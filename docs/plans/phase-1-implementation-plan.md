@@ -1,11 +1,11 @@
 # Phase 1: Foundation — Implementation Plan
 
-- Status: **Draft（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-12
+- Status: **Draft rev.2（再レビュー待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-12（rev.2: 2026-10-13 PR #1 レビュー反映）
 - 対象: [Phase 1 Design Issue](../specs/phase-1-foundation.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-本Planが承認されるまで実装は開始しない。
+本Planが承認されるまで実装は開始しない。レビュー指摘への対応は [§10 Review対応履歴](#10-review対応履歴) を参照。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| Branch | `main`（clean）。Commitは `183147b first commit`, `ece2767 docs: add MVP specification and Phase 1 design materials` の2件 |
+| Branch | `main`。Commitは `183147b first commit`, `ece2767 docs: add MVP specification and Phase 1 design materials` の2件 |
 | Tracked Files | `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/development/workflow.md`, `docs/specs/mvp-v0.1.md`, `docs/specs/phase-1-foundation.md` のみ |
 | Source Code | なし（`src/`, `tests/` 未作成） |
 | Package管理 | `package.json`, lockfile なし |
@@ -27,11 +27,13 @@
 
 ## 2. 設計方針（Plan全体の前提）
 
-1. **仕様のDirectory Structure（MVP §12）に従う。** ただしPhase 1で中身を持たないファイル（`src/tools/task.ts` 等の空ファイル、`src/connectors/todoist/` 等の空ディレクトリ）は作成しない。各Phaseで追加する。
+1. **仕様のDirectory Structure（MVP §12）に従う。** ただしPhase 1で中身を持たないファイル（`src/tools/task.ts` 等、`src/connectors/todoist/` 等）は作成しない。各Phaseで追加する。
 2. **Zod SchemaをDomain Modelの正とする。** TypeScript型は `z.infer` で導出し、型とValidationを二重定義しない。
-3. **抽象化は最小限。** Plugin Loader、DI Container、Base Class、Connector Registry、Generic Repository等は作らない。
-4. **stdout はMCP JSON-RPC専用。** Logやエラー出力はすべて stderr に出す（stdio transportの破損防止）。
-5. **Serverの組み立てと起動を分離する。** `createServer()` は副作用なしで生成のみ行い、プロセス起動（Config読込・stdio接続・終了コード）はEntry Pointが担う。これによりIn-Memory Transportでのテストが可能になる。
+3. **MCP SDKの上に独自Frameworkを作らない。** Tool登録はSDK v2の `McpServer.registerTool()` を直接使う。独自の `ToolDefinition` 型・Registry・重複検出・Error変換は作らない。
+4. **Entity SchemaとTool / Connector Input Schemaを分離する。** Entity Schemaは仕様§5の各Entityの必須項目のみを必須とし、Input Schemaは仕様§9に定義があり、かつPhase 1で必要なものだけ定義する。
+5. **抽象化は最小限。** Plugin Loader、DI Container、Base Class、Connector Registry、Generic Repository等は作らない。
+6. **stdout はMCP JSON-RPC専用。** Logやエラー出力はすべて stderr に出す（stdio transportの破損防止）。
+7. **Config読込とServer生成を分離する。** `serveStdio(factory)` は接続ごとにfactoryを呼び出し得るため、Config読込・Validationは起動時に1回だけEntry Pointで行い、factory（`createServer`）は副作用なしでServerを組み立てるだけにする。
 
 ---
 
@@ -42,71 +44,103 @@
 | File | 種別 | 責務 |
 |---|---|---|
 | `.gitignore` | 追加 | `node_modules/`, `dist/`, `coverage/`, `.env`, `.env.*`（`!.env.example`）, `credentials*.json`, `token*.json`, `*.pem` 等を除外 |
-| `.env.example` | 追加 | 使用予定の環境変数**名のみ**を記載（値は空）。Phase 1で実際に使うのは `AI_FOUNDATION_CONFIG` のみ。Phase 2以降の変数はコメントで予告のみ |
-| `package.json` | 追加 | `"type": "module"`, `engines.node >=22.12`, scripts（§5）, `bin` は設定しない（ローカル利用のため） |
+| `.env.example` | 追加 | 使用予定の環境変数**名のみ**を記載（値は空）。Phase 1で使うのは `AI_FOUNDATION_CONFIG` のみ。Phase 2以降の変数はコメントで予告のみ |
+| `package.json` | 追加 | `"type": "module"`, `engines.node >=22.12`, scripts（§5）。`bin` は設定しない（ローカル利用のため） |
 | `package-lock.json` | 追加 | npm install により生成 |
-| `tsconfig.json` | 追加 | `strict: true`, `module/moduleResolution: NodeNext`, `target: ES2023`, `outDir: dist`, `rootDir: src`, `noUncheckedIndexedAccess: true` |
-| `tsconfig.test.json` または `vitest.config.ts` | 追加 | Vitest設定（`tests/**/*.test.ts`）。tsconfig側で `tests/` を型検査対象に含めるための分割 |
-| `config.yaml` | 追加 | MVP §13 の内容そのもの。Secret・動的データは含めない |
+| `tsconfig.json` | 追加 | `strict: true`, `module/moduleResolution: NodeNext`, `target: ES2023`, `noUncheckedIndexedAccess: true`。`src` と `tests` を型検査対象とする（`noEmit`） |
+| `tsconfig.build.json` | 追加 | `tsconfig.json` を継承し `rootDir: src`, `outDir: dist` で `src` のみをBuild |
+| `vitest.config.ts` | 追加 | `tests/**/*.test.ts` を対象とするVitest設定 |
+| `config.yaml` | 追加 | MVP §13 の内容。ただし `version: "0.1"`（文字列）とする（§9 Q3）。Secret・動的データは含めない |
 
 ### 3.2 Domain（`src/domain/`）
 
+Entity Schemaの必須項目は仕様§5のEntityごとのSchemaに従う。共通Metadata（§5.1 `id`, `source`, `external_ref`）は「必要に応じて」のため、**Entity側で仕様が明示的に定義している場合のみ**持たせる。
+
 | File | 責務 |
 |---|---|
-| `common.ts` | 共通Schema: `AreaSchema`（`work \| personal`）, `TagsSchema`, `DateTimeSchema`（ISO 8601）, 共通Metadata（`id`, `source`, `external_ref`） |
-| `task.ts` | `TaskStatusSchema`（`inbox/next/waiting/someday/done`）, `TaskSchema`, および仕様§9に定義済みの `TaskCreateInputSchema`, `TaskListFilterSchema` |
-| `schedule.ts` | `ScheduleSchema`, `ScheduleCreateInputSchema`（§9）。`end` が `start` より前の場合はValidation Error |
-| `collection.ts` | `CollectionTypeSchema`（`game/book/movie/other`）, `CollectionItemSchema`（`type: "collection"`, `status: string`, `metadata: Record<string, unknown>`） |
-| `knowledge.ts` | `KnowledgeSourceSchema`（`obsidian/google_drive`）, `KnowledgeSchema`（本文は持たない＝§5.6準拠） |
-| `project.ts` | `ProjectSourceSchema`（`github/google_drive`）, `ProjectSchema`（`title`, `source`, `external_ref` のみ。§5.4準拠で詳細Metadataは持たない） |
-| `index.ts` | Domain Schema/型の再Export |
+| `common.ts` | 共通の値Schemaのみ: `AreaSchema`（`work \| personal`）, `TagsSchema`（`string[]`）, `DateSchema`（`YYYY-MM-DD`）, `DateTimeSchema`（ISO 8601、**Offset必須**） |
+| `task.ts` | Entity: `TaskStatusSchema`, `TaskSchema`。Input（仕様§9定義済み）: `TaskCreateInputSchema`, `TaskListFilterSchema` |
+| `schedule.ts` | Entity: `ScheduleSchema`。Input（仕様§9定義済み）: `ScheduleCreateInputSchema` |
+| `collection.ts` | Entity: `CollectionTypeSchema`, `CollectionItemSchema` |
+| `knowledge.ts` | Entity: `KnowledgeSourceSchema`, `KnowledgeSchema`（本文は持たない＝§5.6準拠） |
+| `project.ts` | Entity: `ProjectSourceSchema`, `ProjectSchema`（§5.4の最低限項目のみ） |
+| `index.ts` | 再Export |
 
-Domain層は `zod` と `./` 相対importのみ許可する（Provider SDK・`connectors/`・`tools/` をimportしない）。この制約はTestで検証する（§6.4）。
+Entity Schemaの項目定義（仕様§5より）:
+
+| Entity | 必須 | null許容 / 任意 | 備考 |
+|---|---|---|---|
+| Task | `type: "task"`, `title`, `status` | `due`（Date または DateTime, nullable）, `area`（nullable）, `project_ref`（nullable）, `tags` | `id` / `source` / `external_ref` は任意 |
+| Schedule | `type: "schedule"`, `title`, `start` | `end`（nullable）, `related_task`（nullable）, `tags` | `end < start` はValidation Error |
+| CollectionItem | `type: "collection"`, `title`, `collection_type`, `status`（string） | `metadata`（object）, `tags` | 仕様例（§5.5）は `tags` を省略しているため任意 |
+| Knowledge | `type: "knowledge"`, `title`, `source`, `external_ref` | `area`（nullable）, `tags` | `source` / `external_ref` は§5.6で必須 |
+| Project | `type: "project"`, `title`, `source`, `external_ref` | — | `source` / `external_ref` は§5.4で必須 |
+
+Input Schemaは仕様§9のJSONに従い、`id` / `source` / `external_ref` / `type` を持たない。§9に定義のない入力（`task_update`, `schedule_list` 等）はPhase 1では定義しない。
 
 ### 3.3 Config（`src/config/`）
 
 | File | 責務 |
 |---|---|
-| `schema.ts` | `ConfigSchema`。全Objectを `.strict()` とし未知Keyを拒否（→ `projects:` やToken等の混入をValidation Errorにする）。Provider値はEntityごとのEnum。`knowledge.default ∈ knowledge.providers` を `refine` で検証。`defaults.timezone` は `Intl.DateTimeFormat` で有効性検証 |
-| `loader.ts` | `loadConfig(path)`: ファイル読込 → YAML parse → Schema Validation → 型付きConfigを返す。失敗時は `ConfigError` を投げ、メッセージにファイルパス・該当Key Path・理由を含める（例: `config.yaml: sources.task.provider: Invalid option: expected "todoist"`）。Config Pathの解決（§9 Q3）もここで行う |
+| `schema.ts` | `ConfigSchema`。全Objectを `.strict()` とし未知Keyを拒否（→ `projects:` やToken等の混入をValidation Errorにする）。`version` は文字列 `"0.1"` 固定。Provider値はEntityごとのEnum。`knowledge.default ∈ knowledge.providers` を `refine` で検証。`defaults.timezone` は `Intl.DateTimeFormat` で有効性検証 |
+| `loader.ts` | `loadConfig(path)`: 与えられたパスのファイル読込 → YAML parse → Schema Validation → 型付きConfigを返す。**パス解決は行わない。** 失敗時は `ConfigError` を投げ、メッセージにファイルパス・Key Path・理由を含める（例: `config.yaml: sources.task.provider: Invalid option: expected "todoist"`） |
 
 ### 3.4 Connectors（`src/connectors/`）
 
 | File | 責務 |
 |---|---|
-| `types.ts` | Connector境界の定義。Phase 2対象の `TaskConnector`（`create/list/update/complete`）, `ScheduleConnector`（`create/list`）を **Domain型のみ** を用いたInterfaceとして定義。全Connectorを束ねる `Connectors` 型（各Entity optional）を定義 |
+| `types.ts` | Connector境界の定義。Domain型のみを用いたInterfaceとして、Phase 2対象の `TaskConnector` / `ScheduleConnector` を定義。全Connectorを束ねる `Connectors` 型（`task?`, `schedule?`）を定義 |
 
-Phase 1では実装クラス・Mock Connectorは作成しない（Design Issue「疑似実装を大量に作る必要はない」）。Collection / Knowledge / Project のInterfaceは各Phaseで追加する（§9 Q2）。
+メソッドは仕様§9でInputが定義済みの操作のみとする（§9 Q2）。
+
+```ts
+interface TaskConnector {
+  create(input: TaskCreateInput): Promise<Task>;
+  list(filter: TaskListFilter): Promise<Task[]>;
+}
+interface ScheduleConnector {
+  create(input: ScheduleCreateInput): Promise<Schedule>;
+}
+```
+
+`task_update` / `task_complete` / `schedule_list` のメソッドは、入力仕様が決まるPhase 2で追加する。Phase 1では実装クラス・Mock Connectorは作成しない。Collection / Knowledge / Project のInterfaceは各Phaseで追加する。
 
 ### 3.5 Tools（`src/tools/`）
 
 | File | 責務 |
 |---|---|
-| `types.ts` | `ToolDefinition`（`name`, `description`, `inputSchema`（Zod）, `handler(input, context)`）と `ToolContext`（`config`, `connectors`）の定義 |
-| `registry.ts` | `registerTools(server, tools, context)`: `ToolDefinition[]` をMCP SDKの `server.registerTool()` へ登録する薄いAdapter。Tool名の重複を検出してErrorにする。Handlerの例外をMCPの `isError: true` 結果へ変換する |
-| `index.ts` | 公開Tool一覧（`ToolDefinition[]`）の集約。Phase 2ではここに `taskTools`, `scheduleTools` を追加するだけで登録される |
-| `foundation.ts` | Phase 1唯一のTool `foundation_info`（§9 Q1 で要承認）。外部通信なし。Entity定義・SoT対応・有効Provider（Configから）を返す |
+| `index.ts` | `ToolContext`（`config`, `connectors`）型と、`registerTools(server, context)` を定義。`registerTools` はEntityごとの登録関数を呼び出すだけの薄い関数で、**Phase 1では登録するToolがないため本体は空**。Phase 2で `registerTaskTools(server, context)` 等の呼び出しを追加する |
+
+Phase 2以降のTool追加パターン（参考。Phase 1では作成しない）:
+
+```ts
+// src/tools/task.ts（Phase 2）
+export function registerTaskTools(server: McpServer, { connectors }: ToolContext) {
+  server.registerTool('task_create', { description, inputSchema: TaskCreateInputSchema },
+    async (input) => { /* connectors.task を呼ぶ */ });
+}
+```
+
+Tool名の重複・Handler例外のMCP Error結果への変換はSDKの挙動に任せる（独自実装しない）。
 
 ### 3.6 Server
 
 | File | 責務 |
 |---|---|
 | `src/instructions.ts` | MVP §15 のAI向けInstructions文字列。MCP initialize時の `instructions` として送る |
-| `src/server.ts` | `createServer({ config, connectors })`: `McpServer` を生成し、Instructionsを設定、`tools/index.ts` のToolを登録して返す（起動はしない） |
-| `src/index.ts` | Entry Point: Config Path解決 → `loadConfig` → `createServer` → `StdioServerTransport` 接続。`ConfigError` 時は stderr にメッセージを出し `exit code 1`。SIGINT/SIGTERMでclose |
+| `src/server.ts` | `createServer({ config, connectors })`: `McpServer` を生成（`capabilities: { tools: {} }` を明示し、公開Tool 0件でも `tools/list` が空配列で応答するようにする）、Instructionsを設定、`registerTools` を呼んで返す。副作用なし |
+| `src/index.ts` | Entry Point: Config Path解決（`--config` → `AI_FOUNDATION_CONFIG` → Repository Rootの `config.yaml`）→ `loadConfig(path)` → `serveStdio(() => createServer({ config, connectors: {} }))`。`ConfigError` 時は stderr にメッセージを出し `exit code 1`。SIGINT/SIGTERMで `handle.close()` |
 
 ### 3.7 Tests（`tests/`）
 
 | File | 内容 |
 |---|---|
-| `tests/domain/*.test.ts` | Entityごとの正常系・異常系Validation |
-| `tests/domain/architecture.test.ts` | `src/domain/**` のimport文を走査し、`zod` と相対パス以外への依存がないことを検証 |
+| `tests/domain/*.test.ts` | Entity Schema / Input Schemaの正常系・異常系Validation |
 | `tests/config/schema.test.ts` | Config Schemaの正常系・異常系 |
 | `tests/config/loader.test.ts` | ファイル読込・YAML構文エラー・Error Messageの可読性 |
 | `tests/fixtures/config/*.yaml` | 正常 / 異常Config Fixture |
-| `tests/tools/registry.test.ts` | Tool登録・重複名Error・Handler例外の `isError` 変換 |
-| `tests/server.test.ts` | SDKの `InMemoryTransport` でClient接続し `listTools()` / `callTool("foundation_info")` を検証 |
-| `tests/e2e/stdio.test.ts` | 実プロセスをstdioで起動し（`StdioClientTransport`）、Tool一覧取得と、不正Configでの起動失敗（非0終了・stderrメッセージ）を検証 |
+| `tests/server.test.ts` | `InMemoryTransport` + `@modelcontextprotocol/client` でClient接続し、(1) 公開Toolが0件で `listTools()` が成功すること、(2) test-only Toolを `ToolContext` 経由で登録した場合に `listTools()` / `callTool()` で取得・実行できることを検証 |
+| `tests/e2e/stdio.test.ts` | 実プロセスをstdioで起動し（`StdioClientTransport`）、接続・`listTools()` 成功、`--config` / `AI_FOUNDATION_CONFIG` の優先順位、不正Configでの起動失敗（非0終了・stderrメッセージ）を検証 |
 
 ### 3.8 Documentation
 
@@ -119,34 +153,35 @@ Phase 1では実装クラス・Mock Connectorは作成しない（Design Issue�
 
 ## 4. 依存Package
 
-npm を使用する（ローカルに pnpm / yarn がなく、既存の慣習もないため）。バージョンは2026-10-12時点の最新安定版。
+npm を使用する（ローカルに pnpm / yarn がなく、既存の慣習もないため）。バージョンは2026-10-13時点の最新安定版。
 
 ### dependencies
 
 | Package | Version | 用途 |
 |---|---|---|
-| `@modelcontextprotocol/sdk` | `^1.32.1` | MCP Server / stdio transport / テスト用Client・InMemoryTransport |
-| `zod` | `^4.6.6` | Domain / Config / Tool Input Schema（SDKのpeer: `^3.25 \|\| ^4.0` を満たす） |
+| `@modelcontextprotocol/server` | `^2.3.1` | MCP SDK v2 Server（`McpServer`, `serveStdio` は `@modelcontextprotocol/server/stdio`） |
+| `zod` | `^4.6.6` | Domain / Config / Tool Input Schema（SDK v2の依存 `zod ^4.2.0` を満たす） |
 | `yaml` | `^2.9.1` | `config.yaml` の読込 |
 
 ### devDependencies
 
 | Package | Version | 用途 |
 |---|---|---|
-| `typescript` | §9 Q5 参照 | Build / 型検査 |
+| `@modelcontextprotocol/client` | `^2.3.1` | テスト用Client（`InMemoryTransport` 接続、`StdioClientTransport` によるe2e） |
+| `typescript` | `~5.9.3` | Build / 型検査（§9 Q5） |
 | `@types/node` | `^24` | Node.js型（実行環境 v24 に合わせる） |
 | `vitest` | `^5.0.4` | Test Runner（engines: Node `^22.12 \|\| ^24`） |
 | `tsx` | `^4.23` | `npm run dev` でのTS直接実行、e2eテストでのServer起動 |
 
-**追加しないもの:** `dotenv`（Phase 1でSecretを読まないため不要。Phase 2で必要になればNode標準の `process.loadEnvFile()` を優先検討）, ESLint/Prettier（§9 Q6）, Provider SDK類（Phase 2以降）。
+**追加しないもの:** `@modelcontextprotocol/sdk`（v1 maintenance line）, `dotenv`（Phase 1でSecretを読まないため不要。Phase 2で必要になればNode標準の `process.loadEnvFile()` を優先検討）, ESLint/Prettier, Provider SDK類（Phase 2以降）。
 
 ---
 
 ## 5. npm scripts
 
 ```text
-build      tsc -p tsconfig.json
-typecheck  tsc --noEmit（src + tests）
+build      tsc -p tsconfig.build.json
+typecheck  tsc -p tsconfig.json
 test       vitest run
 dev        tsx src/index.ts
 start      node dist/index.js
@@ -160,19 +195,19 @@ start      node dist/index.js
 
 - Vitestによる自動テストのみ。外部Serviceへの通信は一切発生しない。
 - 「Validationが通ること」だけでなく「拒否されるべき入力が拒否されること」を重点的に検証する。
+- Layer間の依存方向（DomainがProvider SDKをimportしない等）は独自のArchitecture Testを作らず、TypeScriptの型検査とCode Reviewで担保する。
 - `npm run typecheck && npm test` の成功をImplementation Review前の必須条件とする。
 
 ### 6.2 Domain Schema
 
-| Entity | 正常系 | 異常系 |
+| Schema | 正常系 | 異常系 |
 |---|---|---|
-| Task | 全項目指定 / `due: null` / `area: null` / 日付のみの`due` | 不正status、`title`空、`tags`が配列でない |
-| Schedule | `end: null` / `related_task` 指定 | `start`欠落、不正日時、`end < start` |
-| CollectionItem | book / game の仕様例そのもの | 不正`collection_type`、`metadata`が非Object |
-| Knowledge | obsidian / google_drive | 不正source、`external_ref`欠落 |
-| Project | github / google_drive | 不正source |
-
-仕様書に記載された例（§5.2, §5.5）はそのままFixture化して通ることを確認する。
+| Task | 仕様例（§5.2）/ `id` なし / `due: null` / 日付のみの `due` / Offset付き日時の `due` | 不正status、`title` 空、Offsetなし日時の `due` |
+| TaskCreateInput / TaskListFilter | 仕様§9の例 | `status: done` での作成、不正area |
+| Schedule / ScheduleCreateInput | `end: null` / `related_task` 指定 | `start` 欠落、Offsetなし日時、`end < start` |
+| CollectionItem | 仕様例（§5.5 game / book、`tags` 省略） | 不正 `collection_type`、`metadata` が非Object |
+| Knowledge | obsidian / google_drive | 不正source、`external_ref` 欠落 |
+| Project | github / google_drive | 不正source、`external_ref` 欠落 |
 
 ### 6.3 Config
 
@@ -181,23 +216,18 @@ start      node dist/index.js
 | リポジトリ同梱の `config.yaml` | 成功 |
 | ファイルが存在しない | `ConfigError`（パスを含むメッセージ） |
 | YAML構文エラー | `ConfigError`（行番号を含む） |
+| `version: 0.1`（数値） | `ConfigError`（文字列であることを要求） |
 | 必須Key欠落（`sources.task`） | `ConfigError`（Key Pathを含む） |
 | 不正Provider（`task.provider: asana`） | `ConfigError` |
 | `knowledge.default` が `providers` に含まれない | `ConfigError` |
 | 不正timezone | `ConfigError` |
 | 未知Key（`projects: [...]`, `sources.task.api_token: ...`） | `ConfigError`（動的データ・Secret混入の防止を検証） |
 
-### 6.4 Architecture
+### 6.4 Server / Tool登録
 
-- `src/domain/**/*.ts` のimportが `zod` または相対パスのみであること。
-- `src/domain` / `src/tools` が `src/connectors/<provider>/` 配下を直接importしていないこと（Phase 2以降の回帰防止）。
-
-### 6.5 Tool / Server
-
-- `registerTools` が定義済みToolをすべて登録し、重複名でErrorになる。
-- Handler例外がClientへ `isError: true` として返る（プロセスが落ちない）。
-- InMemoryTransport経由で `listTools()` が `foundation_info` を返し、`inputSchema` を含む。
-- e2e: `tsx src/index.ts` をstdioで起動し `listTools()` が成功する。不正Config指定時は非0終了し、stderrに理由が出る。
+- InMemoryTransport経由で接続し、Phase 1の公開Toolが0件の状態で `listTools()` が空配列で成功する。
+- テスト内で `ToolContext` を受け取るtest-only登録関数（Phase 2の `registerTaskTools` と同じ形）を用意し、`createServer` 後に登録したToolが `listTools()` に現れ、`callTool()` でContext経由の値を返すことを確認する。test-only Toolは `tests/` 配下のみに置き、productionコードには含めない。
+- e2e: `tsx src/index.ts` をstdioで起動し接続・`listTools()` が成功する。`--config` が `AI_FOUNDATION_CONFIG` より優先される。不正Config指定時は非0終了し、stderrに理由が出る。
 
 ---
 
@@ -208,13 +238,12 @@ start      node dist/index.js
 | # | Step | 成果物 | 完了条件 |
 |---|---|---|---|
 | 1 | Project Scaffold | `.gitignore`, `package.json`, `tsconfig*.json`, `vitest.config.ts`, 依存Install | `npm run typecheck` / `npm test`（0件）が成功 |
-| 2 | Domain Model | `src/domain/*` + Domain Test + Architecture Test | Domain Testが成功 |
+| 2 | Domain Model | `src/domain/*` + Domain Test | Domain Testが成功 |
 | 3 | Config | `src/config/*`, `config.yaml`, `.env.example` + Config Test | Config Testが成功 |
 | 4 | Connector境界 | `src/connectors/types.ts` | 型検査成功 |
-| 5 | Tool登録構造 | `src/tools/*` + Registry Test | Registry Testが成功 |
-| 6 | MCP Server | `src/instructions.ts`, `src/server.ts`, `src/index.ts` + Server / e2e Test | 全Test成功、`npm run build && npm start` で起動 |
-| 7 | Documentation | `README.md` 更新 | READMEの手順のみで Install → Build → Test → 起動 が再現できる |
-| 8 | 最終確認 | — | `git status` にSecret・`dist/`・`.env` が含まれない。`npm run typecheck && npm test` 成功 |
+| 5 | MCP Server / Tool登録 | `src/tools/index.ts`, `src/instructions.ts`, `src/server.ts`, `src/index.ts` + Server / e2e Test | 全Test成功、`npm run build && npm start` で起動 |
+| 6 | Documentation | `README.md` 更新 | READMEの手順のみで Install → Build → Test → 起動 が再現できる |
+| 7 | 最終確認 | — | `git status` にSecret・`dist/`・`.env` が含まれない。`npm run typecheck && npm test` 成功 |
 
 Step 1を最初に行うのは、`.gitignore` を依存Install・設定ファイル作成より前に置くため。
 
@@ -224,83 +253,87 @@ Step 1を最初に行うのは、`.gitignore` を依存Install・設定ファイ
 
 | AC | 対応 | 検証 |
 |---|---|---|
-| **MCP Server**: stdioで起動できる | `src/index.ts` + `StdioServerTransport` | e2e Test、README手順 |
-| **MCP Server**: ClientからTool情報を取得できる | `foundation_info` を登録 | `server.test.ts`, e2e Test |
+| **MCP Server**: stdioで起動できる | `src/index.ts` + `serveStdio` | e2e Test、README手順 |
+| **MCP Server**: ClientからTool情報を取得できる | `capabilities.tools` を宣言し、`tools/list` に応答（Phase 1の公開Toolは0件）。登録機構はtest-only Toolで検証（§9 Q1） | `server.test.ts`, e2e Test |
 | **Domain**: 5 Entityの共通Schemaが定義されている | `src/domain/*.ts` | Domain Test |
 | **Domain**: Schema Validationが可能 | Zod Schema + `z.infer` | Domain Test |
-| **Domain**: Provider SDK型へ依存しない | Domainは `zod` のみ依存 | Architecture Test |
+| **Domain**: Provider SDK型へ依存しない | Domainは `zod` のみ依存（Provider SDKはPhase 1で未導入） | 型検査、Code Review |
 | **Config**: `config.yaml` を読み込める | `loadConfig` | Config Test（同梱config.yaml） |
 | **Config**: Schema Validationが行われる | `ConfigSchema` | Config Test |
 | **Config**: 不正時に理解可能なErrorで起動失敗 | `ConfigError` + Key Path付きメッセージ + exit 1 | Loader Test, e2e Test |
 | **Config**: 個別Project情報がSchemaに含まれない | `project.providers` のみ。`.strict()` で未知Key拒否 | Config Test（`projects:` 拒否） |
-| **Tool**: 追加・登録の基本構造 | `ToolDefinition` + `registerTools` + `tools/index.ts` | Registry Test |
-| **Tool**: Phase 2でTask/Schedule Tool追加可能 | `tools/index.ts` に追加するだけ。`ToolContext.connectors.task/schedule` 経由でConnector利用 | 構造レビュー |
-| **Tool**: 疑似実装を大量に作らない | Mock Connector・未実装Toolを作らない | 構造レビュー |
-| **Connector**: 境界が定義されている | `connectors/types.ts`（Domain型のみのInterface） | 型検査、Architecture Test |
-| **Security**: SecretがCommitされない | `.gitignore`、Config `.strict()`、Secretを読まない | Step 8 で `git status` 確認 |
+| **Tool**: 追加・登録の基本構造 | `ToolContext` + `registerTools` + SDK `registerTool` 直接利用 | Server Test（test-only Tool） |
+| **Tool**: Phase 2でTask/Schedule Tool追加可能 | `src/tools/task.ts` 等を追加し `registerTools` から呼ぶだけ。Connectorは `ToolContext.connectors` 経由 | 構造レビュー |
+| **Tool**: 疑似実装を大量に作らない | Mock Connector・未実装Tool・仕様外Toolを作らない | 構造レビュー |
+| **Connector**: 境界が定義されている | `connectors/types.ts`（Domain型のみのInterface） | 型検査、Code Review |
+| **Security**: SecretがCommitされない | `.gitignore`、Config `.strict()`、Secretを読まない | Step 7 で `git status` 確認 |
 | **Security**: `.env.example` にSecretなし | 変数名のみ・値は空 | レビュー |
 | **Test**: Config / 主要Domain SchemaのTestが存在 | §6 | `npm test` |
 | **Test**: Test Suiteが正常終了 | — | `npm test` |
-| **Docs**: Install / Build / Test / 起動方法がREADMEにある | README更新 | Step 7 |
+| **Docs**: Install / Build / Test / 起動方法がREADMEにある | README更新 | Step 6 |
 
 ---
 
 ## 9. 懸念点 / 未確定事項
 
-Plan Reviewで判断をお願いしたい事項。各項目に推奨案を記載する。
+### Q1. AC「ClientからTool情報を取得できる」の解釈（要確認）
 
-### Q1. Phase 1で公開するToolがない問題（要判断）
+レビュー指摘に従い、公開Tool 0件を許容し「stdioでClient接続でき、`tools/list` が応答する」「Tool登録機構はtest-only Toolで検証できる」と解釈する。
 
-AC「ClientからServerが公開するTool情報を取得できる」に対し、Phase 1の仕様上のTool（§8）はすべて外部接続が必要でPhase 2以降。Toolが0件だと `tools/list` は空配列となり、ACの検証として弱い。
+- Design Issue（`docs/specs/phase-1-foundation.md`）のAC文言をこの解釈に合わせて更新するかは、User / ChatGPT側の判断とする（Coding Agentは仕様を勝手に変更しない）。本PRでの更新が必要であれば指示いただきたい。
 
-- **推奨: A.** 外部通信を持たない `foundation_info` Toolを追加する（Entity定義・SoT対応・有効Providerを返す）。§8のIF一覧にないToolを追加することになるため、仕様への追記可否を確認したい。
-- B. Tool 0件のまま、`tools/list` が空配列で成功することをもってACを満たすとみなす。
-- C. Phase 2のTool（`task_create` 等）を「未実装Error」を返す形で登録する。→ AIが呼び出して失敗するため非推奨。
+### Q2. Connector Interfaceのメソッド範囲
 
-### Q2. Connector Interfaceの範囲
+Task / Schedule のみ定義する方針はレビューで合意済み。そのうえで、メソッドは**仕様§9でInputが定義されている `task.create` / `task.list` / `schedule.create` のみ**とし、`task_update` / `task_complete` / `schedule_list` はPhase 2で入力仕様と合わせて追加する。Phase 1で入力型を推測して固定しないため。
 
-- **推奨:** Phase 2対象の `TaskConnector` / `ScheduleConnector` のみ定義し、他EntityのInterfaceは各Phaseで追加する。未設計のIF（`collection_search` 等の入力仕様は§9に未定義）を先回りで固定しないため。
-- 代替: 5 Entity分すべてのInterfaceを§8のIF名から定義する（入力型の一部は推測になる）。
+### Q3. Config `version` と仕様例の差分
 
-### Q3. Config Pathの解決方法
+`version` は文字列 `"0.1"` 固定とする（レビュー指摘）。MVP仕様§13の例は `version: 0.1`（数値）のため、同梱 `config.yaml` と仕様例に差分が出る。仕様§13の例を `version: "0.1"` に更新するかはUser / ChatGPT側で判断いただきたい。
 
-MCP ClientはServerを任意のcwdで起動するため、相対パス `./config.yaml` は不安定。
+### Q4. 日時表現
 
-- **推奨:** 優先順位 `--config <path>` 引数 → 環境変数 `AI_FOUNDATION_CONFIG` → Repository Root（`dist/` / `src/` からの相対で解決）の `config.yaml`。
-
-### Q4. 日時表現・仕様内の細部
-
-- Task `due` は仕様上 `datetime | null` だが例は `2026-10-16`（日付のみ）。**推奨:** ISO 8601の日付（`YYYY-MM-DD`）と日時（Offset付き）の両方を受け付ける。Offsetなし日時の扱い（`defaults.timezone` 適用）はPhase 2のConnectorで決める。
-- `config.yaml` の `version: 0.1` はYAML上で数値になる。**推奨:** 数値 `0.1` と文字列 `"0.1"` の両方を受け付け、内部では文字列 `"0.1"` に正規化する。
-- CollectionItemのEntity名は `CollectionItem` だが `type` 値は `collection`（§5.5）。**推奨:** 仕様通り `type: "collection"`。
-- 共通Metadataの `id` / `source` は「必要に応じて」とされている。**推奨:** Entity Schemaでは `id` 必須（外部Source由来の `todoist:<id>` 形式を想定）、Create Input Schemaでは `id` を持たない。
+- Task `due`: 日付のみ（`YYYY-MM-DD`）またはOffset付き日時を受け付ける。
+- Schedule `start` / `end` 等その他のdatetime: Offset必須。
+- Offsetなし日時へ `defaults.timezone` を適用する変換はConnector / Tool側の責務とし、Phase 2で扱う。
 
 ### Q5. TypeScriptのバージョン
 
-npm最新は `7.0.2`（ネイティブ実装の新Major）、旧系は `6.0.3` / `5.9.3`。
+`typescript@~5.9.3` を採用する。npm最新の7系（ネイティブ実装の新Major）はTool Chainとの互換性実績が浅く、Phase 1でリスクを取る理由がないため。安定確認後に別途Upgradeする。
 
-- **推奨:** `typescript@~5.9.3` を採用する。7系はTool Chain（Vitest・エディタ統合等）との互換性実績が浅く、Phase 1の目的に対してリスクを取る理由がないため。安定確認後に別途Upgradeする。
-- 代替: `^6.0.3` または `^7.0.2`。
+### Q6. Directory Structureの差分
 
-### Q6. Lint / Format
-
-Design Issueに記載がないため、Phase 1では導入しない（`tsc --strict` による型検査のみ）。必要であれば別Issueで ESLint + Prettier（またはBiome）を検討する。
-
-### Q7. Directory Structureの差分
-
-MVP §12からの差分として以下を追加する。仕様Directory構成への追記が必要か確認したい。
+MVP §12からの差分として以下を追加する。
 
 - `src/index.ts`（Entry Point。`server.ts` から起動処理を分離しテスト可能にするため）
 - `src/instructions.ts`（§15のInstructions）
 - `src/domain/common.ts`, `src/domain/index.ts`
-- `src/tools/types.ts`, `src/tools/registry.ts`, `src/tools/index.ts`, `src/tools/foundation.ts`
+- `src/tools/index.ts`
 - `src/connectors/types.ts`
+- `tsconfig.build.json`, `vitest.config.ts`
 - `docs/plans/`（Implementation Plan置き場）
 
 逆に、仕様にある `src/tools/{task,schedule,...}.ts` と `src/connectors/{todoist,...}/` はPhase 1では作成しない。
 
 ### その他の懸念
 
+- **SDK v2の挙動確認:** `serveStdio` は接続のOpening（2025年版 `initialize` か新方式か）によって扱いを切り替える。Claude Code / Codex等、利用予定のClientから接続できることをStep 5で実機確認する。また、Tool 0件時の `tools/list` 応答、重複Tool名・Handler例外時のSDKの挙動は実装時に確認し、想定と異なればPlanを更新して報告する。
 - **stdout汚染:** `console.log` を1行でも出すとstdio transportが壊れる。Logは `console.error` のみ使用する方針をREADME（開発者向け節）に明記する。
-- **Windows:** e2e Testで子プロセスを起動するため、`npx`/`tsx` 起動時のパス・`shell` 差異に注意する（SDKの `StdioClientTransport` は `cross-spawn` を使用しており対応済みの見込み）。
-- **Delete操作:** §16「Delete → 原則ユーザー確認」はPhase 1にDelete Toolがないため対象外。Phase 2以降で扱う。
+- **Windows:** e2e Testで子プロセスを起動するため、`tsx` 起動時のパス・`shell` 差異に注意する（`@modelcontextprotocol/client` の `StdioClientTransport` は `cross-spawn` を使用しており対応済みの見込み）。
+- **Delete操作:** §16「Delete → 原則ユーザー確認」はPhase 1にDelete Toolがないため対象外。
+
+---
+
+## 10. Review対応履歴
+
+### rev.2（PR #1 レビュー反映）
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| 1 | MCP SDKをv2へ変更 | `@modelcontextprotocol/server@^2.3.1` を採用、テスト用に `@modelcontextprotocol/client@^2.3.1`。起動は `serveStdio(() => createServer(...))`（§3.6, §4） |
+| 2 | `foundation_info` を追加しない | 削除。公開Tool 0件を許容し、登録機構はtest-only Toolで検証（§3.5, §6.4, §9 Q1） |
+| 3 | 独自Tool frameworkを薄く | `ToolDefinition` / `registry.ts` / 独自重複検出・Error変換を削除。SDK `registerTool` を直接使い、`registerTools(server, context)` のみ残す（§3.5） |
+| 4 | Domain ModelとTool Inputを分離 | Entity SchemaはEntityごとの必須項目のみ。`id` / `source` / `external_ref` の共通必須を撤回。Input Schemaは§9定義済みでPhase 1に必要なもののみ（§3.2） |
+| 5 | Config versionを文字列固定 | `version: "0.1"` 固定、数値は拒否（§3.3, §6.3, §9 Q3） |
+| 6 | Architecture Testを削除 | 削除。型検査 + Code Reviewで担保（§6.1） |
+| 他 | Config Path解決をEntry Pointへ | `loadConfig(path)` は読込・Validationのみ。解決は `src/index.ts`（§3.3, §3.6） |
+| 他 | Connector Interfaceのメソッド | 合意済みのTask / Scheduleに加え、§9定義済み入力の操作のみに限定（§9 Q2） |
