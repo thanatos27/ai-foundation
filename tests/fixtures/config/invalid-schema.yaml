@@ -1,0 +1,24 @@
+# Numeric version, unknown provider and a project list.
+version: 0.1
+
+defaults:
+  area: personal
+  timezone: Asia/Tokyo
+
+sources:
+  task:
+    provider: asana
+  schedule:
+    provider: google_calendar
+  collection:
+    provider: notion
+  knowledge:
+    default: obsidian
+    providers:
+      - obsidian
+  project:
+    providers:
+      - github
+
+projects:
+  - thanatos27/physical-ai-robot
