@@ -735,7 +735,7 @@ ai-foundation/
 個別Project等の動的データは保存しない。
 
 ```yaml
-version: 0.1
+version: "0.1"
 
 defaults:
   area: personal
