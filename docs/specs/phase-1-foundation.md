@@ -91,7 +91,9 @@ Cross-source Search
 
 ローカル環境からstdio transportでMCP Serverを起動できる。
 
-ClientからServerが公開するTool情報を取得できる。
+ClientからServerへ接続し、Tool一覧を取得できる。Phase 1ではProduction Toolが0件でもよい。
+
+Tool登録機構はTest内のtest-only Toolを用いて、ClientからTool情報取得・呼出が可能であることを検証する。
 
 ### Domain Model
 
