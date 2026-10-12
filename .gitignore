@@ -1,0 +1,18 @@
+# Dependencies / build output
+node_modules/
+dist/
+coverage/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+credentials*.json
+token*.json
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
