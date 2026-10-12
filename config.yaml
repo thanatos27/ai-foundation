@@ -1,0 +1,29 @@
+# AI Foundation static configuration (see docs/specs/mvp-v0.1.md §13).
+# Do not list projects, IDs or other dynamic data here.
+# Never put credentials in this file — use environment variables (.env).
+version: "0.1"
+
+defaults:
+  area: personal
+  timezone: Asia/Tokyo
+
+sources:
+  task:
+    provider: todoist
+
+  schedule:
+    provider: google_calendar
+
+  collection:
+    provider: notion
+
+  knowledge:
+    default: obsidian
+    providers:
+      - obsidian
+      - google_drive
+
+  project:
+    providers:
+      - github
+      - google_drive
