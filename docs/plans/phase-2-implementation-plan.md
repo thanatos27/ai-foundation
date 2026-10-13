@@ -1,11 +1,11 @@
 # Phase 2: Task / Schedule — Implementation Plan
 
-- Status: **Draft rev.2（再レビュー待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-14（rev.2: 2026-10-14 PR #3 レビュー反映）
+- Status: **rev.3（Plan Review完了・User承認待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-14（rev.2: PR #3 レビュー反映、rev.3: PR #3 再レビューでQ1確定）
 - 対象: [Phase 2 Design Issue](../specs/phase-2-task-schedule.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 1 Implementation Plan](phase-1-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-本Planが承認されるまで実装は開始しない。仕様と衝突する点・判断が必要な点は [§16 懸念点 / 未確定事項](#16-懸念点--未確定事項)、レビュー指摘への対応は [§17 Review対応履歴](#17-review対応履歴) を参照。
+ChatGPTによるPlan Reviewは完了済み（追加のBlocking Issueなし）。**User承認まで実装は開始しない。** 判断済み事項は [§16 懸念点 / 未確定事項](#16-懸念点--未確定事項)、レビュー指摘への対応は [§17 Review対応履歴](#17-review対応履歴) を参照。
 
 ---
 
@@ -15,7 +15,7 @@
 |---|---|
 | Branch | 作業Branch `feat/phase-2-task-schedule`（PR #3）。Baseは `main` の `4a66f7e docs: clarify Phase 2 date handling`（Phase 1実装 `fb1884a` のMerge後に、Phase 2 Design Issue追加 `75924ae`、MVP仕様のPhase 2整合 `660b302`、Taskの日付扱い明確化 `4a66f7e` がコミット済み） |
 | Repository | `thanatos27/ai-foundation`（**Public**） |
-| ローカル環境 | Node.js v24.20.0, npm。`package.json` の `engines.node` は `>=22.12` |
+| ローカル環境 | Node.js v24.20.0, npm 11.19.0。`package.json` の `engines` は現在 `node >=22.12` のみ（Phase 2で `node >=24`, `npm >=11` へ変更。Q1） |
 | 依存 | `@modelcontextprotocol/server ^2.3.1`, `zod ^4.6.7`, `yaml ^2.9.1`（dev: `@modelcontextprotocol/client`, `typescript ~5.9.3`, `vitest ^5.0.4`, `tsx`, `@types/node`） |
 | 公開Tool | 0件（`registerTools` は空） |
 
@@ -121,14 +121,14 @@
 
 | File | 変更 |
 |---|---|
-| `package.json` | 依存追加（§11）、scripts `test:integration`, `auth:google` 追加。Q1でAの場合は `engines.node` を `>=24` に変更 |
+| `package.json` | 依存追加（§11）、scripts `test:integration`, `auth:google` 追加。`engines` を `{ "node": ">=24", "npm": ">=11" }` に変更（Q1） |
 | `vitest.config.ts` | `tests/integration/**` を除外 |
 | `vitest.integration.config.ts` | 追加。`tests/integration/**/*.integration.test.ts` のみ対象 |
 | `tsconfig.json` | `include` に `scripts` と `vitest.integration.config.ts` を追加 |
 | `config.yaml` | `writable_calendar_id` をコメントで例示（値はコミットしない。§10, Q2） |
 | `.env.example` | `TODOIST_API_TOKEN`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN` を有効化（値は空） |
 | `.gitignore` | `config.local.yaml` を追加 |
-| `README.md` | Current Phase更新、Todoist Token / Google OAuth / 専用Calendarのセットアップ、Credentialの渡し方、Integration Test実行方法、Tool一覧 |
+| `README.md` | Current Phase更新、PrerequisitesをNode.js 24以上 / npm 11以上へ更新（Q1）、Todoist Token / Google OAuth / 専用Calendarのセットアップ、Credentialの渡し方、Integration Test実行方法、Tool一覧 |
 | `docs/plans/phase-2-implementation-plan.md` | 本ファイル |
 
 ---
@@ -500,7 +500,7 @@ schedule: z.strictObject({
 
 `@doist/todoist-sdk` について:
 
-- READMEは「Node 20.18.1+」と案内しているが、公開Package（v15.3.1）の `package.json` は `engines: { node: ">=24", npm: ">=11" }` を宣言している（`npm view` と展開したTarballで確認）。npmは既定では `engines` 不一致を警告（`EBADENGINE`）に留めるため、本Repositoryの `>=22.12` のままでもInstallは可能。扱いは Q1 で確認する。
+- READMEは「Node 20.18.1+」と案内しているが、公開Package（v15.3.1）の `package.json` は `engines: { node: ">=24", npm: ">=11" }` を宣言している（`npm view` と展開したTarballで確認）。利用する具体的なVersionのMetadataを実行環境要件として優先し、本Repositoryの `engines` を `node >=24`, `npm >=11` へ引き上げる（Q1、合意済み）。
 - 依存として `zod 4.3.6`（固定）、`undici`、`@doist/sdk-kmp` 等を持ち、`type-fest` をPeer依存とする。SDK内部のzodは本Repositoryの `zod ^4.6.7` とは別Instanceになるが、SDKのSchemaをDomainへ渡さないため影響しない。
 - Endpointは6つと少なく直接 `fetch` でも実装できるが、公式SDKを使うことでRequest / Responseの型とAPI変更への追従をSDKに任せられ、`TodoistClient` Interface経由でFakeも容易に注入できるため、SDKを採用する。
 
@@ -612,7 +612,7 @@ Build後、Claude CodeにServerを登録し（Credentialは `.env` またはMCP 
 | 1 | Domain / Error / Datetime | `domain/*` 変更、`errors.ts`、`shared/datetime.ts` + Test | Domain / Datetime Test成功、型検査成功 |
 | 2 | Config / Credential | `config/schema.ts`, `config.yaml`, `credentials/*`, `.env.example`, `.gitignore` + Test | Config / Credential Test成功 |
 | 3 | Connector境界 / Tool Layer | `connectors/types.ts`, `tools/{result,task,schedule,index}.ts`, Fake Connector + Tool Test、`server.test.ts` 更新 | Tool Test成功（Fake Connectorで6 Toolが動作） |
-| 4 | Todoist Connector | 依存追加（`@doist/todoist-sdk`）、`connectors/todoist/*` + Test | Todoist Connector Test成功 |
+| 4 | Todoist Connector | `engines` 変更（`node >=24`, `npm >=11`）、依存追加（`@doist/todoist-sdk`）、`connectors/todoist/*` + Test | `npm install` で `EBADENGINE` 警告が出ない。Todoist Connector Test成功 |
 | 5 | Google Calendar Connector | 依存追加、`connectors/google-calendar/*`, `scripts/google-auth.ts` + Test | Google Calendar Connector Test成功 |
 | 6 | 配線 | `connectors/index.ts`, `src/index.ts`（`.env`読込・Credential・Connector生成）、e2e更新 | 全Test成功、Credentialなしで起動可能 |
 | 7 | Integration Test / Documentation | `tests/integration/*`, `vitest.integration.config.ts`, README | 実Credentialで `npm run test:integration` 成功 |
@@ -654,16 +654,17 @@ Tool Layer（Step 3）をConnector実装より先に行うのは、Domain Input 
 
 ## 16. 懸念点 / 未確定事項
 
-rev.2時点で、Q2〜Q5、Q7〜Q10はレビューで合意済み。Q1・Q11・Q12はレビュー指摘を反映した。未解決はQ1のNode要件のみ。
+rev.3時点で、Q1〜Q5、Q7〜Q10はレビューで合意済み、Q11・Q12はレビュー指摘を反映済み。未解決の事項はない。Q6とその他は実装時の方針・注意点として残す。
 
-### Q1. Todoist SDKの採用とNode要件（要確認）
+### Q1. Todoist SDKの採用とNode要件（合意済み: A）
 
-レビュー指摘により公式SDK `@doist/todoist-sdk` を採用する（§6.1、§11）。
+公式SDK `@doist/todoist-sdk` を採用する（§6.1、§11）。
 
-残る確認事項として、SDKのREADMEは「Node 20.18.1+」だが、公開Package（v15.3.1）の `package.json` は `engines.node >=24` / `engines.npm >=11` を宣言しており、記述が食い違っている。以下のどちらにするか判断いただきたい。
+SDKのREADMEは「Node 20.18.1+」だが、公開Package（v15.3.1）の `package.json` は `engines.node >=24` / `engines.npm >=11` を宣言している。利用する具体的なVersionのMetadataを優先し、以下とする（PR #3 再レビューでA案に合意）。
 
-- **A（推奨）:** 本Repositoryの `engines.node` を `>=24` に上げる。開発環境はNode 24で、SDKの宣言と一致し、`EBADENGINE` 警告も出ない。READMEのPrerequisitesも更新する。
-- **B:** `>=22.12` のまま維持する。Node 22では `npm install` 時に `EBADENGINE` 警告が出る（`engine-strict` 設定時は失敗）。Node 22での動作はSDK READMEの記載を根拠とし、本Repositoryでは検証しない。
+- `package.json#engines`: `{ "node": ">=24", "npm": ">=11" }`
+- READMEのPrerequisitesをNode.js 24以上 / npm 11以上へ更新
+- 開発環境（Node v24.20.0 / npm 11.19.0）は要件を満たす
 
 ### Q2. `writable_calendar_id` の保存場所（合意済み）
 
@@ -734,6 +735,15 @@ Credentialの有無に関わらず6 Toolを常に登録し、呼び出し時にC
 ---
 
 ## 17. Review対応履歴
+
+### rev.3（PR #3 再レビュー反映）
+
+再レビューでrev.2の対応はすべて妥当とされ、追加のBlocking Issueはなし。ChatGPTによるPlan Reviewは完了。
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| Q1 | A案を採用。`engines.node >=24`、npm `>=11` もPrerequisitesに明記（可能なら `engines.npm` にも設定）、READMEをNode 24 / npm 11以上へ更新 | `engines` を `{ "node": ">=24", "npm": ">=11" }` とし、README Prerequisitesを更新する方針に確定（§1、§4.3、§11、§14 Step 4、Q1） |
+| — | Plan Statusを承認待ちへ | Statusを「rev.3（Plan Review完了・User承認待ち）」に変更 |
 
 ### rev.2（PR #3 レビュー反映）
 
