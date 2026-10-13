@@ -213,7 +213,7 @@ status:
   someday |
   done
 
-due: datetime | null
+due: date | datetime | null
 
 area: work | personal | null
 
@@ -513,7 +513,7 @@ Input:
 {
   "title": "string",
   "status": "inbox | next | waiting | someday",
-  "due": "datetime | null",
+  "due": "date | datetime | null",
   "area": "work | personal | null",
   "tags": ["string"]
 }
@@ -527,8 +527,8 @@ Input:
 {
   "status": ["next"],
   "area": "work",
-  "due_before": "datetime | null",
-  "due_after": "datetime | null",
+  "due_before": "date | datetime | null",
+  "due_after": "date | datetime | null",
   "tags": ["string"]
 }
 ```
