@@ -11,6 +11,7 @@ credentials*.json
 token*.json
 *.pem
 *.key
+config.local.yaml
 
 # OS / editor
 .DS_Store

@@ -9,18 +9,29 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/config/${name}`, import.meta.url));
 const invalidConfig = fixture('invalid-schema.yaml');
 
-/** Runs src/index.ts through tsx, exactly as `npm run dev` does. */
-const serverCommand = { command: process.execPath, args: ['--import', 'tsx', 'src/index.ts'] };
+/**
+ * Runs src/index.ts through tsx, exactly as `npm run dev` does, without the developer's .env so
+ * that no test can reach a real provider.
+ */
+const serverCommand = { command: process.execPath, args: ['--import', 'tsx', 'src/index.ts', '--no-env-file'] };
+
+const CREDENTIAL_VARS = [
+  'TODOIST_API_TOKEN',
+  'GOOGLE_OAUTH_CLIENT_ID',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+  'GOOGLE_OAUTH_REFRESH_TOKEN',
+];
 
 function childEnv(extra: Record<string, string> = {}): Record<string, string> {
   const env = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
   delete env.AI_FOUNDATION_CONFIG;
+  for (const name of CREDENTIAL_VARS) delete env[name];
   return { ...env, ...extra };
 }
 
-async function listToolsOverStdio(args: string[] = [], env = childEnv()) {
+async function withStdioClient<T>(run: (client: Client) => Promise<T>, args: string[] = [], env = childEnv()) {
   const transport = new StdioClientTransport({
     command: serverCommand.command,
     args: [...serverCommand.args, ...args],
@@ -31,11 +42,17 @@ async function listToolsOverStdio(args: string[] = [], env = childEnv()) {
   const client = new Client({ name: 'e2e-client', version: '0.0.0' });
   await client.connect(transport);
   try {
-    return await client.listTools();
+    return await run(client);
   } finally {
     await client.close();
   }
 }
+
+const listToolsOverStdio = (args: string[] = [], env = childEnv()) =>
+  withStdioClient((client) => client.listTools(), args, env);
+
+const TOOL_NAMES = ['schedule_create', 'schedule_list', 'task_complete', 'task_create', 'task_list', 'task_update'];
+const toolNames = ({ tools }: { tools: { name: string }[] }) => tools.map((tool) => tool.name).sort();
 
 async function runExpectingFailure(args: string[], env = childEnv()) {
   const error = await promisify(execFile)(serverCommand.command, [...serverCommand.args, ...args], {
@@ -51,9 +68,14 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and answers tools/list', async () => {
-    const { tools } = await listToolsOverStdio();
-    expect(tools).toEqual([]);
+  it('starts with the repository config.yaml and lists the task and schedule tools', async () => {
+    expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
+  });
+
+  it('starts without credentials and reports them missing on use', async () => {
+    const result = await withStdioClient((client) => client.callTool({ name: 'task_list', arguments: {} }));
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('Credential error: Todoist credential is not configured');
   });
 
   it('uses AI_FOUNDATION_CONFIG when set', async () => {
@@ -64,8 +86,8 @@ describe('stdio server (e2e)', { timeout: 30_000 }, () => {
 
   it('prefers --config over AI_FOUNDATION_CONFIG', async () => {
     const valid = fileURLToPath(new URL('../../config.yaml', import.meta.url));
-    const { tools } = await listToolsOverStdio(['--config', valid], childEnv({ AI_FOUNDATION_CONFIG: invalidConfig }));
-    expect(tools).toEqual([]);
+    const tools = await listToolsOverStdio(['--config', valid], childEnv({ AI_FOUNDATION_CONFIG: invalidConfig }));
+    expect(toolNames(tools)).toEqual(TOOL_NAMES);
   });
 
   it('fails to start on an invalid config with a readable message', async () => {

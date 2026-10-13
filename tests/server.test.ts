@@ -48,11 +48,18 @@ describe('createServer', () => {
     expect(client.getInstructions()).toBe(INSTRUCTIONS);
   });
 
-  it('answers tools/list with no production tools', async () => {
+  it('lists the Phase 2 task and schedule tools', async () => {
     const client = await connect(createServer(context));
     expect(client.getServerCapabilities()?.tools).toBeDefined();
     const { tools } = await client.listTools();
-    expect(tools).toEqual([]);
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'schedule_create',
+      'schedule_list',
+      'task_complete',
+      'task_create',
+      'task_list',
+      'task_update',
+    ]);
   });
 });
 
@@ -66,7 +73,10 @@ describe('tool registration (test-only tools)', () => {
   it('lists registered tools with their input schema', async () => {
     const client = await connectWithTestTools();
     const { tools } = await client.listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['test_echo', 'test_fail']);
+    expect(tools.map((tool) => tool.name).filter((name) => name.startsWith('test_')).sort()).toEqual([
+      'test_echo',
+      'test_fail',
+    ]);
     const echo = tools.find((tool) => tool.name === 'test_echo');
     expect(echo?.inputSchema).toMatchObject({
       type: 'object',

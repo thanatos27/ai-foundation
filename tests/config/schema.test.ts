@@ -64,6 +64,26 @@ describe('ConfigSchema', () => {
     expect(issuePaths(config)).toEqual(['defaults.timezone']);
   });
 
+  it('accepts a writable calendar ID for schedules', () => {
+    const config = validConfig();
+    const schedule = { ...config.sources.schedule, writable_calendar_id: 'abc@group.calendar.google.com' };
+    const result = ConfigSchema.safeParse({ ...config, sources: { ...config.sources, schedule } });
+    expect(result.success && result.data.sources.schedule.writable_calendar_id).toBe('abc@group.calendar.google.com');
+  });
+
+  it('allows the writable calendar ID to be omitted', () => {
+    const result = ConfigSchema.safeParse(validConfig());
+    expect(result.success && result.data.sources.schedule.writable_calendar_id).toBeUndefined();
+  });
+
+  it('rejects an empty writable calendar ID', () => {
+    const config = validConfig();
+    const schedule = { ...config.sources.schedule, writable_calendar_id: '' };
+    expect(issuePaths({ ...config, sources: { ...config.sources, schedule } })).toEqual([
+      'sources.schedule.writable_calendar_id',
+    ]);
+  });
+
   it('rejects an invalid default area', () => {
     const config = validConfig();
     config.defaults.area = 'study';
@@ -86,6 +106,12 @@ describe('ConfigSchema', () => {
       const config = validConfig();
       const task = { ...config.sources.task, api_token: 'xxxx' };
       expect(issuePaths({ ...config, sources: { ...config.sources, task } })).toEqual(['sources.task']);
+    });
+
+    it('rejects OAuth secrets under the schedule source', () => {
+      const config = validConfig();
+      const schedule = { ...config.sources.schedule, refresh_token: 'xxxx' };
+      expect(issuePaths({ ...config, sources: { ...config.sources, schedule } })).toEqual(['sources.schedule']);
     });
   });
 });

@@ -5,17 +5,23 @@
   "description": "MCP server that lets AI clients read and write Task / Schedule / Collection / Knowledge / Project across their Sources of Truth.",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": ">=24",
+    "npm": ">=11"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "auth:google": "tsx scripts/google-auth.ts"
   },
   "dependencies": {
+    "@doist/todoist-sdk": "^15.3.1",
+    "@googleapis/calendar": "^20.1.0",
     "@modelcontextprotocol/server": "^2.3.1",
+    "google-auth-library": "^11.3.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },

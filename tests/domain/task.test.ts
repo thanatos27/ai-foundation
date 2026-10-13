@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { TaskCreateInputSchema, TaskListFilterSchema, TaskSchema } from '../../src/domain/index.js';
+import {
+  TaskCreateInputSchema,
+  TaskIdInputSchema,
+  TaskListFilterSchema,
+  TaskSchema,
+  TaskUpdateInputSchema,
+} from '../../src/domain/index.js';
 
 describe('TaskSchema', () => {
   it('accepts the spec §5.2 example (date-only due, no id)', () => {
@@ -44,10 +50,23 @@ describe('TaskCreateInputSchema', () => {
       status: 'next',
       due: '2026-10-16',
       area: 'work',
-      project_ref: null,
       tags: [],
     });
     expect(result.success).toBe(true);
+  });
+
+  it('accepts an offset date-time due', () => {
+    expect(TaskCreateInputSchema.safeParse({ title: 'a', due: '2026-10-16T18:00:00+09:00' }).success).toBe(true);
+  });
+
+  it.each([
+    ['project_ref (not an input in Phase 2)', { title: 'a', project_ref: null }],
+    ['an unknown key', { title: 'a', calendar_id: 'x' }],
+    ['a date-time without offset', { title: 'a', due: '2026-10-16T18:00:00' }],
+    ['a reserved af- tag', { title: 'a', tags: ['accounting', 'af-next'] }],
+    ['a reserved tag in another case', { title: 'a', tags: ['AF-custom'] }],
+  ])('rejects %s', (_label, input) => {
+    expect(TaskCreateInputSchema.safeParse(input).success).toBe(false);
   });
 
   it('accepts a title-only input', () => {
@@ -64,16 +83,23 @@ describe('TaskCreateInputSchema', () => {
 });
 
 describe('TaskListFilterSchema', () => {
-  it('accepts the spec §9 example', () => {
+  it('accepts every filter', () => {
     const result = TaskListFilterSchema.safeParse({
-      status: ['next'],
+      status: ['next', 'inbox'],
       area: 'work',
-      due_before: null,
-      due_after: null,
-      project_ref: null,
+      due_before: '2026-10-31',
+      due_after: '2026-10-01T00:00:00+09:00',
       tags: ['accounting'],
     });
     expect(result.success).toBe(true);
+  });
+
+  it.each([
+    ['done status', { status: ['done'] }],
+    ['project_ref', { project_ref: 'github:x/y' }],
+    ['a null due bound', { due_before: null }],
+  ])('rejects %s', (_label, input) => {
+    expect(TaskListFilterSchema.safeParse(input).success).toBe(false);
   });
 
   it('accepts an empty filter', () => {
@@ -82,5 +108,42 @@ describe('TaskListFilterSchema', () => {
 
   it('rejects a non-array status', () => {
     expect(TaskListFilterSchema.safeParse({ status: 'next' }).success).toBe(false);
+  });
+});
+
+describe('TaskUpdateInputSchema', () => {
+  it.each([
+    ['title', { title: '新しいタイトル' }],
+    ['status', { status: 'waiting' }],
+    ['due', { due: '2026-10-20' }],
+    ['due cleared', { due: null }],
+    ['area cleared', { area: null }],
+    ['tags cleared', { tags: [] }],
+  ])('accepts a single field: %s', (_label, fields) => {
+    expect(TaskUpdateInputSchema.safeParse({ id: 'todoist:1', ...fields }).success).toBe(true);
+  });
+
+  it('rejects an update without any field', () => {
+    const result = TaskUpdateInputSchema.safeParse({ id: 'todoist:1' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toContain('At least one of');
+  });
+
+  it.each([
+    ['status done', { id: 'todoist:1', status: 'done' }],
+    ['empty title', { id: 'todoist:1', title: '' }],
+    ['missing id', { title: 'a' }],
+    ['a reserved tag', { id: 'todoist:1', tags: ['af-area-work'] }],
+    ['an unknown key', { id: 'todoist:1', title: 'a', project_ref: 'x' }],
+  ])('rejects %s', (_label, input) => {
+    expect(TaskUpdateInputSchema.safeParse(input).success).toBe(false);
+  });
+});
+
+describe('TaskIdInputSchema', () => {
+  it('requires a non-empty id', () => {
+    expect(TaskIdInputSchema.safeParse({ id: 'todoist:1' }).success).toBe(true);
+    expect(TaskIdInputSchema.safeParse({ id: '' }).success).toBe(false);
+    expect(TaskIdInputSchema.safeParse({}).success).toBe(false);
   });
 });
