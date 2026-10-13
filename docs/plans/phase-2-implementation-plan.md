@@ -1,11 +1,11 @@
 # Phase 2: Task / Schedule — Implementation Plan
 
-- Status: **Draft rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-14
+- Status: **Draft rev.2（再レビュー待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-14（rev.2: 2026-10-14 PR #3 レビュー反映）
 - 対象: [Phase 2 Design Issue](../specs/phase-2-task-schedule.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 1 Implementation Plan](phase-1-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-本Planが承認されるまで実装は開始しない。仕様と衝突する点・判断が必要な点は [§16 懸念点 / 未確定事項](#16-懸念点--未確定事項) にまとめた。
+本Planが承認されるまで実装は開始しない。仕様と衝突する点・判断が必要な点は [§16 懸念点 / 未確定事項](#16-懸念点--未確定事項)、レビュー指摘への対応は [§17 Review対応履歴](#17-review対応履歴) を参照。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| Branch | `main`（clean）。最新は `fb1884a Merge pull request #2 from thanatos27/feat/phase-1-foundation` |
+| Branch | 作業Branch `feat/phase-2-task-schedule`（PR #3）。Baseは `main` の `4a66f7e docs: clarify Phase 2 date handling`（Phase 1実装 `fb1884a` のMerge後に、Phase 2 Design Issue追加 `75924ae`、MVP仕様のPhase 2整合 `660b302`、Taskの日付扱い明確化 `4a66f7e` がコミット済み） |
 | Repository | `thanatos27/ai-foundation`（**Public**） |
 | ローカル環境 | Node.js v24.20.0, npm。`package.json` の `engines.node` は `>=22.12` |
 | 依存 | `@modelcontextprotocol/server ^2.3.1`, `zod ^4.6.7`, `yaml ^2.9.1`（dev: `@modelcontextprotocol/client`, `typescript ~5.9.3`, `vitest ^5.0.4`, `tsx`, `@types/node`） |
@@ -50,7 +50,7 @@
 2. **Provider非依存のルールはDomainに置く。** 「時刻予定の`end`省略 = +1時間」「終日予定の`end`省略 = 1日」「DateとDateTimeの混在禁止」はProvider非依存のためDomainの純粋関数 / Schemaで表現し、Connectorはそれを受け取ってProvider形式へ変換する。
 3. **Credentialは境界の外から注入する。** `process.env` を読むのは `src/index.ts`（Entry Point）だけとし、Connectorは `CredentialProvider` Interfaceのみに依存する。
 4. **起動時に外部APIへ接続しない。** Credential取得・Inbox Project解決・OAuth Token取得はTool呼び出し時に遅延実行する。Credential未設定でもServerは起動し、該当Tool呼び出し時にCredential Errorを返す（e2e Testが外部APIなしで動くことも保証される）。
-5. **テスト容易性のため、Connectorは通信手段を注入可能にする。** TodoistはHTTP `fetch` 関数、Google Calendarは利用するAPIのみを持つ薄いClient Interfaceを注入する。通常のTest Suiteは実APIへ一切通信しない。
+5. **テスト容易性のため、Connectorは通信手段を注入可能にする。** Todoist・Google Calendarとも、Connectorが利用するSDKメソッドだけを持つ薄いInterfaceに依存させ、テストではFakeを注入する。通常のTest Suiteは実APIへ一切通信しない。
 6. **独自Framework・抽象化を増やさない。** Connector Registry、Retry/Rate-limit Framework、Cache層、汎用Mapper等は作らない。
 
 ---
@@ -59,8 +59,8 @@
 
 | 対象 | 変更 | 理由 |
 |---|---|---|
-| `domain/schedule.ts` | `start` / `end` を `DateOrDateTimeSchema` へ拡張し、Date/DateTime混在を拒否。`ScheduleCreateInputSchema` から `related_task` を削除。`ScheduleListFilterSchema` 追加。`normalizeScheduleCreateInput` 追加 | 終日予定対応（Phase 2 §Schedule）、`related_task` はPhase 2対象外 |
-| `domain/task.ts` | Input Schemaから `project_ref` を削除。`TaskListFilterSchema.status` から `done` を除外。`TaskUpdateInputSchema`, `TaskIdInputSchema` 追加 | Phase 2 §task_create / §task_list / §task_update / §task_complete |
+| `domain/schedule.ts` | `start` / `end` を `DateOrDateTimeSchema` へ拡張し、Date/DateTime混在を拒否。`ScheduleSchema` と `ScheduleCreateInputSchema` の両方から `related_task` を削除。`ScheduleListFilterSchema` 追加。`normalizeScheduleCreateInput` 追加 | 終日予定対応（Phase 2 §Schedule）。`related_task` はPhase 2で実装しないことが確定し、MVP §5.3からも削除済み |
+| `domain/task.ts` | Input Schemaから `project_ref` を削除。`TaskListFilterSchema.status` から `done` を除外。`tags` 入力で `af-` Prefixを拒否。`TaskUpdateInputSchema`, `TaskIdInputSchema` 追加 | Phase 2 §task_create / §task_list / §task_update / §task_complete、`af-*` NamespaceはAI Foundation管理用に予約 |
 | `domain/common.ts` | `sameDateKind` 等のヘルパー追加 | Date/DateTime混在チェックの共通化 |
 | `connectors/types.ts` | `TaskConnector` に `update` / `complete`、`ScheduleConnector` に `list` を追加 | Phase 1 Plan Q2で「入力仕様が決まるPhase 2で追加」としていたもの |
 | `config/schema.ts` / `config.yaml` | `sources.schedule.writable_calendar_id` を追加 | Phase 2 §Calendar Policy |
@@ -69,7 +69,7 @@
 | `tests/server.test.ts`, `tests/e2e/stdio.test.ts` | 「公開Tool 0件」のAssertionを「6 Toolが公開される」へ変更 | Tool公開に伴う期待値変更 |
 | `.env.example`, `.gitignore`, `README.md` | Credential変数名・ローカルConfig・セットアップ手順 | Security / 利用手順 |
 
-`domain/task.ts` の `TaskSchema`（Entity）は変更しない（`project_ref` はEntityとしては残し、Phase 2の出力では常に `null`）。`ScheduleSchema` の `related_task` もEntityとしては残す（Phase 2では出力しない）。
+`domain/task.ts` の `TaskSchema`（Entity）は変更しない（`project_ref` はMVP §5.2に定義があるためEntityとしては残し、Phase 2の出力では常に `null`）。
 
 ---
 
@@ -88,7 +88,7 @@
 | `src/credentials/env.ts` | 追加 | `EnvCredentialProvider`（§8） |
 | `src/connectors/types.ts` | 変更 | `update` / `complete` / `list` メソッド追加 |
 | `src/connectors/index.ts` | 追加 | `createConnectors(config, credentials)`: Configの `provider` に応じてConnectorを生成し `Connectors` を返す |
-| `src/connectors/todoist/client.ts` | 追加 | Todoist API v1への薄いHTTP Client（認証Header付与、Pagination、HTTP Status → Domain Error変換）。`fetch` を注入可能 |
+| `src/connectors/todoist/client.ts` | 追加 | `@doist/todoist-sdk` の `TodoistApi` 生成（Tokenは `CredentialProvider` から遅延取得）。Connectorが使うメソッドだけを持つ `TodoistClient` Interface（`Pick<TodoistApi, ...>`）、Pagination Helper、`TodoistRequestError` → Domain Error変換 |
 | `src/connectors/todoist/mapping.ts` | 追加 | Label ↔ status/area/tags、Due ↔ `due`、Todoist Task → Domain `Task` |
 | `src/connectors/todoist/filter.ts` | 追加 | `task_list` Filterの適用（純粋関数） |
 | `src/connectors/todoist/connector.ts` | 追加 | `TodoistTaskConnector implements TaskConnector` |
@@ -110,7 +110,7 @@
 | `tests/domain/task.test.ts`, `tests/domain/schedule.test.ts` | 変更（§12.2） |
 | `tests/shared/datetime.test.ts` | 追加 |
 | `tests/credentials/env.test.ts` | 追加 |
-| `tests/connectors/todoist/mapping.test.ts`, `filter.test.ts`, `connector.test.ts` | 追加（Fake `fetch`） |
+| `tests/connectors/todoist/mapping.test.ts`, `filter.test.ts`, `connector.test.ts` | 追加（Fake `TodoistClient`） |
 | `tests/connectors/google-calendar/mapping.test.ts`, `connector.test.ts` | 追加（Fake `CalendarApi`） |
 | `tests/tools/task.test.ts`, `tests/tools/schedule.test.ts` | 追加（InMemoryTransport + Fake Connector） |
 | `tests/helpers/fake-connectors.ts` | 追加（Tool Test用のIn-memory Fake） |
@@ -121,7 +121,7 @@
 
 | File | 変更 |
 |---|---|
-| `package.json` | 依存追加（§11）、scripts `test:integration`, `auth:google` 追加 |
+| `package.json` | 依存追加（§11）、scripts `test:integration`, `auth:google` 追加。Q1でAの場合は `engines.node` を `>=24` に変更 |
 | `vitest.config.ts` | `tests/integration/**` を除外 |
 | `vitest.integration.config.ts` | 追加。`tests/integration/**/*.integration.test.ts` のみ対象 |
 | `tsconfig.json` | `include` に `scripts` と `vitest.integration.config.ts` を追加 |
@@ -142,13 +142,20 @@ Tool Input SchemaはDomainのInput Schemaをそのまま使う（Phase 1方針�
 ```ts
 const ActiveTaskStatusSchema = TaskStatusSchema.exclude(['done']); // inbox | next | waiting | someday
 
+/** `af-` はAI Foundation管理用Namespace。通常Tagとしては受け付けない（大文字小文字を区別しない）。 */
+export const RESERVED_TAG_PREFIX = 'af-';
+const TaskTagsInputSchema = TagsSchema.refine(
+  (tags) => tags.every((tag) => !tag.toLowerCase().startsWith(RESERVED_TAG_PREFIX)),
+  { message: 'tags must not start with "af-" (reserved for AI Foundation)' },
+);
+
 // task_create
 TaskCreateInputSchema = z.strictObject({
   title: z.string().min(1),
   status: ActiveTaskStatusSchema.optional(),        // 省略時 inbox
   due: DateOrDateTimeSchema.nullable().optional(),
   area: AreaSchema.nullable().optional(),
-  tags: TagsSchema.optional(),
+  tags: TaskTagsInputSchema.optional(),
 });                                                  // project_ref を削除
 
 // task_list
@@ -157,7 +164,7 @@ TaskListFilterSchema = z.strictObject({
   area: AreaSchema.optional(),
   due_before: DateOrDateTimeSchema.optional(),
   due_after: DateOrDateTimeSchema.optional(),
-  tags: TagsSchema.optional(),
+  tags: TagsSchema.optional(),                       // af-* は通常Tagに現れないため、指定しても一致しないだけ
 });                                                  // project_ref を削除
 
 // task_update
@@ -167,7 +174,7 @@ TaskUpdateInputSchema = z.strictObject({
   status: ActiveTaskStatusSchema.optional(),         // done は拒否 → task_complete
   due: DateOrDateTimeSchema.nullable().optional(),   // null = 期限削除
   area: AreaSchema.nullable().optional(),            // null = Area Label削除
-  tags: TagsSchema.optional(),                       // 通常Labelの置換。[] = 通常Labelを全削除
+  tags: TaskTagsInputSchema.optional(),              // 通常Labelの置換。[] = 通常Labelを全削除
 }).refine(hasAnyUpdateField, { message: 'At least one field other than id must be specified' });
 
 // task_complete
@@ -176,7 +183,8 @@ TaskIdInputSchema = z.strictObject({ id: z.string().min(1) });
 
 - `id` の形式（`todoist:<task-id>`）はProvider固有のため、DomainではなくTodoist Connectorが検証し、不正形式は `InputValidationError` とする。
 - `due` / `due_before` / `due_after` の `null` は、Phase 1の `TaskListFilterSchema` では許容していたが、Filterでは「指定なし」と意味が重複するため削除する（`task_update.due` の `null` = 削除は維持）。
-- `TaskSchema`（出力）は変更しない。Phase 2では `id: "todoist:<id>"`, `source: "todoist"`, `external_ref: <TodoistのTask URL>`, `project_ref: null` を返す。
+- `af-*` Namespaceの予約はTodoist固有ではなくAI Foundationの規則のため、Domainの入力Schemaで検証する（Tool呼び出し時にSDKが `Input validation error` として返す）。
+- `TaskSchema`（出力）は変更しない。Phase 2では `id: "todoist:<id>"`, `source: "todoist"`, `external_ref: "https://app.todoist.com/app/task/<id>"`, `project_ref: null` を返す。Todoist API v1のTask objectには旧 `url` Propertyがないため、`external_ref` はConnectorでTask IDから組み立てる。
 
 ### 5.2 Schedule
 
@@ -189,8 +197,9 @@ ScheduleSchema = z.object({
   title: z.string().min(1),
   start: DateOrDateTimeSchema,
   end: DateOrDateTimeSchema.nullable().optional(),
-  related_task: ..., tags: ...,                       // 既存のまま
+  tags: TagsSchema.optional(),                        // 既存のまま
 }).refine(sameDateKind, DateKindConsistent).refine(endNotBeforeStart, END_BEFORE_START);
+                                                      // related_task を削除（MVP §5.3と一致）
 
 // schedule_create
 ScheduleCreateInputSchema = z.strictObject({
@@ -216,7 +225,7 @@ type NormalizedScheduleCreate =
 function normalizeScheduleCreateInput(input: ScheduleCreateInput): NormalizedScheduleCreate;
 ```
 
-`+1h` はOffset付きDateTimeの元のOffsetを保ったまま計算する（例: `2026-10-17T14:00:00+09:00` → `2026-10-17T15:00:00+09:00`）。
+`+1h` は入力DateTimeのOffsetを保ったまま計算する（例: `2026-10-17T14:00:00+09:00` → `2026-10-17T15:00:00+09:00`、`2026-10-14T20:00:00+02:00` → `2026-10-14T21:00:00+02:00`）。
 
 `endNotBeforeStart` は既存実装（`Date.parse` 比較）がDate同士でも正しく動くため変更しない。終日予定の `start == end`（1日）は許容される。
 
@@ -226,41 +235,45 @@ function normalizeScheduleCreateInput(input: ScheduleCreateInput): NormalizedSch
 
 ### 6.1 利用API
 
-Todoist API v1（`https://api.todoist.com/api/v1/`）を `fetch` で直接呼ぶ（SDKを使わない理由は Q1）。
+公式SDK `@doist/todoist-sdk`（Todoist API v1）を使う（採用理由・Node要件は Q1）。Connectorは以下のメソッドだけを持つ `TodoistClient` Interface（`Pick<TodoistApi, 'getUser' | 'getTasks' | 'getTask' | 'addTask' | 'updateTask' | 'closeTask'>`）に依存し、テストではFakeを注入する。
 
-| 操作 | Endpoint |
+| 操作 | SDKメソッド（API v1 Endpoint） |
 |---|---|
-| Inbox Project解決 | `GET /projects`（Pagination）→ `inbox_project: true` のProject ID。プロセス内でMemoize |
-| Task一覧 | `GET /tasks?project_id=<inbox>&limit=200&cursor=...`（`next_cursor` がnullになるまで取得） |
-| Task取得 | `GET /tasks/{id}` |
-| Task作成 | `POST /tasks`（`project_id` は指定しない → Inbox） |
-| Task更新 | `POST /tasks/{id}` |
-| Task完了 | `POST /tasks/{id}/close` |
+| Inbox Project解決 | `getUser()` → `inboxProjectId`（`GET /user`）。プロセス内でMemoize |
+| Task一覧 | `getTasks({ projectId: inboxId, limit: 200, cursor })` → `{ results, nextCursor }`。`nextCursor` がnullになるまで取得 |
+| Task取得 | `getTask(id)`（`GET /tasks/{id}`） |
+| Task作成 | `addTask({ content, labels, dueDate \| dueDatetime })`（`projectId` は指定しない → Inbox） |
+| Task更新 | `updateTask(id, { content?, labels?, dueDate \| dueDatetime \| dueString })` |
+| Task完了 | `closeTask(id)`（`POST /tasks/{id}/close`） |
 
-`Authorization: Bearer <token>` は `client.ts` だけが付与し、Error Message・Logへ出さない。
+- `TodoistApi` は初回Tool呼び出し時に `CredentialProvider.getTodoistApiToken()` のTokenで1回だけ生成してMemoizeする。
+- SDKは `customFetch` オプションでHTTP層も差し替え可能だが、通常のテストはメソッド単位のFakeで足りるため使わない。
 
 ### 6.2 Label Mapping（`mapping.ts`）
+
+`af-` で始まるLabelはすべてAI Foundation管理用Namespaceとして扱い、通常Tagと分離する。
 
 ```ts
 const STATUS_LABELS = { next: 'af-next', waiting: 'af-waiting', someday: 'af-someday' } as const;
 const AREA_LABELS   = { work: 'af-area-work', personal: 'af-area-personal' } as const;
-const MANAGED_LABELS = new Set([...Object.values(STATUS_LABELS), ...Object.values(AREA_LABELS)]);
+const isManagedLabel = (label: string) => label.toLowerCase().startsWith(RESERVED_TAG_PREFIX); // 'af-'
 ```
 
 | 方向 | 規則 |
 |---|---|
 | Domain → Todoist | `labels = [statusLabel?, areaLabel?, ...tags]`。`inbox` / `area: null` はLabelなし |
-| Todoist → Domain | status: Status Labelがなければ `inbox`。area: Area Labelがなければ `null`。tags: `MANAGED_LABELS` 以外のLabel |
+| Todoist → Domain | status: Status Labelがなければ `inbox`。area: Area Labelがなければ `null`。tags: `af-*` **以外**のLabel |
+| 未知の `af-*` Label（上記5種以外） | status / area / tagsのいずれにも反映しない。`task_update` でも保持し、削除しない（将来の管理Label追加時の衝突防止） |
 | 不整合（Status Labelが複数） | 読取時は固定優先順（`next` > `waiting` > `someday`、`work` > `personal`）で1つを採用。次回の該当項目更新時に同種Labelはすべて除去される |
-| `tags` に予約Label（`af-next` 等）が含まれる | `InputValidationError`（管理用Labelを `tags` 経由で操作させない。Q11） |
+| `tags` 入力に `af-` で始まるTag | Domain Schemaで拒否（§5.1、Q11） |
 
 ### 6.3 Due Mapping
 
-| Domain `due` | Todoist Request |
+| Domain `due` | Todoist Request（SDK引数） |
 |---|---|
-| `YYYY-MM-DD` | `due_date` |
-| Offset付きDateTime | `due_datetime`（UTC `Z` 形式に変換） |
-| `null`（update時） | `due_string: "no date"` |
+| `YYYY-MM-DD` | `dueDate` |
+| Offset付きDateTime | `dueDatetime`（UTC `Z` 形式に変換） |
+| `null`（update時） | `dueString: null`（SDK型定義上 `"no date"` と同等。期限削除） |
 | 未指定 | 送らない |
 
 | Todoist `due` | Domain `due` |
@@ -276,10 +289,10 @@ API v1の時刻付き `due` の正確な形状（`date` に時刻が入るか、
 
 | メソッド | 処理 |
 |---|---|
-| `create(input)` | Labels / Due を組み立てて `POST /tasks` → 応答をDomain `Task` へ変換 |
+| `create(input)` | Labels / Due を組み立てて `addTask` → 応答をDomain `Task` へ変換 |
 | `list(filter)` | Inbox ID解決 → Inbox内の未完了Taskを全件取得 → Domainへ変換 → `filter.ts` で絞り込み |
-| `update(input)` | `id` をParse → `GET /tasks/{id}`（現在のLabel取得）→ 変更対象カテゴリのLabelだけを差し替えた `labels` を計算 → 変更Fieldのみ `POST /tasks/{id}` → 応答を変換 |
-| `complete(id)` | `id` をParse → `POST /tasks/{id}/close` → 完了したTaskを `status: done` で返す（closeの応答は本文を持たないため、close前に `GET` した内容を利用） |
+| `update(input)` | `id` をParse → `getTask`（現在のLabel取得）→ 変更対象カテゴリのLabelだけを差し替えた `labels` を計算 → 変更Fieldのみ `updateTask` → 応答を変換 |
+| `complete(id)` | 下記 |
 
 `update` のLabel計算（AC「古いLabelが残らない」「通常Tag更新で管理用Labelが破壊されない」の中核）:
 
@@ -287,11 +300,25 @@ API v1の時刻付き `due` の正確な形状（`date` に時刻が入るか、
 next = current
 if status 指定: next から全Status Labelを除去し、新しいStatus Labelを追加（inbox なら追加なし）
 if area   指定: next から全Area Labelを除去し、新しいArea Labelを追加（null なら追加なし）
-if tags   指定: next から全通常Labelを除去し、tags を追加（管理用Labelは保持）
+if tags   指定: next から af-* 以外の全Labelを除去し、tags を追加（af-* Labelはすべて保持）
 status / area / tags のいずれも指定がなければ labels を送らない
 ```
 
-GET → POSTの間に他所でLabelが変更された場合は後勝ちになる（Q6）。
+`complete` は**close後のSoT状態と矛盾するTaskを返さない**:
+
+```text
+before = getTask(id)            // 存在確認（404 → NotFoundError）
+closeTask(id)
+after  = getTask(id) を試行
+  after が取得でき、未完了（checked: false）  → 繰り返しTaskが次回分へ進んだ状態。after をそのまま変換して返す（status は Label 由来、due は次回日付）
+  after が取得でき、完了（checked: true）     → after を status: done で返す
+  after が 404                               → before を status: done で返す
+```
+
+- 繰り返しTaskでは返却Taskの `status` が `done` にならないため、Tool Descriptionに「繰り返しTaskは次回分へ進み、未完了のまま返る」ことを明記する。
+- close後の `getTask` が完了Taskを返すか404になるか、繰り返しTaskのclose後の状態はIntegration Testで確認し、上記の分岐で両方に対応しておく。
+
+`getTask` → `updateTask` の間に他所でLabelが変更された場合は後勝ちになる（Q6）。
 
 ### 6.5 Filter（`filter.ts`）
 
@@ -309,10 +336,10 @@ GET → POSTの間に他所でLabelが変更された場合は後勝ちになる
 | 状況 | Error |
 |---|---|
 | Token未設定 | `CredentialError`（`CredentialProvider` が投げる） |
-| HTTP 401 / 403 | `CredentialError`（"Todoist rejected the API token"） |
-| HTTP 404（Task取得・更新・完了） | `NotFoundError`（"Task todoist:123 not found"） |
-| HTTP 400 | `ProviderApiError`（Todoistが返したMessageを含める） |
-| HTTP 429 / 5xx / Network Error / 不正JSON | `ProviderApiError`（Status・概要を含める。Retryはしない） |
+| `TodoistRequestError` 401 / 403（`isAuthenticationError()`） | `CredentialError`（"Todoist rejected the API token"） |
+| `TodoistRequestError` 404（Task取得・更新・完了） | `NotFoundError`（"Task todoist:123 not found"） |
+| `TodoistRequestError` 400 | `ProviderApiError`（Todoistが返したMessageを含める） |
+| `TodoistRequestError` 429 / 5xx、Network Error、SDKの応答Validation失敗 | `ProviderApiError`（Status・概要を含める。Retryは追加しない） |
 | `id` が `todoist:` で始まらない | `InputValidationError` |
 | Inbox Projectが見つからない | `ProviderApiError` |
 
@@ -337,15 +364,17 @@ interface CalendarApi {
 - OAuth Scope（最小化）:
   - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`（閲覧可能Calendar一覧）
   - `https://www.googleapis.com/auth/calendar.events`（Event読み書き）
-  - Credentialは技術的に他Calendarへ書けるため、書き込み先の固定はConnectorで保証する（仕様どおり）。Scopeでの技術的制限案は Q7。
+  - `calendar.events` Scope自体は全CalendarのEvent書き込み権限を与えるため、**書き込み先を `writable_calendar_id` に固定することはConnectorのHard Ruleとして維持する**（Write系の呼び出しは `insertEvent` 1か所のみで、`calendarId` 引数には常にConfig値を渡す。テストで保証）。Scopeでの技術的制限案は Q7。
 
 ### 7.2 schedule_create
 
 1. `config.sources.schedule.writable_calendar_id` が未設定なら `ConfigurationError`。
 2. `normalizeScheduleCreateInput(input)` で正規化。
 3. Google Eventへ変換:
-   - timed: `start: { dateTime: start, timeZone: defaults.timezone }`, `end: { dateTime: end, timeZone: defaults.timezone }`
+   - timed: `start: { dateTime: start }`, `end: { dateTime: end }`。**入力のOffsetを正とし、`timeZone` は付けない**（`defaults.timezone` を付けると `+02:00` の入力と矛盾し得るため）。表示Timezoneは書き込み先CalendarのTimezoneに従う
    - all_day: `start: { date: startDate }`, `end: { date: addDays(endDate, 1) }`（**排他的終了日への変換はここだけ**）
+
+   `defaults.timezone` はDate-onlyの期間境界（§7.3）とTodoistのFloating datetime解釈（§6.3）にのみ使う。
 4. `insertEvent(writableCalendarId, event)`。`calendarId` は常にConfig値で、Tool Input由来の値は経路上に存在しない（Input Schemaもstrictで `calendar_id` を拒否）。
 5. 応答をDomain `Schedule` へ変換して返す。
 
@@ -465,13 +494,17 @@ schedule: z.strictObject({
 
 | Package | 種別 | Version | 用途 |
 |---|---|---|---|
+| `@doist/todoist-sdk` | dependencies | `^15.3.1` | Todoist公式TypeScript SDK（API v1。旧 `@doist/todoist-api-typescript` の後継）。型付きRequest / Response、Pagination、`TodoistRequestError` |
 | `@googleapis/calendar` | dependencies | `^20.1.0` | Calendar API v3 Client（`googleapis` 全体は巨大なため単体Packageを使う）。engines: Node >=22 |
 | `google-auth-library` | dependencies | `^11.3.0` | `OAuth2Client`（Token Refresh、PKCE、Loopback認可）。engines: Node >=22 |
 
-追加しないもの:
+`@doist/todoist-sdk` について:
 
-- `@doist/todoist-sdk`（旧 `@doist/todoist-api-typescript` の後継、v15.3.1）: `engines.node >=24` で本Repositoryの `>=22.12` と不一致、独自に `zod 4.3.6` を固定依存し、`type-fest` Peer依存等も増える。必要なEndpointは6つのみのため `fetch` 直接利用とする（Q1）。
-- `dotenv`（Node標準 `process.loadEnvFile()` を使う）、日付Library（`Intl` で足りる）、`googleapis`（全API同梱）。
+- READMEは「Node 20.18.1+」と案内しているが、公開Package（v15.3.1）の `package.json` は `engines: { node: ">=24", npm: ">=11" }` を宣言している（`npm view` と展開したTarballで確認）。npmは既定では `engines` 不一致を警告（`EBADENGINE`）に留めるため、本Repositoryの `>=22.12` のままでもInstallは可能。扱いは Q1 で確認する。
+- 依存として `zod 4.3.6`（固定）、`undici`、`@doist/sdk-kmp` 等を持ち、`type-fest` をPeer依存とする。SDK内部のzodは本Repositoryの `zod ^4.6.7` とは別Instanceになるが、SDKのSchemaをDomainへ渡さないため影響しない。
+- Endpointは6つと少なく直接 `fetch` でも実装できるが、公式SDKを使うことでRequest / Responseの型とAPI変更への追従をSDKに任せられ、`TodoistClient` Interface経由でFakeも容易に注入できるため、SDKを採用する。
+
+追加しないもの: `dotenv`（Node標準 `process.loadEnvFile()` を使う）、日付Library（`Intl` で足りる）、`googleapis`（全API同梱）。
 
 バージョンは実装開始時点の最新安定版を再確認し、Lockfileで固定する。
 
@@ -481,7 +514,7 @@ schedule: z.strictObject({
 
 ### 12.1 方針
 
-- `npm test` は外部Serviceへ一切通信しない（Fake `fetch` / Fake `CalendarApi` / Fake Connector / Fake CredentialProvider）。
+- `npm test` は外部Serviceへ一切通信しない（Fake `TodoistClient` / Fake `CalendarApi` / Fake Connector / Fake CredentialProvider）。
 - 層ごとに責務を分けてテストする。Tool LayerはFake Connector、ConnectorはFake通信、Mapping / Filter / Datetimeは純粋関数として直接テストする。
 - `npm run typecheck && npm test` 成功をImplementation Review前の必須条件とする。
 
@@ -489,12 +522,13 @@ schedule: z.strictObject({
 
 | 対象 | 正常系 | 異常系 |
 |---|---|---|
-| `TaskCreateInputSchema` | status省略 / date due / datetime due | `status: done`、`project_ref` 指定（strict）、Offsetなし日時 |
+| `TaskCreateInputSchema` | status省略 / date due / datetime due | `status: done`、`project_ref` 指定（strict）、Offsetなし日時、`tags: ['af-next']` / `['AF-foo']`（`af-` Namespace） |
 | `TaskListFilterSchema` | 空 / 全Filter | `status: ['done']` |
-| `TaskUpdateInputSchema` | 各Field単独 / `due: null` / `area: null` / `tags: []` | `id` のみ、`status: done`、`title: ''` |
+| `TaskUpdateInputSchema` | 各Field単独 / `due: null` / `area: null` / `tags: []` | `id` のみ、`status: done`、`title: ''`、`af-` で始まるTag |
+| `ScheduleSchema` | timed / 終日 | Date・DateTime混在、`related_task` を持たないこと |
 | `ScheduleCreateInputSchema` | timed（end有/無）/ date（end有/無）/ 同日の終日 | Date・DateTime混在、`end < start`、`calendar_id` / `related_task` 指定 |
 | `ScheduleListFilterSchema` | date範囲 / datetime範囲 | `start` 欠落、`end < start` |
-| `normalizeScheduleCreateInput` | +1h（Offset維持、日付跨ぎ）、終日1日、終日複数日 | — |
+| `normalizeScheduleCreateInput` | +1h（`+09:00` / `+02:00` それぞれのOffset維持、日付跨ぎ）、終日1日、終日複数日 | — |
 
 ### 12.3 Shared / Credentials
 
@@ -503,17 +537,17 @@ schedule: z.strictObject({
 
 ### 12.4 Todoist Connector
 
-Fake `fetch` はRequest（Method / URL / Body / Header）を記録し、Responseを返す。
+Fake `TodoistClient`（§6.1のSDKメソッドのみ）は呼び出し引数を記録し、用意した応答または `TodoistRequestError` を返す。
 
 | 観点 | ケース |
 |---|---|
-| Mapping | 全status × area の Label生成、読取時の管理Label除外、不整合Labelの優先順位、Due（date / UTC / 固定TZ / Floating）の変換 |
-| create | Bodyに `project_id` を含まない（Inbox）、`labels` / `due_date` / `due_datetime`（UTC）、予約Labelを `tags` に含めると `InputValidationError` |
-| list | Inbox ID解決とMemoize、`project_id` 指定、Pagination（`next_cursor`）、各Filter（OR / AND / 境界値 / due無し除外 / Date×DateTime比較） |
-| update | status変更で旧Status Labelが消える、area変更・`area: null`、tags置換で管理Labelが残る、指定外Fieldを送らない、`due: null` → `due_string: "no date"`、不正ID形式 |
-| complete | `POST /tasks/{id}/close`、`status: done` を返す |
-| Error | 401/403 → `CredentialError`、404 → `NotFoundError`、400/429/500/Network/不正JSON → `ProviderApiError`、Token未設定、MessageにTokenが含まれない |
-| 認証 | `Authorization: Bearer <token>` がCredentialProvider由来であること |
+| Mapping | 全status × area の Label生成、読取時に `af-*`（未知の `af-foo` を含む）を `tags` から除外、不整合Labelの優先順位、Due（date / UTC / 固定TZ / Floating）の変換、`external_ref` = `https://app.todoist.com/app/task/<id>` |
+| create | `addTask` に `projectId` を渡さない（Inbox）、`labels` / `dueDate` / `dueDatetime`（UTC） |
+| list | `getUser().inboxProjectId` の解決とMemoize、`projectId` 指定、Pagination（`nextCursor`）、各Filter（OR / AND / 境界値 / due無し除外 / Date×DateTime比較） |
+| update | status変更で旧Status Labelが消える、area変更・`area: null`、tags置換で5種の管理Labelと未知の `af-*` Labelが残る、指定外Fieldを送らない、`due: null` → `dueString: null`、不正ID形式 |
+| complete | close後に未完了（繰り返しTask）→ 次回分のTaskを未完了のまま返す、close後に完了状態で取得 → `status: done`、close後に404 → close前のTaskを `status: done` で返す、close前404 → `NotFoundError` |
+| Error | `TodoistRequestError` 401/403 → `CredentialError`、404 → `NotFoundError`、400/429/500 → `ProviderApiError`、Network Error → `ProviderApiError`、Token未設定、MessageにTokenが含まれない |
+| 認証 | `TodoistApi` 生成に渡すTokenがCredentialProvider由来で、生成が1回だけであること（Client Factoryを注入して検証） |
 
 ### 12.5 Google Calendar Connector
 
@@ -521,7 +555,7 @@ Fake `CalendarApi` は呼び出し引数を記録する。
 
 | 観点 | ケース |
 |---|---|
-| create | `calendarId` が常に `writable_calendar_id`、timed end省略で+1h、終日1日（`end.date = start + 1`）、終日複数日（`end.date = end + 1`）、`writable_calendar_id` 未設定で `ConfigurationError` |
+| create | `calendarId` が常に `writable_calendar_id`、timed end省略で+1h、timedの `start` / `end` が入力Offsetのままで `timeZone` を含まない（`+02:00` 入力と `defaults.timezone: Asia/Tokyo` の組み合わせ）、終日1日（`end.date = start + 1`）、終日複数日（`end.date = end + 1`）、`writable_calendar_id` 未設定で `ConfigurationError` |
 | list | 全Calendarに対して呼ぶ、Date範囲→`timeMin`/`timeMax`（翌日0時）、cancelled除外、複数Calendarのマージとソート、終日Eventの包含終了日変換、`summary` なし |
 | Error | `invalid_grant` / 401 / 403 → `CredentialError`、create時404 → `ConfigurationError`、500 / Network → `ProviderApiError`、1 Calendar失敗で全体Error |
 
@@ -529,7 +563,7 @@ Fake `CalendarApi` は呼び出し引数を記録する。
 
 `InMemoryTransport` + `@modelcontextprotocol/client` + In-memory Fake Connector（`tests/helpers/fake-connectors.ts`）。
 
-- `listTools()` に6 Toolが含まれ、Input Schema（必須項目、`status` のenumに `done` がない等）が公開される。
+- `listTools()` に6 Toolが含まれ、Input Schema（必須項目、`status` のenumに `done` がない等）とAnnotation（§16 その他）が公開される。
 - 各Toolの `callTool()` が `structuredContent` と JSON `content` を返し、Fake ConnectorへDomain Inputがそのまま渡る。
 - Validation Error（`task_update` で `id` のみ、`schedule_create` に `calendar_id`）が `isError` になり、Connectorが呼ばれない。
 - Connectorが投げた `NotFoundError` 等のMessageが `isError` 結果に現れる。
@@ -548,7 +582,7 @@ Fake `CalendarApi` は呼び出し引数を記録する。
 
 - `npm run test:integration`（`vitest.integration.config.ts`）。通常の `npm test` には含めない。
 - `AI_FOUNDATION_INTEGRATION=1` と必要なCredentialがない場合は全件skip。
-- **Todoist**: 一意なPrefix付きTitle（`[af-it] <timestamp>`）でTaskを作成 → `list` で取得・Label / Due確認 → `update`（status / area / tags / `due: null`）→ Todoist上のLabelを直接確認 → `complete`。テストTaskは完了状態で残る。
+- **Todoist**: 一意なPrefix付きTitle（`[af-it] <timestamp>`）でTaskを作成 → `list` で取得・Label / Due確認 → `update`（status / area / tags / `due: null`）→ Todoist上のLabelを直接確認 → `complete`。テストTaskは完了状態で残る。加えて、繰り返しTask（`dueString: "every day"` をテストコードから直接設定）を `complete` し、close後に未完了のまま次回分へ進んで返ることを確認する。非繰り返しTaskのclose後に `getTask` が完了Taskを返すか404になるかもここで確定する。
 - **Google Calendar**: テスト用Calendar（`writable_calendar_id`）にtimed / 終日1日 / 終日複数日を作成 → `list` で取得・期間確認 → 後片付けとしてテストコードからのみ `events.delete` を呼ぶ（ConnectorにDeleteは実装しない）。
 - Todoist Due形状（§6.3）、`process.loadEnvFile` の上書き挙動はここで確定させ、必要ならPlanへ反映して報告する。
 
@@ -578,7 +612,7 @@ Build後、Claude CodeにServerを登録し（Credentialは `.env` またはMCP 
 | 1 | Domain / Error / Datetime | `domain/*` 変更、`errors.ts`、`shared/datetime.ts` + Test | Domain / Datetime Test成功、型検査成功 |
 | 2 | Config / Credential | `config/schema.ts`, `config.yaml`, `credentials/*`, `.env.example`, `.gitignore` + Test | Config / Credential Test成功 |
 | 3 | Connector境界 / Tool Layer | `connectors/types.ts`, `tools/{result,task,schedule,index}.ts`, Fake Connector + Tool Test、`server.test.ts` 更新 | Tool Test成功（Fake Connectorで6 Toolが動作） |
-| 4 | Todoist Connector | `connectors/todoist/*` + Test | Todoist Connector Test成功 |
+| 4 | Todoist Connector | 依存追加（`@doist/todoist-sdk`）、`connectors/todoist/*` + Test | Todoist Connector Test成功 |
 | 5 | Google Calendar Connector | 依存追加、`connectors/google-calendar/*`, `scripts/google-auth.ts` + Test | Google Calendar Connector Test成功 |
 | 6 | 配線 | `connectors/index.ts`, `src/index.ts`（`.env`読込・Credential・Connector生成）、e2e更新 | 全Test成功、Credentialなしで起動可能 |
 | 7 | Integration Test / Documentation | `tests/integration/*`, `vitest.integration.config.ts`, README | 実Credentialで `npm run test:integration` 成功 |
@@ -599,8 +633,8 @@ Tool Layer（Step 3）をConnector実装より先に行うのは、Domain Input 
 | **task_list**: Inbox未完了Task取得、5種Filter、Domain変換 | §6.4〜6.5 | Filter / Connector Test、Integration Test |
 | **task_update**: ID指定の部分更新 | `TaskUpdateInputSchema` + §6.4 | Domain / Connector / Tool Test |
 | **task_update**: 古い管理Labelが残らない | カテゴリ単位のLabel差し替え | Connector Test、Integration Test |
-| **task_update**: 通常Tag更新で管理Labelが破壊されない | 同上 | Connector Test、Integration Test |
-| **task_complete**: ID指定で完了 | `POST /tasks/{id}/close` | Connector Test、Integration Test |
+| **task_update**: 通常Tag更新で管理Labelが破壊されない | 同上 + `af-*` Namespace全体を保持 | Connector Test、Integration Test |
+| **task_complete**: ID指定で完了 | `closeTask` + close後の再取得でSoT状態を返す（§6.4） | Connector Test、Integration Test |
 | **Google Calendar接続**: OAuth Credentialで接続 | `OAuth2Client` + Refresh Token、`scripts/google-auth.ts` | Integration Test |
 | **schedule_create**: 専用Calendarへ作成 | `writable_calendar_id` 固定 | Connector Test、Integration Test |
 | **schedule_create**: 他の書き込み先を指定できない | Input Schemaに書き込み先がなくstrictで拒否、Connectorは常にConfig値を使う | Tool Test（`calendar_id` 拒否）、Connector Test |
@@ -620,65 +654,97 @@ Tool Layer（Step 3）をConnector実装より先に行うのは、Domain Input 
 
 ## 16. 懸念点 / 未確定事項
 
-### Q1. Todoist: SDKを使わず `fetch` 直接利用（要確認）
+rev.2時点で、Q2〜Q5、Q7〜Q10はレビューで合意済み。Q1・Q11・Q12はレビュー指摘を反映した。未解決はQ1のNode要件のみ。
 
-MVP §11は「Todoist API / TypeScript SDK」としており、どちらも許容範囲と解釈した。公式SDKは `@doist/todoist-sdk`（v15）へ移行しており、`engines.node >=24`（本Repositoryは `>=22.12`）、`zod 4.3.6` の固定依存、`type-fest` Peer依存がある。利用Endpointが6つと少なく、Fake `fetch` でテストしやすいため直接利用を提案する。SDK採用を優先する場合は `engines` を `>=24` へ上げる必要がある。
+### Q1. Todoist SDKの採用とNode要件（要確認）
 
-### Q2. `writable_calendar_id` の保存場所（要確認）
+レビュー指摘により公式SDK `@doist/todoist-sdk` を採用する（§6.1、§11）。
 
-仕様はCalendar IDをConfigへ保存してよいとしているが、RepositoryがPublicのため、コミット対象の `config.yaml` に個人のCalendar IDを書くと公開される。`config.yaml` には書かず `config.local.yaml`（gitignore）を `--config` で指定する運用を提案する。また、未設定でも起動できるよう `optional` とする。
+残る確認事項として、SDKのREADMEは「Node 20.18.1+」だが、公開Package（v15.3.1）の `package.json` は `engines.node >=24` / `engines.npm >=11` を宣言しており、記述が食い違っている。以下のどちらにするか判断いただきたい。
 
-### Q3. `task_list` Filterの比較規則（要確認）
+- **A（推奨）:** 本Repositoryの `engines.node` を `>=24` に上げる。開発環境はNode 24で、SDKの宣言と一致し、`EBADENGINE` 警告も出ない。READMEのPrerequisitesも更新する。
+- **B:** `>=22.12` のまま維持する。Node 22では `npm install` 時に `EBADENGINE` 警告が出る（`engine-strict` 設定時は失敗）。Node 22での動作はSDK READMEの記載を根拠とし、本Repositoryでは検証しない。
 
-仕様に定義がないため以下を提案する。
+### Q2. `writable_calendar_id` の保存場所（合意済み）
+
+`config.yaml`（Public Repositoryにコミット）には書かず、`config.local.yaml`（gitignore）を `--config` で指定する。Configでは `optional`。
+
+### Q3. `task_list` Filterの比較規則（合意済み）
 
 - `due_before` / `due_after` は境界を含む。Date-onlyが絡む比較は `defaults.timezone` の日付単位で行う。`due` なしのTaskはDue Filter指定時に除外。
 - `tags` はAND、`status` はOR。
 
-### Q4. Scheduleの出力形式（要確認）
+### Q4. Scheduleの出力形式（合意済み）
 
-- `id`: 仕様は `todoist:<id>` のみ定義。Eventは複数Calendarにまたがるため `google_calendar:<calendarId>:<eventId>` を提案する（Phase 2には `id` を入力に取るSchedule Toolはない）。
-- 終日予定の `end`: 入力と対称にするため、ユーザー視点の包含終了日（1日予定は `end == start`）を返す。
+- `id`: `google_calendar:<calendarId>:<eventId>`（Phase 2には `id` を入力に取るSchedule Toolはない）。
+- 終日予定の `end`: ユーザー視点の包含終了日（1日予定は `end == start`）。
 
-### Q5. Inbox外TaskのUpdate / Complete
+### Q5. Inbox外TaskのUpdate / Complete（合意済み）
 
-`task_list` はInboxのみが対象だが、`task_update` / `task_complete` はID指定のため、Inbox外（ユーザーがTodoist上で移動したTask）のIDも操作できる。IDはSoTから取得したものであり制限する理由が薄いため**制限しない**ことを提案する。Inbox内に限定すべき場合は指示いただきたい。
+ID指定の `task_update` / `task_complete` はInbox外のTaskも制限しない。
 
 ### Q6. Todoist固有の挙動
 
-- **繰り返しTask**: `task_complete` は次回分へ進む（完全には完了しない）。`task_update` で `due` を変更すると繰り返し設定が失われる。Phase 2では特別扱いせず、Tool Descriptionに注意を記載する。
+- **繰り返しTask**: `task_complete` は次回分へ進み、Taskは未完了のまま残る。close後に再取得してSoTの状態を返す（§6.4）。`task_update` で `due` を変更すると繰り返し設定が失われる。Tool Descriptionに両方を記載する。
 - **Label更新の競合**: `task_update` はGET → POSTでLabelを差し替えるため、同時に別ClientがLabelを変更すると後勝ちになる。個人利用のため許容する。
-- **Labelの自動作成・大文字小文字**: 未作成のLabel名を指定した場合の自動作成、`af-*` Labelの大文字小文字の扱いはIntegration Testで確認する。
+- **Labelの自動作成・大文字小文字**: 未作成のLabel名を指定した場合の自動作成、`af-*` Labelの大文字小文字の扱いはIntegration Testで確認する。`af-` Prefixの判定は大文字小文字を区別しない側に倒している。
 
-### Q7. Google OAuthの運用
+### Q7. Google OAuthの運用（合意済み）
 
 - OAuth同意画面が「Testing」状態の外部アプリでは、**Refresh Tokenが7日で失効する**。継続利用には「In production」へ変更（未確認アプリ警告は出るが個人利用は可能）するか、Google Workspaceの内部アプリにする必要がある。README手順に明記する。
-- 書き込み先をScopeで技術的に制限する案として、`calendar.app.created`（アプリが作成したCalendarのみ操作可能）がある。採用する場合は専用Calendarをアプリ経由で作成する手順が必要になり、閲覧用Scopeとの組み合わせ検証も要るため、Phase 2ではConnectorでの固定（仕様どおり）とし、将来検討とする。
+- 書き込み先をScopeで技術的に制限する案として、`calendar.app.created`（アプリが作成したCalendarのみ操作可能）がある。Phase 2では採用せず、`calendar.events` Scopeのもとで専用Calendar固定をConnectorのHard Ruleとして維持する（§7.1）。
 
-### Q8. `schedule_list` の失敗時挙動
+### Q8. `schedule_list` の失敗時挙動（MVPでは合意済み）
 
-一部Calendarの取得失敗時に全体をErrorとする（部分結果を返すと「予定がない」と誤解されるため）。共有Calendarの権限変更等で日常的に失敗する場合は、部分結果 + 失敗Calendarの警告を返す方式へ変更を検討する。
+一部Calendarの取得失敗時は全体をErrorとする。共有Calendarの権限変更等で日常的に失敗する場合は、部分結果 + 失敗Calendarの警告を返す方式へ変更を検討する。
 
-### Q9. Connector未設定時もToolを公開する
+### Q9. Connector未設定時もToolを公開する（合意済み）
 
-Credentialの有無に関わらず6 Toolを常に登録し、呼び出し時にCredential / Configuration Errorを返す。AI ClientがToolを認識でき、原因をMessageで判断できるため。Phase 1の「公開Tool 0件」前提のテストは変更する。
+Credentialの有無に関わらず6 Toolを常に登録し、呼び出し時にCredential / Configuration Errorを返す。Phase 1の「公開Tool 0件」前提のテストは変更する。
 
-### Q10. Tool InputをstrictObjectにする
+### Q10. Tool InputをstrictObjectにする（合意済み）
 
-未知Keyを黙って捨てると、`calendar_id` や `project_ref` が無視されたことにAIもユーザーも気付けないため、明示的にValidation Errorとする。LLM Clientが余計なKeyを付与しがちな場合は再検討する。
+未知Key（`calendar_id`, `project_ref` 等）はValidation Errorとする。
 
-### Q11. `tags` に管理用Label名を指定した場合
+### Q11. `af-*` Namespaceの予約（レビュー反映）
 
-`af-next` 等を `tags` に含めた場合は `InputValidationError` とする（黙って除外すると意図と異なる状態になるため）。
+`af-` で始まるLabelをすべてAI Foundation管理用Namespaceとして扱う。`tags` 入力で `af-` Prefixを拒否し（§5.1）、Todoist → Domain変換でも `af-*` を `tags` へ含めず、`task_update` の `tags` 置換でも `af-*` Labelを保持する（§6.2、§6.4）。
 
-### Q12. Phase 1 Schemaの変更
+### Q12. Phase 1 Schemaの変更（レビュー反映）
 
 - `ScheduleSchema.start` / `end` をDateTimeのみ → Date or DateTimeへ拡張する。MVP §5.3（`date | datetime`）とPhase 2仕様に合わせるもの。
-- Input Schemaから `project_ref`（Task）、`related_task`（Schedule）を削除する。Phase 2仕様の「入力として扱わない」に従う。Entity Schemaには残す。
+- `related_task` は `ScheduleCreateInputSchema` と `ScheduleSchema`（Entity）の両方から削除する。MVP §5.3からも削除済み。
+- Task Input Schemaから `project_ref` を削除する。`TaskSchema`（Entity）には残す（MVP §5.2に定義あり）。
 
 ### その他
 
 - **Timezone表記**: Taskの時刻付き `due` はTodoistへUTCで送るため、取得時の表記（Offset）が入力と異なる場合がある（同一時刻）。
-- **Tool Description**: 自然言語日時はClientが解釈すること、`defaults.timezone`（Config値を埋め込む）、IDの取得方法（`task_list` → `id`）、完了は `task_complete`、予定は専用Calendarへ作成されることを記載する。MVP §15のInstructions本文は変更しない。
-- **Rate Limit**: Retryは実装しない。429は `ProviderApiError` として返す。
-- **MCP Tool Annotations**: `task_list` / `schedule_list` に `readOnlyHint: true`、その他は `destructiveHint: false` を付与する。
+- **Tool Description**: 自然言語日時はClientが解釈してOffset付きで渡すこと、ユーザーの既定Timezone（`defaults.timezone` を埋め込む）、IDの取得方法（`task_list` → `id`）、完了は `task_complete`、繰り返しTaskの挙動（Q6）、予定は専用Calendarへ作成されることを記載する。MVP §15のInstructions本文は変更しない。
+- **Rate Limit**: 独自のRetryは実装しない。429は `ProviderApiError` として返す。
+- **MCP Tool Annotations**: MCPの `destructiveHint: false` は「追加的な更新のみ」を意味するため、既存データを変更するToolには付けない。
+
+  | Tool | Annotation |
+  |---|---|
+  | `task_list`, `schedule_list` | `readOnlyHint: true` |
+  | `task_create`, `schedule_create` | `readOnlyHint: false`, `destructiveHint: false` |
+  | `task_update`, `task_complete` | `readOnlyHint: false`, `destructiveHint: true` |
+
+  全Toolで `openWorldHint: true`（外部Serviceを操作するため）。
+
+---
+
+## 17. Review対応履歴
+
+### rev.2（PR #3 レビュー反映）
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| 1 | Todoist SDKのNode要件を再確認し、SDK採用を第一候補に | `@doist/todoist-sdk ^15.3.1` を採用。Connectorは `Pick<TodoistApi, ...>` のInterfaceに依存し、テストはFake Clientで行う。README（20.18.1+）と公開Packageの `engines`（`>=24`）の食い違いを記載し、Repositoryの `engines` の扱いをQ1で確認（§6.1、§11、§12.4、Q1） |
+| 2 | `ScheduleSchema.related_task` も削除 | Entity / Inputの両方から削除（§3、§5.2、§12.2、Q12） |
+| 3 | Timed Eventに `defaults.timezone` を強制しない | `dateTime` は入力Offsetのまま送り、`timeZone` を付けない。`defaults.timezone` はDate-only境界とFloating datetime解釈のみに使う（§7.2、§12.5） |
+| 4 | Tool Annotationの修正 | create = `destructiveHint: false`、update / complete = `destructiveHint: true`（§16 その他） |
+| 5 | 繰り返しTaskで `task_complete` が常に `done` を返す矛盾 | close後に再取得し、未完了なら次回分のTaskを、完了 / 404なら `done` を返す。Integration Testで実挙動を確認（§6.4、§12.4、§13.1） |
+| 6 | `af-*` をNamespaceとして扱う | `tags` 入力で `af-` Prefixを拒否（Domain）、Todoist → Domainで `af-*` を `tags` から除外、`tags` 置換で `af-*` を保持（§5.1、§6.2、§6.4、Q11） |
+| 他 | `external_ref` のTask URL | API v1に `url` Propertyがないため `https://app.todoist.com/app/task/<id>` を組み立てる（§5.1） |
+| 他 | Repository状態の更新 | Base `4a66f7e` と、それまでのコミットを記載（§1） |
+| 他 | `calendar.events` Scopeの扱い | 専用Calendar固定をConnectorのHard Ruleとして明記（§7.1、Q7） |
