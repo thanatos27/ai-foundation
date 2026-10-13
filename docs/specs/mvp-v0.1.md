@@ -265,10 +265,8 @@ Schema:
 type: schedule
 title: string
 
-start: datetime
-end: datetime | null
-
-related_task: string | null
+start: date | datetime
+end: date | datetime | null
 
 tags: string[]
 ```
@@ -517,7 +515,6 @@ Input:
   "status": "inbox | next | waiting | someday",
   "due": "datetime | null",
   "area": "work | personal | null",
-  "project_ref": "string | null",
   "tags": ["string"]
 }
 ```
@@ -532,7 +529,6 @@ Input:
   "area": "work",
   "due_before": "datetime | null",
   "due_after": "datetime | null",
-  "project_ref": "string | null",
   "tags": ["string"]
 }
 ```
@@ -544,9 +540,8 @@ Input:
 ```json
 {
   "title": "string",
-  "start": "datetime",
-  "end": "datetime | null",
-  "related_task": "string | null"
+  "start": "date | datetime",
+  "end": "date | datetime | null"
 }
 ```
 
@@ -747,6 +742,7 @@ sources:
 
   schedule:
     provider: google_calendar
+    writable_calendar_id: "<AI Foundation Calendar ID>"
 
   collection:
     provider: notion
@@ -918,6 +914,8 @@ schedule_list
 ```
 
 このPhase終了時点で日常タスク管理に利用可能とする。
+
+詳細なScopeとAcceptance Criteriaは[Phase 2 Design Issue](phase-2-task-schedule.md)を参照する。
 
 ---
 
