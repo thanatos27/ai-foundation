@@ -16,7 +16,7 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 3 — Collection。Todoist・Google Calendar・Notionへ実際に接続し、以下のToolを公開している。
+Phase 4 — Knowledge。Todoist・Google Calendar・Notion・Obsidian Vaultへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -29,10 +29,16 @@ Phase 3 — Collection。Todoist・Google Calendar・Notionへ実際に接続し
 | `collection_create` | Notionの専用Collectionへ本・ゲーム・映画等を作成（title / collection_type / status / metadata / tags / note） |
 | `collection_search` | 専用CollectionをTitle部分一致・collection_type・status・tags（AND）で検索 |
 | `collection_update` | `notion:<page-id>` を指定して部分更新（status / metadata（shallow merge）/ tags（置換）/ append_note（本文末尾へ追記）） |
+| `knowledge_create` | Obsidian VaultのKnowledge Directory直下へMarkdownを新規作成（title / description / content / area / tags）。既存ファイルは上書きしない |
+| `knowledge_search` | Knowledge Directory以下を再帰的に検索（query: title / description / tags / 本文の部分一致、area、tags（AND））。本文全文ではなくsnippetを返す |
+| `knowledge_get` | `obsidian:<vault-relative-path>` を指定してMetadataと本文全文を取得 |
+| `knowledge_append` | `obsidian:<vault-relative-path>` を指定して本文末尾へ追記（Frontmatterは変更しない） |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
 
 CollectionItemの `status` は自由文字列（例: `wishlist` / `playing` / `read`）で、NotionのSelect optionとして保存する。`metadata` は自由形式のObjectで、`Metadata` PropertyにJSON文字列として保存する。感想・読書メモ等の長文は `note` / `append_note` でPage本文の末尾へParagraphとして追記する。
+
+Knowledgeは1件 = 1 Markdown file（UTF-8）で、`title` / `description` / `area` / `tags` をYAML Frontmatterに持つ。IDはVault相対パス（`obsidian:AI Foundation/Knowledge/CAP定理.md`）で、ローカルの絶対パスは含まない。ObsidianでファイルをKnowledge Directory内の別フォルダへ移動するとIDが変わる（旧IDはNot foundになり、`knowledge_search` で新しいIDが見つかる）。
 
 ## Getting Started
 
@@ -62,7 +68,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信しない。実際のTodoist / Google Calendar / Notionに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` を設定したうえで明示的に実行する。Credentialが設定されていないServiceのTestはskipされる。テストで作成したTask / Eventは終了時に削除し、NotionのPageはゴミ箱へ移す。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledgeのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vaultに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir`）で実行する。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -98,7 +104,7 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
 
 ### ローカル設定（`config.local.yaml`）
 
-予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）とCollectionのNotion Data Source ID（`sources.collection.data_source_id`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
 
 ```yaml
 sources:
@@ -108,9 +114,35 @@ sources:
   collection:
     provider: notion
     data_source_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  knowledge:
+    default: obsidian
+    providers:
+      - obsidian
+    obsidian:
+      storage: filesystem
+      vault_path: "C:/Users/you/Documents/Obsidian/MyVault"
+      knowledge_dir: "AI Foundation/Knowledge"
 ```
 
-未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 ToolがConfiguration Errorになる。
+未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 ToolがConfiguration Errorになる。
+
+### Obsidian
+
+KnowledgeはObsidian VaultのMarkdownとしてFilesystem経由で読み書きする。Credentialは不要。
+
+1. Vault内にAI Foundation用のKnowledge Directory（例: `AI Foundation/Knowledge`）を作成する。AI Foundationは自動作成しない
+2. `config.local.yaml` の `sources.knowledge.obsidian` に `vault_path`（Vaultの絶対パス）と `knowledge_dir`（Vault相対パス、`/` 区切り）を設定する。YAMLでWindowsのパスを書く場合は `/` 区切り（`"C:/Users/..."`）か単一引用符（`'C:\Users\...'`）にする（二重引用符内の `\` はEscapeになる）
+
+読み書きは `knowledge_dir` 以下の `.md` だけに限定される。`knowledge_create` は `knowledge_dir` 直下に作成し、`knowledge_search` はサブフォルダも含めて検索する。Obsidian上でファイルを編集・サブフォルダへ移動・削除してよく、次のTool呼び出しで現在のファイル状態が反映される（独自のIndexやCacheは持たない）。
+
+- ファイル名は `title` から作る。OSやObsidianのLinkで使えない文字（`/ \ : * ? " < > | # ^ [ ]`）は空白に置き換える。同名ファイルが既にあれば上書きせずErrorになる
+- `tags` はObsidianのTag規則に従う（`#` なし、空白なし、英字・数字・`_` `-` `/`・日本語等、数字だけは不可）。比較は大文字小文字を区別しない
+- `knowledge_append` は本文末尾へ段落として追記するだけで、Frontmatter・既存本文は変更しない。日時や見出しは付けない
+- Frontmatterが壊れている（YAMLとして読めない、`area` が `work` / `personal` 以外、`tags` がTag規則に合わない等）ファイルは検索結果から除外され（stderrに件数とPathを出す）、`knowledge_get` / `knowledge_append` はErrorになる。AI Foundationは自動修復しないので、Obsidianで直す
+- FrontmatterのないMarkdownも扱える（titleはファイル名）。AI Foundationが知らないFrontmatter Key（`aliases` 等）はそのまま残る
+- `vault_path` 自体は同期フォルダへのSymbolic Link / Junctionでもよいが、Vaultから `knowledge_dir` までと `knowledge_dir` の内側のSymbolic Link / Junctionは辿らない（Configuration ErrorまたはInput Validation Error）
+
+VaultはGoogle Drive等の同期フォルダに置いてよい。AI Foundationは同期を管理せず、手元のFilesystemに見えている状態だけを扱う。同期の競合で作られたファイル（`CAP定理 (1).md` 等）も通常のKnowledgeとして検索される。Google Drive for desktopを「ストリーミング」で使うと検索のたびにファイルの読み込みが発生して遅くなるため、Vaultのフォルダは「ミラーリング」（またはオフラインで使用可能）を推奨する。
 
 ## Credentials
 
@@ -200,8 +232,8 @@ src/
 ├─ domain/       Provider非依存のEntity / Tool Input Schema（Zod）
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
-├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/）
-├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts）
+├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts）
 ├─ shared/       Timezone計算などの共通処理
 ├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
@@ -233,5 +265,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Phase 2 Implementation Plan](docs/plans/phase-2-implementation-plan.md)
 - [Phase 3 Design Issue](docs/specs/phase-3-collection.md)
 - [Phase 3 Implementation Plan](docs/plans/phase-3-implementation-plan.md)
+- [Phase 4 Design Issue](docs/specs/phase-4-knowledge.md)
+- [Phase 4 Implementation Plan](docs/plans/phase-4-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

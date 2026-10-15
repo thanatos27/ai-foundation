@@ -1068,3 +1068,45 @@ Plan Reviewで判断をお願いした項目。PR #6 レビューでQ1〜Q6, Q8�
 | 指摘 | 対応 |
 |---|---|
 | [P2] recursive searchが仕様より狭い（dot-prefixed entry除外 + depth 32上限） | §15.1: dot始まりのFile / Directoryを除外せず、固定の深さ上限も撤廃（symlinkを辿らないため循環しない）。§10.2: dot始まりsegmentの拒否（旧規則8）を削除し、searchで返したIDをそのままget / appendできるようにした。§11.1の `knowledge_dir` 形式検証からもdot始まりsegmentの禁止を外して整合。§8.1のdoc comment、§24.3 / §24.4 / §24.5のTestを更新。将来 `.obsidian` 等を除外する場合は明示的なignore仕様として追加する |
+
+---
+
+## 31. 実装・Integration Verificationで確定した事項
+
+実装（`feat/phase-4-knowledge`）、検証用Vault・実Vault（Google Drive同期フォルダ内）に対するIntegration Test、Obsidianアプリでの手動確認、Claude CodeからのLLM Client Verificationで確定した事項。
+
+### 31.1 Verification結果
+
+| 項目 | 結果 |
+|---|---|
+| Automated Test（`npm test`） | 776件中772件成功、4件skip（Windowsでファイルsymlinkの作成権限がない環境のためのファイルsymlinkケース。Directory Junctionのケースはすべて実行） |
+| Integration Test（`tests/integration/obsidian.integration.test.ts`） | 検証用Vault・実Vaultとも5件成功。作成ファイルはテスト終了時に削除され残らない |
+| 作成ファイルの形式 | UTF-8（BOMなし）、LFのみ、末尾改行あり。Frontmatterは `title` → `description` → `area` → `tags` の順 |
+| ObsidianでのProperties表示 | title / description / area / tags がPropertiesとして表示され、tagsはTagとして認識される |
+| Obsidianで編集したFrontmatterの再読込 | Obsidian上で `分散システム` → `distributed-systems` に変更後、次の `knowledge_search({ tags: ["distributed-systems"] })` / `knowledge_get` に反映 |
+| Obsidianで移動 | `Knowledge/CAP定理.md` → `Knowledge/分散システム/CAP定理.md` へ移動後、旧idの `knowledge_get` は `NotFoundError`、searchで新idを再発見 |
+| append | 既存本文の末尾に空行1つを挟んで追記され、Frontmatterは不変 |
+| Google Drive同期 | Vaultは同期フォルダ内（`.tmp.driveupload` あり）。AI Foundationは同期に関与せず、ローカルFilesystemの状態のみで動作 |
+
+### 31.2 LLM Client Verification（Claude Code）
+
+| # | 発話 | Tool呼び出し |
+|---|---|---|
+| 1 | 「今日CAP定理について理解した内容をメモして」 | `knowledge_search`（重複確認）→ `knowledge_create` |
+| 2 | 「CAP定理について前に何をメモした？」 | `knowledge_search` → exact id → `knowledge_get` |
+| 3 | 「CAP定理のメモにPACELCについて追記して」 | `knowledge_search` → exact id → `knowledge_append`（重複作成なし） |
+| 4 | 「distributed-systemsタグのメモを探して」 | `knowledge_search({ tags: ["distributed-systems"] })`。Tag変更前は0件（付いていたのは `分散システム`）、Obsidianでの変更・移動後は新idで1件 |
+
+### 31.3 Plan外の追加（Implementation Reviewで確認してほしい点）
+
+- **Metadata非変更のTool Description明記**: LLM Client Verification #4で、Claudeが「タグを付け替えることもできます」と申し出た（Phase 4にFrontmatter更新Toolはない）。`knowledge_create` / `knowledge_append` のDescriptionに「title / description / area / tags は作成後に変更できず、更新Toolもないので申し出ない。ユーザーがObsidianで編集し、次回呼び出しで読まれる」旨を追加した（`0ceb519`）。
+- **走査から除外する名前**: `knowledge_search` の走査では、ID規則（§10.2）で表せない名前（`\` や制御文字を含むファイル名。Linux等でのみ作成可能）を持つエントリを返さない。searchが返すIDは必ずget / appendで受け付けられる（§15.1の対称性を保つため）。
+
+### 31.4 Implementation Review対応（PR #7）
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] `..` で始まる通常の名前（`..note.md`、`..archive/`）を範囲外と誤判定し、searchが全体で失敗する | `isInside` の親ディレクトリ判定を `rel === '..'` または `rel` が `..` + OSのパス区切りで始まる場合に限定。`..note.md` / `..archive/note.md` をsearch・get・appendできる回帰Test（Storage / Connector）を追加 |
+| [P2] search / get / append にも既定Providerが適用され、`default: google_drive` でObsidianに明示作成したノートを取得・追記できない | §9.1どおり、既定Providerの適用を `knowledge_create` の `source` 省略 / `auto` に限定し、search / get / append は常にObsidianとして解決（`providers` にobsidianがなければ `ConfigurationError`）。上記Configで明示create後にsearch / get / appendできる回帰Testを追加 |
+
+再レビュー（対象 `b6bc5c5`）: 上記2件の解消を確認、追加の指摘なし。`..note.md` / `..archive/note.md` のsearch / get / appendの成功、`..` によるTraversalとKnowledge Directory外IDの拒否、`default: google_drive` 設定での明示create後のsearch / get / append、source省略 / `auto` のcreateが引き続き `ConfigurationError` になること、providersからObsidianを外した場合の拒否が確認された。

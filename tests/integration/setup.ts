@@ -5,7 +5,7 @@ import type { Config } from '../../src/config/schema.js';
 import { EnvCredentialProvider } from '../../src/credentials/env.js';
 
 /**
- * Integration tests talk to the real Todoist / Google Calendar accounts configured locally.
+ * Integration tests talk to the real Todoist / Google Calendar / Notion accounts and Obsidian vault configured locally.
  * They run only with AI_FOUNDATION_INTEGRATION=1, read credentials from the environment or the
  * repository's .env, and the config from AI_FOUNDATION_CONFIG (else config.local.yaml, else config.yaml).
  */
