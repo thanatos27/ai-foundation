@@ -1101,3 +1101,10 @@ Plan Reviewで判断をお願いした項目。PR #6 レビューでQ1〜Q6, Q8�
 
 - **Metadata非変更のTool Description明記**: LLM Client Verification #4で、Claudeが「タグを付け替えることもできます」と申し出た（Phase 4にFrontmatter更新Toolはない）。`knowledge_create` / `knowledge_append` のDescriptionに「title / description / area / tags は作成後に変更できず、更新Toolもないので申し出ない。ユーザーがObsidianで編集し、次回呼び出しで読まれる」旨を追加した（`0ceb519`）。
 - **走査から除外する名前**: `knowledge_search` の走査では、ID規則（§10.2）で表せない名前（`\` や制御文字を含むファイル名。Linux等でのみ作成可能）を持つエントリを返さない。searchが返すIDは必ずget / appendで受け付けられる（§15.1の対称性を保つため）。
+
+### 31.4 Implementation Review対応（PR #7）
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] `..` で始まる通常の名前（`..note.md`、`..archive/`）を範囲外と誤判定し、searchが全体で失敗する | `isInside` の親ディレクトリ判定を `rel === '..'` または `rel` が `..` + OSのパス区切りで始まる場合に限定。`..note.md` / `..archive/note.md` をsearch・get・appendできる回帰Test（Storage / Connector）を追加 |
+| [P2] search / get / append にも既定Providerが適用され、`default: google_drive` でObsidianに明示作成したノートを取得・追記できない | §9.1どおり、既定Providerの適用を `knowledge_create` の `source` 省略 / `auto` に限定し、search / get / append は常にObsidianとして解決（`providers` にobsidianがなければ `ConfigurationError`）。上記Configで明示create後にsearch / get / appendできる回帰Testを追加 |
