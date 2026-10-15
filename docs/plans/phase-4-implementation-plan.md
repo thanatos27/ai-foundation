@@ -1108,3 +1108,5 @@ Plan Reviewで判断をお願いした項目。PR #6 レビューでQ1〜Q6, Q8�
 |---|---|
 | [P2] `..` で始まる通常の名前（`..note.md`、`..archive/`）を範囲外と誤判定し、searchが全体で失敗する | `isInside` の親ディレクトリ判定を `rel === '..'` または `rel` が `..` + OSのパス区切りで始まる場合に限定。`..note.md` / `..archive/note.md` をsearch・get・appendできる回帰Test（Storage / Connector）を追加 |
 | [P2] search / get / append にも既定Providerが適用され、`default: google_drive` でObsidianに明示作成したノートを取得・追記できない | §9.1どおり、既定Providerの適用を `knowledge_create` の `source` 省略 / `auto` に限定し、search / get / append は常にObsidianとして解決（`providers` にobsidianがなければ `ConfigurationError`）。上記Configで明示create後にsearch / get / appendできる回帰Testを追加 |
+
+再レビュー（対象 `b6bc5c5`）: 上記2件の解消を確認、追加の指摘なし。`..note.md` / `..archive/note.md` のsearch / get / appendの成功、`..` によるTraversalとKnowledge Directory外IDの拒否、`default: google_drive` 設定での明示create後のsearch / get / append、source省略 / `auto` のcreateが引き続き `ConfigurationError` になること、providersからObsidianを外した場合の拒否が確認された。
