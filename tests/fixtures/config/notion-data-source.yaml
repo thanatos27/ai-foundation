@@ -1,0 +1,22 @@
+# Valid config with a (fake) collection data source, for the e2e tests.
+version: "0.1"
+
+defaults:
+  area: personal
+  timezone: Asia/Tokyo
+
+sources:
+  task:
+    provider: todoist
+  schedule:
+    provider: google_calendar
+  collection:
+    provider: notion
+    data_source_id: "11111111-2222-3333-4444-555555555555"
+  knowledge:
+    default: obsidian
+    providers:
+      - obsidian
+  project:
+    providers:
+      - github

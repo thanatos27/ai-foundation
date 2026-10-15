@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Config } from '../config/schema.js';
 import type { Connectors } from '../connectors/types.js';
+import { registerCollectionTools } from './collection.js';
 import { registerScheduleTools } from './schedule.js';
 import { registerTaskTools } from './task.js';
 
@@ -20,4 +21,5 @@ export interface ToolContext {
 export function registerTools(server: McpServer, context: ToolContext): void {
   registerTaskTools(server, context);
   registerScheduleTools(server, context);
+  registerCollectionTools(server, context);
 }

@@ -16,7 +16,7 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 2 — Task / Schedule。TodoistとGoogle Calendarへ実際に接続し、以下のToolを公開している。
+Phase 3 — Collection。Todoist・Google Calendar・Notionへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -26,8 +26,13 @@ Phase 2 — Task / Schedule。TodoistとGoogle Calendarへ実際に接続し、�
 | `task_complete` | `todoist:<id>` を指定して完了 |
 | `schedule_create` | AI Foundation専用Calendarへ予定を作成（時刻予定 / 終日予定） |
 | `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得 |
+| `collection_create` | Notionの専用Collectionへ本・ゲーム・映画等を作成（title / collection_type / status / metadata / tags / note） |
+| `collection_search` | 専用CollectionをTitle部分一致・collection_type・status・tags（AND）で検索 |
+| `collection_update` | `notion:<page-id>` を指定して部分更新（status / metadata（shallow merge）/ tags（置換）/ append_note（本文末尾へ追記）） |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
+
+CollectionItemの `status` は自由文字列（例: `wishlist` / `playing` / `read`）で、NotionのSelect optionとして保存する。`metadata` は自由形式のObjectで、`Metadata` PropertyにJSON文字列として保存する。感想・読書メモ等の長文は `note` / `append_note` でPage本文の末尾へParagraphとして追記する。
 
 ## Getting Started
 
@@ -57,7 +62,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信しない。実際のTodoist / Google Calendarに対するIntegration Testは、Credentialと `writable_calendar_id` を設定したうえで明示的に実行する。テストで作成したTask / Eventは終了時に削除する。
+`npm test` は外部Serviceへ通信しない。実際のTodoist / Google Calendar / Notionに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` を設定したうえで明示的に実行する。Credentialが設定されていないServiceのTestはskipされる。テストで作成したTask / Eventは終了時に削除し、NotionのPageはゴミ箱へ移す。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -93,16 +98,19 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
 
 ### ローカル設定（`config.local.yaml`）
 
-予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）とCollectionのNotion Data Source ID（`sources.collection.data_source_id`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
 
 ```yaml
 sources:
   schedule:
     provider: google_calendar
     writable_calendar_id: "xxxxxxxx@group.calendar.google.com"
+  collection:
+    provider: notion
+    data_source_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-未設定でもServerは起動し、`schedule_create` だけがConfiguration Errorになる。
+未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 ToolがConfiguration Errorになる。
 
 ## Credentials
 
@@ -131,6 +139,32 @@ Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app
 
 `invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する。
 
+### Notion
+
+AI Foundation専用のCollection Databaseを1つ用意し、Internal Connection（Integration）を共有する。種類（book / game 等）ごとにDatabaseを分けず、種類別・Status別の一覧はNotionのViewで作る。
+
+1. NotionでDatabase「AI Foundation Collection」を作成する
+2. 以下のPropertyを作成する（名前は大文字小文字まで一致させる）
+
+   | Property | 種類 |
+   |---|---|
+   | `Name` | Title（既定のTitle Property） |
+   | `Type` | Select（`game` / `book` / `movie` / `other`。**小文字で**作る。`Book` のように大文字小文字だけが異なるoptionがあるとConfiguration Errorになる） |
+   | `Status` | **Select**（NotionのStatus型ではない。Status型はAPIから任意の値を書き込めない） |
+   | `Tags` | Multi-select |
+   | `Metadata` | Text |
+
+3. [Integrations](https://www.notion.so/profile/integrations) でInternal Integrationを作成する。Capabilitiesは Read content / Update content / Insert content を有効にする
+4. 作成したIntegrationのTokenを `NOTION_API_TOKEN` に設定する
+5. Databaseのメニュー（`•••`）→ Connections から、作成したIntegrationを追加する
+6. DatabaseのData Source IDを取得し、`config.local.yaml` の `sources.collection.data_source_id` に設定する（Databaseのメニュー → Data sourcesの設定から「Copy data source ID」）
+
+Propertyの不足・型の違い、Integrationが共有されていないData Sourceは、Collection Toolの初回呼び出し時にConfiguration Errorとして原因を返す。Propertyを直した後はServerを再起動する（Schemaの確認はProcessごとに1回）。
+
+StatusやTagにNotion上に存在しない値を指定すると、Select optionが自動で追加される。使われなくなったoptionは自動では削除されないため、必要に応じてNotion上で整理する。既存のoptionと大文字小文字だけが異なる値（例: 既存 `rpg` に対して `RPG`）は、既存のoptionとして扱われ、既存の表記で保存される。Select optionの名前にはカンマを使えない。
+
+Page本文の内容はAI Foundationからは変更・削除せず、`note` / `append_note` を末尾へ追記するだけ。Notion上で直接編集してよいが、`Metadata` はJSON Objectの形を保つ（JSONとして読めない場合、検索結果に `metadata` が含まれず、`metadata` の更新はErrorになる）。`Type` が空または4種以外のPageは検索結果に含まれない。
+
 ## Register with an MCP Client
 
 Build後、`dist/index.js` の絶対パスを指定して登録する。MCP Clientは任意のディレクトリでServerを起動するため、パスは絶対パスで指定する。
@@ -155,7 +189,7 @@ args = ["/absolute/path/to/ai-foundation/dist/index.js"]
 claude mcp add ai-foundation -- node /absolute/path/to/ai-foundation/dist/index.js --config /absolute/path/to/ai-foundation/config.local.yaml
 ```
 
-`.env` を使わずMCP Client側でCredentialを渡す場合は、`claude mcp add` の `-e TODOIST_API_TOKEN=...` や、Codexの `env` を使う。`--no-env-file` を付けると `.env` を読み込まない。
+`.env` を使わずMCP Client側でCredentialを渡す場合は、`claude mcp add` の `-e TODOIST_API_TOKEN=...`（Notionは `-e NOTION_API_TOKEN=...`） や、Codexの `env` を使う。`--no-env-file` を付けると `.env` を読み込まない。
 
 ## Development
 
@@ -166,8 +200,8 @@ src/
 ├─ domain/       Provider非依存のEntity / Tool Input Schema（Zod）
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
-├─ connectors/   Connector境界と実装（todoist/, google-calendar/）
-├─ tools/        MCP Toolの登録（task.ts, schedule.ts）
+├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts）
 ├─ shared/       Timezone計算などの共通処理
 ├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
@@ -197,5 +231,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Phase 1 Implementation Plan](docs/plans/phase-1-implementation-plan.md)
 - [Phase 2 Design Issue](docs/specs/phase-2-task-schedule.md)
 - [Phase 2 Implementation Plan](docs/plans/phase-2-implementation-plan.md)
+- [Phase 3 Design Issue](docs/specs/phase-3-collection.md)
+- [Phase 3 Implementation Plan](docs/plans/phase-3-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

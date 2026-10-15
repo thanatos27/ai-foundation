@@ -1,5 +1,5 @@
-import type { ScheduleConnector, TaskConnector } from '../../src/connectors/types.js';
-import type { Schedule, Task } from '../../src/domain/index.js';
+import type { CollectionConnector, ScheduleConnector, TaskConnector } from '../../src/connectors/types.js';
+import { type CollectionItem, mergeMetadata, type Schedule, type Task } from '../../src/domain/index.js';
 
 /** In-memory task connector that records the domain input of every call. */
 export class FakeTaskConnector implements TaskConnector {
@@ -74,5 +74,58 @@ export class FakeScheduleConnector implements ScheduleConnector {
     this.calls.push({ method: 'list', arg: filter });
     if (this.failWith) throw this.failWith;
     return this.schedules;
+  }
+}
+
+/** In-memory collection connector that records the domain input of every call. */
+export class FakeCollectionConnector implements CollectionConnector {
+  readonly calls: { method: keyof CollectionConnector; arg: unknown }[] = [];
+  failWith: Error | undefined;
+  items: CollectionItem[] = [];
+
+  private record(method: keyof CollectionConnector, arg: unknown): void {
+    this.calls.push({ method, arg });
+    if (this.failWith) throw this.failWith;
+  }
+
+  async create(input: Parameters<CollectionConnector['create']>[0]): Promise<CollectionItem> {
+    this.record('create', input);
+    const item: CollectionItem = {
+      id: `notion:${this.items.length + 1}`,
+      source: 'notion',
+      external_ref: `https://www.notion.so/${this.items.length + 1}`,
+      type: 'collection',
+      title: input.title,
+      collection_type: input.collection_type,
+      status: input.status,
+      metadata: input.metadata ?? {},
+      tags: input.tags ?? [],
+    };
+    this.items.push(item);
+    return item;
+  }
+
+  async search(filter: Parameters<CollectionConnector['search']>[0]): Promise<CollectionItem[]> {
+    this.record('search', filter);
+    return this.items;
+  }
+
+  async update(input: Parameters<CollectionConnector['update']>[0]): Promise<CollectionItem> {
+    this.record('update', input);
+    const current = this.items.find((item) => item.id === input.id) ?? {
+      id: input.id,
+      type: 'collection',
+      title: 'existing',
+      collection_type: 'other',
+      status: 'wishlist',
+      metadata: {},
+      tags: [],
+    };
+    return {
+      ...current,
+      ...(input.status !== undefined ? { status: input.status } : {}),
+      ...(input.metadata ? { metadata: mergeMetadata(current.metadata ?? {}, input.metadata) } : {}),
+      ...(input.tags ? { tags: input.tags } : {}),
+    };
   }
 }

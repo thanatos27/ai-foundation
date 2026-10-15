@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const fixture = (name: string) => fileURLToPath(new URL(`../fixtures/config/${name}`, import.meta.url));
 const invalidConfig = fixture('invalid-schema.yaml');
+const notionConfig = fixture('notion-data-source.yaml');
 
 /**
  * Runs src/index.ts through tsx, exactly as `npm run dev` does, without the developer's .env so
@@ -20,6 +21,7 @@ const CREDENTIAL_VARS = [
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',
   'GOOGLE_OAUTH_REFRESH_TOKEN',
+  'NOTION_API_TOKEN',
 ];
 
 function childEnv(extra: Record<string, string> = {}): Record<string, string> {
@@ -51,7 +53,17 @@ async function withStdioClient<T>(run: (client: Client) => Promise<T>, args: str
 const listToolsOverStdio = (args: string[] = [], env = childEnv()) =>
   withStdioClient((client) => client.listTools(), args, env);
 
-const TOOL_NAMES = ['schedule_create', 'schedule_list', 'task_complete', 'task_create', 'task_list', 'task_update'];
+const TOOL_NAMES = [
+  'collection_create',
+  'collection_search',
+  'collection_update',
+  'schedule_create',
+  'schedule_list',
+  'task_complete',
+  'task_create',
+  'task_list',
+  'task_update',
+];
 const toolNames = ({ tools }: { tools: { name: string }[] }) => tools.map((tool) => tool.name).sort();
 
 async function runExpectingFailure(args: string[], env = childEnv()) {
@@ -68,7 +80,7 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and lists the task and schedule tools', async () => {
+  it('starts with the repository config.yaml and lists the task, schedule and collection tools', async () => {
     expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
   });
 
@@ -76,6 +88,25 @@ describe('stdio server (e2e)', { timeout: 30_000 }, () => {
     const result = await withStdioClient((client) => client.callTool({ name: 'task_list', arguments: {} }));
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('Credential error: Todoist credential is not configured');
+  });
+
+  it('reports a missing collection data source on use', async () => {
+    const result = await withStdioClient((client) => client.callTool({ name: 'collection_search', arguments: {} }));
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain(
+      'Configuration error: sources.collection.data_source_id is not set',
+    );
+  });
+
+  it('reports a missing Notion token on use once the data source is configured', async () => {
+    const result = await withStdioClient(
+      (client) => client.callTool({ name: 'collection_search', arguments: {} }),
+      ['--config', notionConfig],
+    );
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain(
+      'Credential error: Notion credential is not configured: set NOTION_API_TOKEN',
+    );
   });
 
   it('uses AI_FOUNDATION_CONFIG when set', async () => {

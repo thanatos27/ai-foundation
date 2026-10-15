@@ -2,6 +2,8 @@ import type { Config } from '../config/schema.js';
 import type { CredentialProvider } from '../credentials/types.js';
 import { lazyCalendarApi } from './google-calendar/client.js';
 import { GoogleCalendarScheduleConnector } from './google-calendar/connector.js';
+import { lazyNotionClient } from './notion/client.js';
+import { NotionCollectionConnector } from './notion/connector.js';
 import { lazyTodoistClient } from './todoist/client.js';
 import { TodoistTaskConnector } from './todoist/connector.js';
 import type { Connectors } from './types.js';
@@ -18,6 +20,10 @@ export function createConnectors(config: Config, credentials: CredentialProvider
       api: lazyCalendarApi(credentials),
       writableCalendarId: config.sources.schedule.writable_calendar_id,
       timeZone,
+    }),
+    collection: new NotionCollectionConnector({
+      client: lazyNotionClient(credentials),
+      dataSourceId: config.sources.collection.data_source_id,
     }),
   };
 }

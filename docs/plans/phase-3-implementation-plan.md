@@ -724,7 +724,7 @@ SDK v5.27.0 がサポートする `2025-09-03`（SDK既定）と `2026-03-11` �
 
 成功した検証結果はプロセス存続中Memoizeする。起動後にNotion側でPropertyを変更した場合はNotionの400（`ProviderApiError`）になり、再起動で再検証される。毎回 `retrieve` するとRequest数が1回増える（Notion Rate Limit: 平均3 req/s）ため、Memoizeを推奨する。
 
-### Q8. Select option名の大文字小文字・正規化（合意済み: Integration Testで確定）
+### Q8. Select option名の大文字小文字・正規化（Integration Testで確定済み。§21）
 
 既存option `RPG` に対し `rpg` を書き込んだときに別optionが作られるか、既存に寄せられるかをIntegration Testで確認する。Connectorは正規化しない。結果に応じてTool Descriptionに「既存の表記に合わせる」旨を記載する。
 
@@ -832,3 +832,27 @@ rev.2で前回の3点（500KB制限、multi_select 100 options、option名100文
 | Q1 | 仕様の不整合をmainで修正済み | 解決済みとして反映（§3、§5.1、§17 Q1） |
 | Q2〜Q11 | 推奨案に賛成。Q4は除外件数をDomain出力へ追加しない | 「合意済み」として反映（§17） |
 | 他 | Repository状態のBaseを最新mainへ | Branchを `0fdcf5f` へrebaseし、§1を更新 |
+
+---
+
+## 21. 実装・Integration Verificationで確定した事項
+
+実装（`feat/phase-3-collection`）と実Notionに対するIntegration Testで確定した挙動。
+
+| 項目 | 結果 | 反映先 |
+|---|---|---|
+| `query`（`title.contains`）の大文字小文字 | **区別しない**（小文字化したqueryでも一致） | Integration Test |
+| 既存optionと大文字小文字だけ異なるStatus / Tag（Q8） | 新しいoptionは作られず、**既存optionとして既存の表記で保存される**（例: 既存 `af-it` に `AF-IT` → `af-it`）。Connectorは正規化しない | Tool Description、README、Integration Test |
+| 存在しないoption名 | 書き込み時に自動作成される（§9.1のとおり） | Integration Test |
+| 長いoption名（150文字超） | 受け付けられる。§9.2のとおり文字数のValidationは追加しない | Integration Test |
+| `external_ref`（`page.url`） | 現在は `https://app.notion.com/p/<slug>-<32桁ID>` 形式（§6.7の `https://www.notion.so/...` は例示であり、Notionが返すURLをそのまま使う） | Integration Test |
+| 2,000文字超のMetadata / Note、Tags 100件、約480KBのRequest | 分割保存・読み戻しとも成功 | Integration Test |
+| Page 404 / 未共有Data Source | `NotFoundError` / `ConfigurationError`（SDKのwarnログはstderrへ出る） | Integration Test |
+
+Implementation Review（PR #5）の指摘で追加:
+
+- **Type optionの大文字小文字**: Notionのoption名は大文字小文字を区別せず一意で、既存optionの表記が再利用される。`Type` に `Book` 等があると、`book` で作成したPageが `Book` で保存され、返却時に不正なTypeとしてErrorになる（保存済みのため再試行で重複する）。§6.3のSchema検証で、`game` / `book` / `movie` / `other` と大文字小文字だけが異なる `Type` optionを検出して `ConfigurationError`（表記修正を案内）とし、書き込み前に止める。回帰Test: 同じ入力の `create` を2回実行しても `pages.create` が呼ばれずPageが増えないこと。Fake Notion Clientも既存optionを大文字小文字を無視して再利用するようにした。
+
+Plan外の追加（Implementation Reviewで確認してほしい点）:
+
+- **検索結果の打ち切り**: `dataSources.query` の応答に `request_status: { type: 'incomplete', incomplete_reason: 'query_result_limit_reached' }` が付く場合があることをSDK型定義で確認した。黙って部分結果を返さないよう `ProviderApiError`（"the search result is incomplete ...; narrow the filter"）とする（§6.5の補足）。

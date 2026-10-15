@@ -84,6 +84,32 @@ describe('ConfigSchema', () => {
     ]);
   });
 
+  it('accepts a data source ID for collections', () => {
+    const config = validConfig();
+    const collection = { ...config.sources.collection, data_source_id: '0f9e3c1a-1111-2222-3333-444455556666' };
+    const result = ConfigSchema.safeParse({ ...config, sources: { ...config.sources, collection } });
+    expect(result.success && result.data.sources.collection.data_source_id).toBe('0f9e3c1a-1111-2222-3333-444455556666');
+  });
+
+  it('allows the collection data source ID to be omitted', () => {
+    const result = ConfigSchema.safeParse(validConfig());
+    expect(result.success && result.data.sources.collection.data_source_id).toBeUndefined();
+  });
+
+  it('rejects an empty collection data source ID', () => {
+    const config = validConfig();
+    const collection = { ...config.sources.collection, data_source_id: '' };
+    expect(issuePaths({ ...config, sources: { ...config.sources, collection } })).toEqual([
+      'sources.collection.data_source_id',
+    ]);
+  });
+
+  it('rejects a Notion token in the collection source', () => {
+    const config = validConfig();
+    const collection = { ...config.sources.collection, api_token: 'ntn_secret' };
+    expect(issuePaths({ ...config, sources: { ...config.sources, collection } })).toEqual(['sources.collection']);
+  });
+
   it('rejects an invalid default area', () => {
     const config = validConfig();
     config.defaults.area = 'study';

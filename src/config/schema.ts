@@ -33,7 +33,15 @@ export const ConfigSchema = z.strictObject({
        */
       writable_calendar_id: z.string().min(1).optional(),
     }),
-    collection: z.strictObject({ provider: z.enum(['notion']) }),
+    collection: z.strictObject({
+      provider: z.enum(['notion']),
+      /**
+       * The Notion data source AI Foundation reads from and writes to. Not a secret, but personal:
+       * keep it in a local config file rather than the committed config.yaml. Optional so the server
+       * still starts; the collection tools return a configuration error without it.
+       */
+      data_source_id: z.string().min(1).optional(),
+    }),
     knowledge: z
       .strictObject({
         default: KnowledgeSourceSchema,

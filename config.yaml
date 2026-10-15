@@ -21,6 +21,10 @@ sources:
 
   collection:
     provider: notion
+    # The AI Foundation Collection data source (required by the collection tools).
+    # This repository is public: do not set it here. Set it in config.local.yaml
+    # (see README "Notion").
+    # data_source_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
   knowledge:
     default: obsidian
