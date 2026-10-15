@@ -1,6 +1,7 @@
 import type {
   CollectionConnector,
   KnowledgeConnector,
+  ProjectConnector,
   ScheduleConnector,
   TaskConnector,
 } from '../../src/connectors/types.js';
@@ -9,6 +10,8 @@ import {
   type Knowledge,
   type KnowledgeSearchResult,
   mergeMetadata,
+  type ProjectGetResult,
+  type ProjectResult,
   type Schedule,
   type Task,
 } from '../../src/domain/index.js';
@@ -198,5 +201,39 @@ export class FakeKnowledgeConnector implements KnowledgeConnector {
         tags: [],
       }
     );
+  }
+}
+
+/** In-memory project connector that records the domain input of every call. */
+export class FakeProjectConnector implements ProjectConnector {
+  readonly calls: { method: keyof ProjectConnector; arg: unknown }[] = [];
+  failWith: Error | undefined;
+  projects: ProjectResult[] = [];
+
+  private record(method: keyof ProjectConnector, arg: unknown): void {
+    this.calls.push({ method, arg });
+    if (this.failWith) throw this.failWith;
+  }
+
+  async list(filter: Parameters<ProjectConnector['list']>[0]): Promise<ProjectResult[]> {
+    this.record('list', filter);
+    return this.projects;
+  }
+
+  async get(id: string): Promise<ProjectGetResult> {
+    this.record('get', id);
+    const [owner = '', name = ''] = id.slice('github:'.length).split('/');
+    return {
+      project: { id, type: 'project', title: name, source: 'github', external_ref: `https://github.com/${owner}/${name}` },
+      details: {
+        description: null,
+        owner,
+        default_branch: 'main',
+        visibility: 'public',
+        archived: false,
+        fork: false,
+        updated_at: '2026-10-15T13:00:00Z',
+      },
+    };
   }
 }
