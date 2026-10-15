@@ -169,7 +169,18 @@ describe('knowledge source resolution', () => {
         arguments: { title: 't', content: 'c', source: 'obsidian' },
       });
       expect(explicit.isError).toBeFalsy();
-      expect(fake.calls.map((call) => call.method)).toEqual(['create']);
+
+      // The default applies to knowledge_create only: the note created on Obsidian stays reachable.
+      const createdId = (explicit.structuredContent as { knowledge: { id: string } }).knowledge.id;
+      for (const [name, args] of [
+        ['knowledge_search', {}],
+        ['knowledge_get', { id: createdId }],
+        ['knowledge_append', { id: createdId, content: 'more' }],
+      ] as const) {
+        const result = await other.callTool({ name, arguments: args });
+        expect(result.isError, name).toBeFalsy();
+      }
+      expect(fake.calls.map((call) => call.method)).toEqual(['create', 'search', 'get', 'append']);
     } finally {
       await other.close();
     }

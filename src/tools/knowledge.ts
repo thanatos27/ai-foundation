@@ -42,7 +42,8 @@ function resolveSource(source: 'auto' | 'obsidian' | undefined, config: Config):
 /** Registers knowledge_create / knowledge_search / knowledge_get / knowledge_append (Source of Truth: Obsidian). */
 export function registerKnowledgeTools(server: McpServer, { config, connectors }: ToolContext): void {
   const defaultArea = config.defaults.area;
-  const connector = (source?: 'auto' | 'obsidian'): KnowledgeConnector => {
+  /** Only knowledge_create applies the default source; the other tools always work on Obsidian. */
+  const connector = (source: 'auto' | 'obsidian' | undefined): KnowledgeConnector => {
     resolveSource(source, config);
     if (!connectors.knowledge) throw new ConfigurationError('the knowledge source (Obsidian) is not configured');
     return connectors.knowledge;
@@ -83,7 +84,7 @@ export function registerKnowledgeTools(server: McpServer, { config, connectors }
       outputSchema: SearchOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async (filter) => jsonResult({ items: await connector().search(filter) }),
+    async (filter) => jsonResult({ items: await connector('obsidian').search(filter) }),
   );
 
   server.registerTool(
@@ -98,7 +99,7 @@ export function registerKnowledgeTools(server: McpServer, { config, connectors }
       outputSchema: KnowledgeDocumentSchema,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    async ({ id }) => jsonResult(await connector().get(id)),
+    async ({ id }) => jsonResult(await connector('obsidian').get(id)),
   );
 
   server.registerTool(
@@ -114,6 +115,6 @@ export function registerKnowledgeTools(server: McpServer, { config, connectors }
       outputSchema: KnowledgeOutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async (input) => jsonResult({ knowledge: await connector().append(input) }),
+    async (input) => jsonResult({ knowledge: await connector('obsidian').append(input) }),
   );
 }
