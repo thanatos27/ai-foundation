@@ -60,6 +60,20 @@ describe('EnvCredentialProvider', () => {
     expect(error.message).toBe('Credential error: Notion credential is not configured: set NOTION_API_TOKEN');
   });
 
+  it('reads the GitHub token', async () => {
+    const provider = new EnvCredentialProvider({ GITHUB_TOKEN: ' github_pat_secret\n' });
+    await expect(provider.getGitHubToken()).resolves.toBe('github_pat_secret');
+  });
+
+  it.each([
+    ['unset', {}],
+    ['empty', { GITHUB_TOKEN: '' }],
+    ['blank', { GITHUB_TOKEN: '   ' }],
+  ])('reports a %s GitHub token by variable name', async (_label, env) => {
+    const error = await credentialError(new EnvCredentialProvider(env).getGitHubToken());
+    expect(error.message).toBe('Credential error: GitHub credential is not configured: set GITHUB_TOKEN');
+  });
+
   it('names every missing Google variable without leaking the ones that are set', async () => {
     const env = { GOOGLE_OAUTH_CLIENT_ID: 'client-id', GOOGLE_OAUTH_CLIENT_SECRET: 'client-secret' };
     const error = await credentialError(new EnvCredentialProvider(env).getGoogleOAuthCredentials());

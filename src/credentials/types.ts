@@ -15,4 +15,6 @@ export interface CredentialProvider {
   getGoogleOAuthCredentials(): Promise<GoogleOAuthCredentials>;
   /** Internal integration token of the AI Foundation Notion connection. */
   getNotionApiToken(): Promise<string>;
+  /** GitHub token; a fine-grained personal access token with read-only repository access is recommended. */
+  getGitHubToken(): Promise<string>;
 }
