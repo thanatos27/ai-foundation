@@ -63,6 +63,42 @@ describe('time zones', () => {
     expect(startOfDay('2026-11-01', 'America/New_York')).toBe(Date.parse('2026-11-01T04:00:00Z'));
   });
 
+  describe('around DST transitions', () => {
+    const local = (localDateTime: string, timeZone: string) =>
+      formatInTimeZone(zonedDateTimeToInstant(localDateTime, timeZone), timeZone);
+
+    it('moves a time skipped by a spring-forward gap forward', () => {
+      expect(local('2026-03-08T02:30:00', 'America/New_York')).toBe('2026-03-08T03:30:00-04:00');
+      expect(local('2026-03-29T02:00:00', 'Europe/Berlin')).toBe('2026-03-29T03:00:00+02:00');
+    });
+
+    it('resolves a time repeated by a fall-back overlap to the earlier instant', () => {
+      expect(local('2026-10-25T02:30:00', 'Europe/Berlin')).toBe('2026-10-25T02:30:00+02:00');
+      expect(local('2026-11-01T01:30:00', 'America/New_York')).toBe('2026-11-01T01:30:00-04:00');
+    });
+
+    it('keeps times next to a transition unchanged', () => {
+      expect(local('2026-03-08T01:59:59', 'America/New_York')).toBe('2026-03-08T01:59:59-05:00');
+      expect(local('2026-03-08T03:00:00', 'America/New_York')).toBe('2026-03-08T03:00:00-04:00');
+      expect(local('2026-10-25T03:00:00', 'Europe/Berlin')).toBe('2026-10-25T03:00:00+01:00');
+    });
+
+    it('starts a day whose midnight is skipped at the first existing instant of that day', () => {
+      // Cuba moves clocks from 00:00 to 01:00 on 2026-03-08.
+      expect(formatInTimeZone(startOfDay('2026-03-08', 'America/Havana'), 'America/Havana')).toBe(
+        '2026-03-08T01:00:00-04:00',
+      );
+      expect(localDateOf(startOfDay('2026-03-08', 'America/Havana'), 'America/Havana')).toBe('2026-03-08');
+    });
+
+    it('starts a day whose midnight is repeated at the earlier midnight', () => {
+      // Cuba moves clocks from 01:00 back to 00:00 on 2026-11-01.
+      expect(formatInTimeZone(startOfDay('2026-11-01', 'America/Havana'), 'America/Havana')).toBe(
+        '2026-11-01T00:00:00-04:00',
+      );
+    });
+  });
+
   it('finds the local date of an instant', () => {
     const instant = Date.parse('2026-10-16T16:00:00Z');
     expect(localDateOf(instant, 'Asia/Tokyo')).toBe('2026-10-17');

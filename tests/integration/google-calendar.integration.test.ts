@@ -1,4 +1,4 @@
-import { calendar } from '@googleapis/calendar';
+import { type calendar_v3, calendar } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lazyCalendarApi } from '../../src/connectors/google-calendar/client.js';
@@ -11,7 +11,8 @@ const run = enabled && hasEnv('GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SEC
 describe.runIf(run)('Google Calendar (real API)', () => {
   let connector: GoogleCalendarScheduleConnector;
   let writableCalendarId: string;
-  let deleteEvent: (eventId: string) => Promise<unknown>;
+  /** Direct googleapis client, independent of the code under test (expectations and cleanup). */
+  let raw: calendar_v3.Calendar;
   const created: string[] = [];
   const day = daysFromToday(30);
 
@@ -29,13 +30,12 @@ describe.runIf(run)('Google Calendar (real API)', () => {
     const { clientId, clientSecret, refreshToken } = await credentials.getGoogleOAuthCredentials();
     const auth = new OAuth2Client({ clientId, clientSecret });
     auth.setCredentials({ refresh_token: refreshToken });
-    const api = calendar({ version: 'v3', auth });
-    // Cleanup only; the connector itself never deletes.
-    deleteEvent = (eventId) => api.events.delete({ calendarId: writableCalendarId, eventId });
+    raw = calendar({ version: 'v3', auth });
   });
 
   afterAll(async () => {
-    await Promise.allSettled(created.map((eventId) => deleteEvent(eventId)));
+    // The connector itself never deletes.
+    await Promise.allSettled(created.map((eventId) => raw.events.delete({ calendarId: writableCalendarId, eventId })));
   });
 
   const remember = (id: string | undefined) => created.push(id!.split(':').at(-1)!);
@@ -66,7 +66,7 @@ describe.runIf(run)('Google Calendar (real API)', () => {
     );
   });
 
-  it('reads every calendar the user can read', async () => {
+  it('reads every calendar the user can read, including hidden ones', async () => {
     const api = await lazyCalendarApi(credentials)();
     const queried: string[] = [];
     const recording = new GoogleCalendarScheduleConnector({
@@ -82,8 +82,19 @@ describe.runIf(run)('Google Calendar (real API)', () => {
     });
 
     await recording.list({ start: daysFromToday(-7), end: daysFromToday(7) });
-    const readable = (await api.listCalendars()).map((entry) => entry.id);
-    expect([...queried].sort()).toEqual([...readable].sort());
+
+    // Every calendar whose events the user can read, hidden or not (free/busy-only ones excluded).
+    const readable: calendar_v3.Schema$CalendarListEntry[] = [];
+    let pageToken: string | undefined;
+    do {
+      const { data } = await raw.calendarList.list({ showHidden: true, pageToken });
+      readable.push(...(data.items ?? []).filter((entry) => entry.accessRole !== 'freeBusyReader'));
+      pageToken = data.nextPageToken ?? undefined;
+    } while (pageToken);
+
+    expect([...queried].sort()).toEqual(readable.map((entry) => entry.id).sort());
     expect(queried).toContain(writableCalendarId);
+    const hidden = readable.filter((entry) => entry.hidden).map((entry) => entry.id);
+    console.error(`[integration] calendars read: ${readable.length} (hidden: ${hidden.length})`);
   });
 });

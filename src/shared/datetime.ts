@@ -67,13 +67,23 @@ export function formatInTimeZone(instantMs: number, timeZone: string): string {
 }
 
 /**
- * Instant of a local date-time in `timeZone`. Times skipped by a DST jump resolve forward,
- * repeated times resolve to the earlier occurrence.
+ * Instant of a local date-time in `timeZone`. Times skipped by a DST jump resolve forward by the
+ * length of the gap (02:30 in a 02:00→03:00 gap becomes 03:30), repeated times resolve to the
+ * earlier occurrence.
  */
 export function zonedDateTimeToInstant(localDateTime: string, timeZone: string): number {
-  const asUtc = Date.parse(`${localDateTime}Z`);
-  const first = asUtc - timeZoneOffset(timeZone, asUtc) * MINUTE_MS;
-  return asUtc - timeZoneOffset(timeZone, first) * MINUTE_MS;
+  const wallClock = Date.parse(`${localDateTime}Z`);
+  // The offsets in force a day either side bracket any single transition around this time.
+  const offsetBefore = timeZoneOffset(timeZone, wallClock - DAY_MS);
+  const offsetAfter = timeZoneOffset(timeZone, wallClock + DAY_MS);
+  const candidates = [offsetBefore, offsetAfter]
+    .map((offset) => wallClock - offset * MINUTE_MS)
+    // A candidate is real when the zone, at that instant, shows the requested wall-clock time.
+    .filter((instant) => instant + timeZoneOffset(timeZone, instant) * MINUTE_MS === wallClock);
+
+  if (candidates.length > 0) return Math.min(...candidates);
+  // Skipped by a gap: keep the offset from before the transition, which lands after the gap.
+  return wallClock - offsetBefore * MINUTE_MS;
 }
 
 /** Instant at which `date` begins in `timeZone`. */

@@ -40,6 +40,14 @@ describe('toTimeRange', () => {
     });
   });
 
+  it('starts and ends days at their first instant across a midnight DST gap', () => {
+    // Cuba skips 2026-03-08 00:00–01:00: the day starts at 01:00 local (05:00Z), not on 03-07.
+    expect(toTimeRange({ start: '2026-03-08', end: '2026-03-08' }, 'America/Havana')).toEqual({
+      timeMin: '2026-03-08T05:00:00.000Z',
+      timeMax: '2026-03-09T04:00:00.000Z',
+    });
+  });
+
   it('passes date-times through', () => {
     const range = { start: '2026-10-12T09:00:00+09:00', end: '2026-10-12T18:00:00+09:00' };
     expect(toTimeRange(range, TZ)).toEqual({ timeMin: range.start, timeMax: range.end });

@@ -10,7 +10,7 @@ import {
   NotFoundError,
   ProviderApiError,
 } from '../../../src/errors.js';
-import { FakeTodoistApi, todoistTask } from './fake-api.js';
+import { FakeTodoistApi, notFound, todoistTask } from './fake-api.js';
 
 const TZ = 'Asia/Tokyo';
 
@@ -190,6 +190,43 @@ describe('complete', () => {
       }),
     ]);
     expect(await connector.complete('todoist:r1')).toMatchObject({ status: 'next', due: '2026-10-15' });
+  });
+
+  describe('when reading the task back after closing fails', () => {
+    /** Makes the first getTask after closeTask throw `error`. */
+    function failReadBack(api: FakeTodoistApi, error: unknown): void {
+      const close = api.closeTask;
+      api.closeTask = (async (id: string) => {
+        const closed = await close(id);
+        api.failures.getTask = error;
+        return closed;
+      }) as typeof api.closeTask;
+    }
+
+    const recurring = () =>
+      setup([
+        todoistTask({ id: 'r1', labels: ['af-next'], due: { isRecurring: true, string: 'every day', date: '2026-10-14' } }),
+      ]);
+
+    it.each([
+      ['a network error', new TodoistRequestError('fetch failed')],
+      ['a server error', new TodoistRequestError('Service Unavailable', 503)],
+      ['an authentication error', new TodoistRequestError('Unauthorized', 401)],
+    ])('reports %s instead of returning done', async (_label, failure) => {
+      const { api, connector } = recurring();
+      failReadBack(api, failure);
+
+      const error = await rejection(connector.complete('todoist:r1'));
+      expect(error).toBeInstanceOf(ProviderApiError);
+      expect(error.message).toContain('task todoist:r1 was closed, but its state afterwards could not be read');
+      expect(api.callsOf('closeTask')).toEqual([['r1']]);
+    });
+
+    it('still treats a task gone after closing as done', async () => {
+      const { api, connector } = setup();
+      failReadBack(api, notFound());
+      expect(await connector.complete('todoist:t1')).toMatchObject({ id: 'todoist:t1', status: 'done' });
+    });
   });
 
   it('reports a missing task without closing anything', async () => {

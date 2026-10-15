@@ -26,11 +26,25 @@ export interface CalendarApi {
 
 export type CalendarApiFactory = (credentials: GoogleOAuthCredentials) => CalendarApi;
 
+/** The googleapis Calendar methods the connector uses. Tests fake these to check request parameters. */
+export interface CalendarResources {
+  events: {
+    insert(params: calendar_v3.Params$Resource$Events$Insert): Promise<{ data: GoogleEvent }>;
+    list(params: calendar_v3.Params$Resource$Events$List): Promise<{ data: calendar_v3.Schema$Events }>;
+  };
+  calendarList: {
+    list(params: calendar_v3.Params$Resource$Calendarlist$List): Promise<{ data: calendar_v3.Schema$CalendarList }>;
+  };
+}
+
 export const createCalendarApi: CalendarApiFactory = ({ clientId, clientSecret, refreshToken }) => {
   const auth = new OAuth2Client({ clientId, clientSecret });
   auth.setCredentials({ refresh_token: refreshToken });
-  const api = calendar({ version: 'v3', auth });
+  return calendarApiFrom(calendar({ version: 'v3', auth }));
+};
 
+/** Builds the connector-facing API, with pagination, on top of the googleapis client. */
+export function calendarApiFrom(api: CalendarResources): CalendarApi {
   return {
     async insertEvent(calendarId, requestBody) {
       return (await api.events.insert({ calendarId, requestBody })).data;
@@ -40,7 +54,13 @@ export const createCalendarApi: CalendarApiFactory = ({ clientId, clientSecret, 
       const entries: GoogleCalendarListEntry[] = [];
       let pageToken: string | undefined;
       do {
-        const { data } = await api.calendarList.list({ minAccessRole: 'reader', maxResults: 250, pageToken });
+        // showHidden: calendars hidden in the UI are still readable and must not be skipped.
+        const { data } = await api.calendarList.list({
+          minAccessRole: 'reader',
+          showHidden: true,
+          maxResults: 250,
+          pageToken,
+        });
         entries.push(...(data.items ?? []));
         pageToken = data.nextPageToken ?? undefined;
       } while (pageToken);
@@ -67,7 +87,7 @@ export const createCalendarApi: CalendarApiFactory = ({ clientId, clientSecret, 
       return events;
     },
   };
-};
+}
 
 /** Creates the API client on first use, so the server starts without credentials. */
 export function lazyCalendarApi(

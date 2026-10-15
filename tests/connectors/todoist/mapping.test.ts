@@ -114,6 +114,11 @@ describe('due', () => {
     expect(dueOf(due, TZ)).toBe('2026-10-16T18:00:00+09:00');
   });
 
+  it('interprets a floating time inside a DST gap forward', () => {
+    const due = { isRecurring: false, string: '', date: '2026-03-08T02:30:00', timezone: 'America/New_York' };
+    expect(dueOf(due, TZ)).toBe('2026-03-08T03:30:00-04:00');
+  });
+
   it('interprets a floating time in the default time zone', () => {
     const due = { isRecurring: false, string: '', date: '2026-10-16T18:00:00', timezone: null };
     expect(dueOf(due, TZ)).toBe('2026-10-16T18:00:00+09:00');

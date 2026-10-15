@@ -1,6 +1,6 @@
 import type { GetTasksResponse } from '@doist/todoist-sdk';
 import type { Task, TaskCreateInput, TaskListFilter, TaskUpdateInput } from '../../domain/index.js';
-import { ProviderApiError } from '../../errors.js';
+import { NotFoundError, ProviderApiError } from '../../errors.js';
 import type { TaskConnector } from '../types.js';
 import { type TodoistClient, type TodoistTask, toFoundationError } from './client.js';
 import { matchesFilter } from './filter.js';
@@ -73,7 +73,9 @@ export class TodoistTaskConnector implements TaskConnector {
 
   /**
    * Closes the task and returns what Todoist holds afterwards: a recurring task moves to its
-   * next occurrence and stays open, anything else is returned as `done`.
+   * next occurrence and stays open, anything else is returned as `done`. Only a task that no
+   * longer exists after closing falls back to its state before; any other failure to read it
+   * back is an error, since its state is then unknown.
    */
   async complete(id: string): Promise<Task> {
     const todoistId = parseTaskId(id);
@@ -84,7 +86,14 @@ export class TodoistTaskConnector implements TaskConnector {
       throw toFoundationError(error, `task ${id}`);
     });
 
-    const after = await this.getTask(api, id, todoistId).catch(() => undefined);
+    const after = await this.getTask(api, id, todoistId).catch((error: unknown) => {
+      if (error instanceof NotFoundError) return undefined;
+      throw new ProviderApiError(
+        'Todoist',
+        `task ${id} was closed, but its state afterwards could not be read: ${(error as Error).message}`,
+        { cause: error },
+      );
+    });
     if (after && !after.checked) return this.toTask(after);
     return this.toTask(after ?? before, 'done');
   }
