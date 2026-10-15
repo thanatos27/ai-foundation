@@ -1,11 +1,11 @@
 # Phase 3: Collection — Implementation Plan
 
-- Status: **rev.2（PR #4 レビュー反映・再レビュー待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #4 レビュー反映）
+- Status: **rev.2（Plan Review完了・User承認済み）**
+- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #4 レビュー反映。同日 再レビュー完了・User承認）
 - 対象: [Phase 3 Design Issue](../specs/phase-3-collection.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-**Plan承認まで実装は開始しない。** 仕様の解釈が必要な箇所・仕様に明記がない箇所は [§17 懸念点 / 未確定事項](#17-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§20 Review対応履歴](#20-review対応履歴) を参照。
+ChatGPTによるPlan Reviewは完了（追加のBlocking Issueなし）し、User承認済み。実装は `main` から作成する `feat/phase-3-collection` で行う。仕様の解釈が必要な箇所・仕様に明記がない箇所は [§17 懸念点 / 未確定事項](#17-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§20 Review対応履歴](#20-review対応履歴) を参照。
 
 ---
 
@@ -815,6 +815,10 @@ Tool Layer（Step 3）をConnector実装より先に行うのは、Phase 2と同
 ---
 
 ## 20. Review対応履歴
+
+### rev.2 再レビュー（PR #4）
+
+rev.2で前回の3点（500KB制限、multi_select 100 options、option名100文字Validationの削除）がすべて適切に反映されていることを確認され、追加のBlocking Issueはなし。ChatGPTによるPlan Reviewは完了し、User承認済み。Statusを「Plan Review完了・User承認済み」に更新した。
 
 ### rev.2（PR #4 レビュー反映）
 
