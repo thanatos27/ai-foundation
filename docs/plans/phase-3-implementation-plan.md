@@ -1,11 +1,11 @@
 # Phase 3: Collection — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-15
+- Status: **rev.2（PR #4 レビュー反映・再レビュー待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #4 レビュー反映）
 - 対象: [Phase 3 Design Issue](../specs/phase-3-collection.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-**Plan承認まで実装は開始しない。** 仕様の解釈が必要な箇所・仕様に明記がない箇所は [§17 懸念点 / 未確定事項](#17-懸念点--未確定事項) にQとしてまとめ、推奨案を付けている。
+**Plan承認まで実装は開始しない。** 仕様の解釈が必要な箇所・仕様に明記がない箇所は [§17 懸念点 / 未確定事項](#17-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§20 Review対応履歴](#20-review対応履歴) を参照。
 
 ---
 
@@ -13,7 +13,7 @@
 
 | 項目 | 状態 |
 |---|---|
-| Branch | Plan用Branch `docs/phase-3-implementation-plan`。Baseは `main` の `fae1b84 docs: clarify Phase 3 Notion plan concerns`（Phase 2実装 PR #3 のMerge `06fb59c` 後に、Phase 3 Design Issue追加 `7fdec15`、MVP仕様のPhase 3整合 `d98946d`、`fae1b84` がコミット済み） |
+| Branch | Plan用Branch `docs/phase-3-implementation-plan`（PR #4）。Baseは `main` の `0fdcf5f docs: align Collection status nullability`（Phase 2実装 PR #3 のMerge `06fb59c` 後に、Phase 3 Design Issue追加 `7fdec15`、MVP仕様のPhase 3整合 `d98946d`、`fae1b84`、PR #4 rev.1 レビューを受けたCollection `status` のnullable化 `b4ffe5e` / `0fdcf5f` がコミット済み） |
 | Repository | `thanatos27/ai-foundation`（**Public**） |
 | ローカル環境 | Node.js v24.20.0, npm 11.19.0。`package.json#engines` は `{ node: ">=24", npm: ">=11" }` |
 | 依存 | `@modelcontextprotocol/server ^2.3.1`, `zod ^4.6.7`, `yaml ^2.9.1`, `@doist/todoist-sdk ^15.3.1`, `@googleapis/calendar ^20.1.0`, `google-auth-library ^11.3.0` |
@@ -55,7 +55,7 @@
 
 | 対象 | 変更 | 理由 |
 |---|---|---|
-| `domain/collection.ts` | `CollectionItemSchema.status` を `nullable` に変更。`CollectionCreateInputSchema` / `CollectionSearchFilterSchema` / `CollectionUpdateInputSchema` / `mergeMetadata` を追加 | Phase 3 §collection_update で `status: null`（クリア）が許可されたため、クリア後のItemを出力で表現する必要がある（Q1） |
+| `domain/collection.ts` | `CollectionItemSchema.status` を `nullable` に変更。`CollectionCreateInputSchema` / `CollectionSearchFilterSchema` / `CollectionUpdateInputSchema` / `mergeMetadata` を追加 | Phase 3 Design Issue / MVP §5.5 の CollectionItem `status: string \| null`（`0fdcf5f` で仕様修正済み。Q1） |
 | `connectors/types.ts` | `CollectionConnector { create, search, update }`、`Connectors.collection?` を追加 | Connector境界 |
 | `connectors/index.ts` | `NotionCollectionConnector` を生成 | 配線 |
 | `credentials/types.ts`, `env.ts` | `getNotionApiToken()` を追加（`NOTION_API_TOKEN`） | Phase 3 §Credential |
@@ -130,7 +130,7 @@ export const CollectionItemSchema = z.object({
   title: z.string().min(1),
   collection_type: CollectionTypeSchema,
   /** Free-form per collection (e.g. `playing`, `read`, `wishlist`). null after it was cleared. */
-  status: z.string().min(1).nullable(),          // 変更: nullable（Q1）
+  status: z.string().min(1).nullable(),          // 変更: nullable（仕様 `string | null`。Q1）
   metadata: z.record(z.string(), z.unknown()).optional(),
   tags: TagsSchema.optional(),
 });
@@ -181,7 +181,7 @@ export const CollectionUpdateInputSchema = z
 
 - `hasAnyUpdate` は「`status` / `metadata` / `tags` が `undefined` 以外」または「`append_note` が非null」のとき真。`{ id, append_note: null }` は何も変更しないためValidation Errorとする（Q5）。
 - `title` / `collection_type` は `collection_update` のSchemaに含めない（strictのため指定するとValidation Error）。
-- `tags` の重複（`["RPG", "RPG"]`）はDomainでは拒否せず、Connectorで順序を保って重複除去する（Notionのmulti_selectは同名optionを2度持てないため）。
+- `tags` の重複（`["RPG", "RPG"]`）はDomainでは拒否せず、Connectorで順序を保って重複除去する（Notionのmulti_selectは同名optionを2度持てないため）。重複除去後の件数上限（100件）はNotion固有の制約のためConnectorで検証する（§8.5）。
 - `id` の形式（`notion:<page-id>`）はProvider固有のためConnectorで検証する（Phase 2のTodoist IDと同じ方針）。
 
 ### 5.3 Metadata merge（Domainの純粋関数）
@@ -256,7 +256,7 @@ SDKのLogger: SDK既定のLoggerは `console.warn` 等へ出力する。MCPのst
 ### 6.4 collection_create
 
 1. `ensureDataSource()`。
-2. 入力を検証・変換（Select名の検証 §9、Metadata JSONの分割 §8.1、Noteの分割 §10）。いずれかが制限を超えたら `InputValidationError`（Notionへは何も送らない）。
+2. 入力を検証・変換（Select名の検証 §9.2、Metadata JSONの分割 §8.1、Noteの分割 §10、Tags件数・Request body size §8.5）。いずれかが制限を超えたら `InputValidationError`（Notionへは何も送らない）。Request body sizeは title + metadata + note + tags を含む**送信予定の `pages.create` body全体**で検証する。
 3. `pages.create`:
    ```ts
    {
@@ -312,7 +312,10 @@ if status !== undefined:   properties.Status   = { select: status === null ? nul
 if tags   !== undefined:   properties.Tags     = { multi_select: dedupe(tags).map(name => ({ name })) }
 if metadata !== undefined: currentMeta = readMetadata(page)   // 壊れていれば Error（§8.3）。上書きしない
                            properties.Metadata = { rich_text: richText(JSON.stringify(mergeMetadata(currentMeta, metadata))) }
-入力の制限チェック（Select名・Metadata長・Note長）をここまでに完了し、超過なら InputValidationError（何も書き込まない）
+updateBody = properties が空でなければ { properties }
+appendBody = append_note != null なら { children: [paragraph(append_note)], position: { type: 'end' } }
+入力の制限チェック（Select名・Tags件数・Metadata長・Note長、updateBody / appendBody それぞれのRequest body size。§8.5）を
+**両Requestとも送信前に**完了し、どちらかが超過なら InputValidationError（何も書き込まない）
 
 updated = properties が空でなければ pages.update({ page_id, properties }) else page
 if append_note != null:
@@ -383,6 +386,7 @@ return toCollectionItem(updated)
 - Notion API制限: **rich_textの1 text objectの `content` は最大2,000文字、1 Property値のrich_text配列は最大100要素**。JSON文字列を2,000文字ごとの text object に分割して保存し、最大 `2,000 × 100 = 200,000` 文字まで扱う。
   - 分割はUTF-16のSurrogate Pairを割らない位置で行う（絵文字等の破損防止）。
   - 200,000文字を超える場合は `InputValidationError`（"metadata JSON is N characters; Notion allows at most 200000"）。**truncateしない。**
+  - 200,000文字以内でも、Request全体のUTF-8 byte数が500KBを超える場合は別途 `InputValidationError` になる（§8.5）。
 - 同じ分割関数 `richText(text)` を `Name`（title）とNote（paragraph）にも使う。
 - Notion側の文字数カウント方式とUTF-16長の差異はIntegration Testで多バイト文字（日本語・絵文字）を含む長文で確認する。
 
@@ -411,6 +415,22 @@ return toCollectionItem(updated)
 | `{}`（空Property） | `{"platform":"Switch"}` | `{"platform":"Switch"}` |
 | 任意 | `{}` | 既存のまま（書き戻しは行う） |
 
+### 8.5 Notion Request制限の事前検証（Metadata / Tags / Note共通）
+
+Notion APIのRequest Limitsに収まらない入力は、Providerの400に任せず**送信前に** `InputValidationError` とする（「truncateしない」方針のため、どの制限で失敗したかを利用者が判断できるMessageにする）。検証は `mapping.ts` の純粋関数として実装し、Connectorは送信予定のRequest bodyを組み立てた後・送信前に呼ぶ。
+
+| 制限 | 対象 | 検証 | Message例 |
+|---|---|---|---|
+| rich_text 1 text objectの `content` 2,000文字 × 配列100要素 | `Name` / `Metadata` / Note Paragraph | 2,000文字単位に分割（§8.1）し、100要素を超えたらError | `metadata JSON is 210000 characters; Notion allows at most 200000` |
+| multi_select 1回の値は最大100 options | `Tags`（create / update） | **重複除去後**の件数が100以下 | `tags has 101 distinct values; Notion allows at most 100` |
+| Request body全体 500KB | `pages.create` / `pages.update` / `blocks.children.append` | 送信予定body（Path Parameterを除く。SDKが送るJSONと同じ内容）を `JSON.stringify` し、`Buffer.byteLength(json, 'utf8')` が上限以下 | `the Notion request would be 612345 bytes; Notion allows at most 500000 bytes (title, metadata, note and tags combined)` |
+
+- **500KBは `500,000` bytes として扱う**（KB=1,000とKiB=1,024のどちらでも超過しない保守側）。JSONのEscape（Metadata JSONを文字列としてrich_textに入れることで増える `\"` 等）や、日本語（UTF-8で3 bytes）・絵文字（4 bytes）による増加は、最終的なbodyのbyte数を測ることで自然に反映される。
+- 1文字あたりの上限では検出できないケース（例: 日本語のみのMetadata 200,000文字 ≒ 600KB、各Fieldは上限内だが title + metadata + note の合計が500KB超）をこの検証で検出する。
+- `collection_update` は `pages.update` と `blocks.children.append` の2 Requestになるため、**両方のbodyを先に組み立てて検証してから** 1つ目を送る（片方だけ書き込まれた後に制限超過で失敗する状態を作らない。§6.6）。
+- `dataSources.query`（Filter）と `pages.retrieve` はbodyが小さいため検証しない。
+- Integration Testで、上限付近（499,xxx bytes）のRequestが成功することを確認する（§15.1 #8）。Notion側の実際の上限が `500,000` より厳しい場合は値を見直してPlan / 実装へ反映する。
+
 ---
 
 ## 9. Status / Tags と Notion Select option
@@ -427,14 +447,15 @@ return toCollectionItem(updated)
 
 ### 9.2 Select名の制約（Connectorで検証）
 
-Notionのselect / multi_select option名には以下の制約があるため、送信前に検証して `InputValidationError` を返す（Notion由来の分かりにくい400にしない）。
+Notion公式のPage Propertyドキュメントで明示されているselect / multi_select option名の制約は**カンマ不可**のみのため、これだけを送信前に検証して `InputValidationError` を返す（Notion由来の分かりにくい400にしない）。
 
 | 制約 | 対象 | 検証 |
 |---|---|---|
 | カンマ `,` を含められない | `status`, `tags[]`（`collection_type` は固定値のため不要） | `includes(',')` → `InputValidationError`（"tags must not contain commas (Notion select option names)"） |
-| 最大100文字 | 同上 | 長さ超過 → `InputValidationError` |
+| 1回のmulti_select値は最大100 options | `tags` | 重複除去後の件数（§8.5） |
 
-`collection_search` の `status` / `tags` も同じ制約を満たさない値は一致し得ないが、Errorにせず空結果とする（Notion Filterにそのまま渡すとValidation Errorになり得るため、Connectorで検証して該当Filterが成立しない場合は空配列を返す）。
+- **option名の文字数上限はFoundation側で検証しない**（rev.1の「最大100文字」は現行のAPIドキュメント / Request Limits / SDK型定義から根拠を確認できなかったため削除）。自由文字列のStatus / TagをFoundationが不要に狭めない。長いoption名の実挙動はIntegration Testで確認し（§15.1 #7）、Notionが拒否する場合はその400を `ProviderApiError`（Notionの `message` を含む）として返す。根拠のある上限が確認できた場合は、根拠とTestを添えて検証を追加することを再提案する。
+- `collection_search` の `status` / `tags` にカンマを含む値が指定された場合は一致し得ないため、Errorにせず空結果とする（Notion Filterにそのまま渡さず、Connectorで判定して空配列を返す）。
 
 ### 9.3 Data Source Schemaの型
 
@@ -449,7 +470,7 @@ Notionのselect / multi_select option名には以下の制約があるため、�
   { object: 'block', type: 'paragraph', paragraph: { rich_text: richText(note) } }
   ```
 - 本文は**Plain Textとして扱い、Markdown等の解釈はしない**（見出し生成・自動分類を行わない仕様に従う）。改行はrich_text内の `\n` としてそのまま保存され、Notion上は同一Paragraph内の改行として表示される（Q9）。
-- 長さ: §8.1の `richText()` で2,000文字ごとに分割し、1 Paragraphのrich_text配列（最大100要素）に収める。最大200,000文字。超過は `InputValidationError`（truncateしない）。
+- 長さ: §8.1の `richText()` で2,000文字ごとに分割し、1 Paragraphのrich_text配列（最大100要素）に収める。最大200,000文字。超過は `InputValidationError`（truncateしない）。200,000文字以内でもRequest body全体が500KBを超える場合は `InputValidationError`（§8.5）。
 - 作成時（`note`）: `pages.create` の `children` に含める（Atomic）。
 - 追記時（`append_note`）: `blocks.children.append` に `position: { type: 'end' }` を明示する。既存Blockは読まない・変更しない（API上、追記は既存Blockを破壊しない）。
 - 日時・見出し・区切り線は付与しない（仕様）。必要な構造はAI ClientがNote本文に含める。
@@ -521,7 +542,7 @@ SDKは `APIResponseError`（`code` / `status`）、`RequestTimeoutError`、`Unkn
 | 個別Pageが存在しない / Connectionから見えない | `pages.*` / `blocks.*` で 404 `object_not_found` | `NotFoundError`（"collection item notion:<id>"） |
 | 専用Collection外 / ゴミ箱のPage | — | `NotFoundError` |
 | `notion:` で始まらない / Page ID形式不正 | — | `InputValidationError` |
-| Select名にカンマ・長さ超過、Metadata / Note長超過 | — | `InputValidationError` |
+| Select名にカンマ、Tags 100件超過（重複除去後）、Metadata / Note長超過、Request body 500KB超過 | — | `InputValidationError`（§8.5、§9.2） |
 | `Type` 不正なPageの更新、壊れたMetadataへのmerge | — | `ProviderApiError`（§7.3, §8.3） |
 | 400 `validation_error` / `invalid_request` 等（上記で防げなかったもの） | 400 | `ProviderApiError`（Notionが返したMessageを含める） |
 | 409 `conflict_error` / 429 `rate_limited` / 5xx / Timeout / Network | — | `ProviderApiError`（HTTP Status・Codeを含める） |
@@ -590,11 +611,12 @@ Fake `NotionClient`（`tests/connectors/notion/fake-client.ts`）はData Source�
 |---|---|
 | Mapping | Property ↔ Domainの往復、`id` = `notion:<uuid>`、`external_ref` = `page.url`、空Name → `(Untitled)`、Status未設定 → `null`、Tags未設定 → `[]`、Metadata空 → `{}` |
 | Rich Text分割 | 2,000文字境界、Surrogate Pairを割らない、200,000文字ちょうどはOK / 超過は `InputValidationError`、分割後の連結で元に戻る（日本語・絵文字） |
+| Request制限（§8.5） | **Tags**: 重複除去後100件はOK / 101件は `InputValidationError`、重複を含む101要素で重複除去後100件ならOK。**Request body size**: ASCII・日本語（3 bytes/文字）・絵文字（4 bytes/文字、Surrogate Pair）それぞれで500,000 bytesちょうど（境界内）はOK / 1 byte超過はError、200,000文字以内の日本語Metadataが500KB超でError、title + metadata + note + tags が各Field上限内だが**合算**で500KB超になる `collection_create` でError、Metadata JSONのEscape増加分が計上されること。いずれもNotion Clientのメソッドが**1回も呼ばれない**こと |
 | Metadata | JSON化して保存、読み取りで復元、配列・プリミティブ・不正JSONは「読めない」扱い、shallow merge（§8.4） |
 | Schema検証 | 5 Property正常、追加Propertyは無視、欠落・型不一致を**まとめて**報告、`Status` がstatus型 → 専用Message、成功時のMemoize（`retrieve` が1回だけ）、失敗時は再試行される、`data_source_id` 未設定 → `ConfigurationError`（Token取得前） |
-| create | `parent.data_source_id` が常にConfig値、各Property、`note` あり → `children` に1 Paragraph、`note: null` / 未指定 → `children` なし、Tags重複除去、Select名のカンマ・長さ超過で `InputValidationError` かつ `pages.create` が呼ばれない |
+| create | `parent.data_source_id` が常にConfig値、各Property、`note` あり → `children` に1 Paragraph、`note: null` / 未指定 → `children` なし、Tags重複除去、Select名のカンマ / Tags 101件 / body 500KB超過で `InputValidationError` かつ `pages.create` が呼ばれない、長いoption名（100文字超）は検証せずそのまま送る |
 | search | `{}` → `filter` なし、各Filter → Notion Filter（`tags` は各Tagが `contains` のAND）、複数Filterの `and`、Pagination（`has_more` / `next_cursor` を最後まで）、`last_edited_time` 降順、Page本文APIを呼ばない、`Type` 不正Pageの除外、壊れたMetadataのItemは `metadata` 省略 |
-| update | 不正ID形式、存在しないPage → `NotFoundError`、専用Data Source外のPage → `NotFoundError`（`pages.update` が呼ばれない）、`in_trash` → `NotFoundError`、`status` 更新 / `status: null` → `select: null`、`tags` 置換 / `[]`、`metadata` merge、壊れたMetadataへのmerge → Errorかつ書き込みなし、壊れたMetadataでも `status` のみの更新は成功、`append_note` のみ → `pages.update` を呼ばず `blocks.children.append`（`position: end`）、Property更新成功後のNote追記失敗 → Propertyは更新済みと分かる `ProviderApiError`、`title` / `collection_type` を送らない、`Type` 不正Pageの更新 → 書き込みなしでError |
+| update | 不正ID形式、存在しないPage → `NotFoundError`、専用Data Source外のPage → `NotFoundError`（`pages.update` が呼ばれない）、`in_trash` → `NotFoundError`、`status` 更新 / `status: null` → `select: null`、`tags` 置換 / `[]`、`metadata` merge、壊れたMetadataへのmerge → Errorかつ書き込みなし、壊れたMetadataでも `status` のみの更新は成功、`append_note` のみ → `pages.update` を呼ばず `blocks.children.append`（`position: end`）、Property更新成功後のNote追記失敗 → Propertyは更新済みと分かる `ProviderApiError`、`title` / `collection_type` を送らない、`Type` 不正Pageの更新 → 書き込みなしでError、`pages.update` のbodyは上限内だが `append_note` のbodyが500KB超 → `pages.update` も `blocks.children.append` も呼ばれない |
 | Error | 401 → `CredentialError`、Data Source 404 → `ConfigurationError`、Page 404 → `NotFoundError`、403 `restricted_resource` → `ConfigurationError`、400 / 409 / 429 / 500 / Timeout / Network → `ProviderApiError`、Token未設定 → `CredentialError`、全MessageにTokenが含まれない |
 | 認証 | `lazyNotionClient`: TokenがCredentialProvider由来、Client生成は1回、Credential失敗時は次回再試行、`notionVersion` に `NOTION_API_VERSION` を渡す（Factoryを注入して検証） |
 
@@ -630,8 +652,8 @@ Fake `NotionClient`（`tests/connectors/notion/fake-client.ts`）はData Source�
 | 4 | `update`: `metadata` shallow merge（既存Keyの保持、`null` 保存）、`tags` 置換と `[]` 全削除、`status` 変更と `null` クリア |
 | 5 | `update`: `append_note` が既存Paragraphの後ろに追加され、既存本文が変わらない |
 | 6 | exact ID: ハイフン付き / なしの両形式で更新できる |
-| 7 | 未作成のStatus / Tag名でoptionが自動作成される。既存optionと大文字小文字だけが異なる名前の扱い（Q8） |
-| 8 | 2,000文字超のMetadata / Noteが分割保存され、読み戻して一致する（Notionの文字数カウント確認） |
+| 7 | 未作成のStatus / Tag名でoptionが自動作成される。既存optionと大文字小文字だけが異なる名前の扱い（Q8）。長いoption名（100文字超・数百文字）が受け付けられるか（§9.2。拒否される場合はNotionのMessageを記録し、検証追加を再提案） |
+| 8 | 2,000文字超のMetadata / Noteが分割保存され、読み戻して一致する（Notionの文字数カウント確認）。Tags 100件で作成できる。日本語を含む上限付近（約490KB）の `collection_create` が成功し、事前検証の上限値（500,000 bytes）がNotionの実制限と矛盾しないこと |
 | 9 | 共有されていないData Source ID → `ConfigurationError`、存在しないPage ID → `NotFoundError`、専用Data Source外のPage（テスト用に別途共有したPage。用意できなければ手動確認）→ `NotFoundError` |
 
 - **後片付け**: テストで作成したPageは、テストコードから直接 `pages.update({ in_trash: true })` を呼んでゴミ箱へ移す（`afterAll`）。**ConnectorにもToolにもDelete操作は実装しない**（仕様）。
@@ -665,50 +687,58 @@ Statusの語彙（「積読」を `wishlist` とするか `unread` とするか�
 
 ## 17. 懸念点 / 未確定事項
 
-### Q1. `CollectionItemSchema.status` をnullableにする（仕様との整合確認）
+rev.2時点で、Q1は仕様修正により解決済み、Q2〜Q11はPR #4 レビューで合意済み。未解決の事項はない。Q8と §9.2 / §8.5 の実挙動はIntegration Testで確定させる。
 
-MVP §5.5のEntity定義は `status: string`、Phase 1実装も `min(1)` 必須だが、Phase 3 §collection_update は `status: null` で「Statusをクリア」を許可している。クリア後のItemを返すため、**Entityの `status` を `string | null` に変更する**ことを提案する。`collection_create` では引き続き必須。MVP仕様 §5.5の記述更新が必要かどうか確認したい。
+### Q1. `CollectionItemSchema.status` をnullableにする（解決済み: 仕様修正）
 
-### Q2. Notion API Version（推奨: `2026-03-11`）
+Phase 3 §collection_update の `status: null`（クリア）とEntity定義の不整合は、User + ChatGPTにより `main` の仕様側で修正された（`b4ffe5e` / `0fdcf5f`）。
+
+- Phase 3 Design Issue / MVP §5.5: CollectionItem `status: string | null`
+- `collection_create.status` は引き続き非空文字列必須
+- `collection_update(status: null)` 後のEntityのみnullを許容
+
+本Planは §5.1 / §5.2 のとおりこれに従う。
+
+### Q2. Notion API Version（合意済み: `2026-03-11`）
 
 SDK v5.27.0 がサポートする `2025-09-03`（SDK既定）と `2026-03-11` のうち、新しい `2026-03-11` に固定する（§6.1）。`2025-09-03` を選ぶ場合も本Planの設計は変わらず、`in_trash` → `archived`、`position` → `after` 省略（末尾追記）に読み替えるだけ。
 
-### Q3. 読めないMetadataの扱い（推奨案は §8.3）
+### Q3. 読めないMetadataの扱い（合意済み: §8.3）
 
 読み取りでは `metadata` を省略して返し、`metadata` 指定の更新は書き込み前にError（既存内容を黙って消さない）。代替案:（a）読み取りでもErrorにする（1件の手編集でSearch全体が失敗する）、（b）`{}` として扱う（更新時にデータが消える）。いずれも推奨しない。
 
-### Q4. `Type` が空・不正なPage（Notion UIで手作業作成されたItem）
+### Q4. `Type` が空・不正なPage（合意済み）
 
-`collection_search` では除外（stderrに件数ログ）、`collection_update` では書き込み前にError（§7.3）。代替案として `other` へ読み替える方法があるが、SoT上の値と異なる値を返すため推奨しない。除外するとLLMから見えなくなるため、除外件数を応答に含めるかは要確認（Domain出力の形を変えるため、Phase 3では含めない案）。
+`collection_search` では除外（stderrに件数ログ）、`collection_update` では書き込み前にError（§7.3）。`other` への読み替えは行わない。**Phase 3では除外件数をDomain出力へ追加しない。**
 
-### Q5. `{ id, append_note: null }` の扱い
+### Q5. `{ id, append_note: null }` の扱い（合意済み: Validation Error）
 
 `append_note: null` は「本文を変更しない」と定義されているため、`id` 以外が `append_note: null` だけの入力は「更新項目なし」としてValidation Errorにする。一方 `metadata: {}` は有効な（結果として変化しない）merge操作として許容する。
 
-### Q6. `collection_search` の件数・ソート
+### Q6. `collection_search` の件数・ソート（合意済み）
 
 - 全件をPaginationで取得し、件数上限は設けない（個人のCollection規模を想定。Phase 2 `task_list` と同じ）。数千件規模になる場合は `limit` 追加を検討する。
 - ソートは `last_edited_time` 降順とする（仕様に記載なし）。
 
-### Q7. Data Source Schema検証のMemoize
+### Q7. Data Source Schema検証のMemoize（合意済み）
 
 成功した検証結果はプロセス存続中Memoizeする。起動後にNotion側でPropertyを変更した場合はNotionの400（`ProviderApiError`）になり、再起動で再検証される。毎回 `retrieve` するとRequest数が1回増える（Notion Rate Limit: 平均3 req/s）ため、Memoizeを推奨する。
 
-### Q8. Select option名の大文字小文字・正規化
+### Q8. Select option名の大文字小文字・正規化（合意済み: Integration Testで確定）
 
 既存option `RPG` に対し `rpg` を書き込んだときに別optionが作られるか、既存に寄せられるかをIntegration Testで確認する。Connectorは正規化しない。結果に応じてTool Descriptionに「既存の表記に合わせる」旨を記載する。
 
-### Q9. Noteの改行
+### Q9. Noteの改行（合意済み: 1 Paragraph）
 
 Noteは1 Paragraph（改行は同一Paragraph内の改行）として保存する。空行区切りで複数Paragraphに分ける案もあるが、仕様の「Paragraphとして追記」「Foundationは構造化しない」に従い1 Paragraphとする。
 
-### Q10. 403 `restricted_resource` の分類
+### Q10. 403 `restricted_resource` の分類（合意済み: `ConfigurationError`）
 
 Connectionに必要なCapabilityがない場合の403を `ConfigurationError` とする（Tokenは有効で、Notion側のConnection設定の問題のため）。仕様のMapping表に明示はない。
 
-### Q11. SDK組み込みRetry
+### Q11. SDK組み込みRetry（合意済み）
 
-SDK既定のRetry（429等）を使い、最大遅延を10秒に制限する（§13）。仕様の「独自のRetry Frameworkを追加しない」に反しないと解釈しているが、`retry: false` で完全に無効化する方がよければ変更する。
+SDK既定のRetry（429 / 529は全Method、500 / 503はGET / DELETEのみ）を使い、最大遅延を10秒に制限する（§13）。AI Foundation独自のRetry層は追加しない。
 
 ### その他
 
@@ -778,5 +808,23 @@ Tool Layer（Step 3）をConnector実装より先に行うのは、Phase 2と同
 | **Automated Test**: 通常Suiteが実Notionに依存しない | Fake注入、Integration分離 | `npm test`（ネットワークなしで成功） |
 | **Automated Test**: 実接続確認の分離 | `npm run test:integration` / 手動Verification | §15 |
 | **Integration Verification**: 7項目 | §15.1 #2〜#6 | Integration Test |
+| **Security / 設計方針**: Provider制限を黙ってtruncateしない | rich_text分割、Tags 100件、Request body 500KBの送信前検証（§8.5） | Connector Test（境界値）、Integration Test #8 |
 | **Integration Verification**: 作成データはテストコードからのみ後片付け、Delete Toolは公開しない | `afterAll` でテストコードから `in_trash: true`。Connector / ToolにDeleteなし | Integration Test、Tool Test（公開Tool一覧） |
 | **LLM Client Verification**: 4シナリオ | §16 #1〜#4 | PRへ記録 |
+
+---
+
+## 20. Review対応履歴
+
+### rev.2（PR #4 レビュー反映）
+
+全体方針はPhase 3 Design Issueと整合しているとの評価。Q1は仕様側（`main`）で修正済み、Q2〜Q11は推奨案で合意。
+
+| # | 指摘 | 対応 |
+|---|---|---|
+| 1 | [P1] Notionの1 Request 500KB制限を設計・テストへ入れる | 送信予定の `pages.create` / `pages.update` / `blocks.children.append` bodyのUTF-8 byte数を送信前に検証し、500,000 bytes超は `InputValidationError`。`collection_update` は2 Requestとも先に検証してから送信。rich_text 2,000×100の検証は維持。ASCII / 日本語 / 絵文字 / 複数Field合算の境界Test、Integration Testで上限付近を確認（§6.4、§6.6、§8.1、§8.5、§10、§12.2、§14.4、§15.1 #8、§19） |
+| 2 | [P1] multi_select 1回100 options制限 | 重複除去後のTagsが100件以下であることをcreate / updateの送信前に検証し、超過は `InputValidationError`。100件 / 101件の回帰Test（§5.2、§8.5、§9.2、§12.2、§14.4、§15.1 #8） |
+| 3 | [P2] Select option名「最大100文字」の根拠 | 現行のAPIドキュメント / Request Limits / SDK（v5.27.0の型定義・README）から根拠を確認できなかったため、独自の100文字Validationを削除。カンマ不可のみ検証し、長いoption名の実挙動はIntegration Testで確認（§9.2、§14.4、§15.1 #7） |
+| Q1 | 仕様の不整合をmainで修正済み | 解決済みとして反映（§3、§5.1、§17 Q1） |
+| Q2〜Q11 | 推奨案に賛成。Q4は除外件数をDomain出力へ追加しない | 「合意済み」として反映（§17） |
+| 他 | Repository状態のBaseを最新mainへ | Branchを `0fdcf5f` へrebaseし、§1を更新 |
