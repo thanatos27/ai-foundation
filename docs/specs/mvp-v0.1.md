@@ -327,7 +327,7 @@ collection_type:
   movie |
   other
 
-status: string
+status: string | null
 
 metadata: object
 
