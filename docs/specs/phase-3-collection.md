@@ -691,6 +691,9 @@ Page本文Noteの追加方法
 Credential Provider変更
 Configuration変更
 Notion API Version / 利用SDK
+自由文字列StatusとNotion Select optionの作成・更新方法
+TagsとNotion multi_select optionの作成・更新方法
+Data Source Propertyの存在・型不一致をどう検出するか
 Error Mapping
 実装順序
 依存Package
