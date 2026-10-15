@@ -93,6 +93,32 @@ describe('data source', () => {
     );
   });
 
+  it('refuses to write while a Type option differs from a collection type only in case', async () => {
+    // Notion would reuse "Book" for "book", saving an item whose Type reads back as invalid.
+    const schema = fake.dataSourceSchemas.get(DATA_SOURCE_ID)!;
+    schema.Type = { type: 'select', select: { options: [{ name: 'Book' }] } };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const error = await failure(connector.create({ title: 'DDIA', collection_type: 'book', status: 'unread' }));
+      expect(error).toBeInstanceOf(ConfigurationError);
+      expect(error.message).toContain('option "Book" of property "Type" must be spelled "book"');
+    }
+    expect(fake.callsTo('pages.create')).toEqual([]);
+    expect(fake.storedPages.size).toBe(0);
+
+    schema.Type = { type: 'select', select: { options: [{ name: 'book' }] } };
+    const item = await connector.create({ title: 'DDIA', collection_type: 'book', status: 'unread' });
+    expect(item.collection_type).toBe('book');
+    await expect(connector.search({})).resolves.toHaveLength(1);
+  });
+
+  it('returns an existing status option with its own spelling', async () => {
+    const schema = fake.dataSourceSchemas.get(DATA_SOURCE_ID)!;
+    schema.Status = { type: 'select', select: { options: [{ name: 'Wishlist' }] } };
+    const item = await connector.create({ title: 'a', collection_type: 'game', status: 'wishlist' });
+    expect(item.status).toBe('Wishlist');
+  });
+
   it('reports missing capabilities as a configuration error', async () => {
     fake.failNext('dataSources.retrieve', apiError(403, APIErrorCode.RestrictedResource));
     await expect(connector.search({})).rejects.toBeInstanceOf(ConfigurationError);

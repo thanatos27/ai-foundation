@@ -849,6 +849,10 @@ rev.2で前回の3点（500KB制限、multi_select 100 options、option名100文
 | 2,000文字超のMetadata / Note、Tags 100件、約480KBのRequest | 分割保存・読み戻しとも成功 | Integration Test |
 | Page 404 / 未共有Data Source | `NotFoundError` / `ConfigurationError`（SDKのwarnログはstderrへ出る） | Integration Test |
 
+Implementation Review（PR #5）の指摘で追加:
+
+- **Type optionの大文字小文字**: Notionのoption名は大文字小文字を区別せず一意で、既存optionの表記が再利用される。`Type` に `Book` 等があると、`book` で作成したPageが `Book` で保存され、返却時に不正なTypeとしてErrorになる（保存済みのため再試行で重複する）。§6.3のSchema検証で、`game` / `book` / `movie` / `other` と大文字小文字だけが異なる `Type` optionを検出して `ConfigurationError`（表記修正を案内）とし、書き込み前に止める。回帰Test: 同じ入力の `create` を2回実行しても `pages.create` が呼ばれずPageが増えないこと。Fake Notion Clientも既存optionを大文字小文字を無視して再利用するようにした。
+
 Plan外の追加（Implementation Reviewで確認してほしい点）:
 
 - **検索結果の打ち切り**: `dataSources.query` の応答に `request_status: { type: 'incomplete', incomplete_reason: 'query_result_limit_reached' }` が付く場合があることをSDK型定義で確認した。黙って部分結果を返さないよう `ProviderApiError`（"the search result is incomplete ...; narrow the filter"）とする（§6.5の補足）。

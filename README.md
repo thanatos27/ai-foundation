@@ -149,7 +149,7 @@ AI Foundation専用のCollection Databaseを1つ用意し、Internal Connection�
    | Property | 種類 |
    |---|---|
    | `Name` | Title（既定のTitle Property） |
-   | `Type` | Select（`game` / `book` / `movie` / `other`） |
+   | `Type` | Select（`game` / `book` / `movie` / `other`。**小文字で**作る。`Book` のように大文字小文字だけが異なるoptionがあるとConfiguration Errorになる） |
    | `Status` | **Select**（NotionのStatus型ではない。Status型はAPIから任意の値を書き込めない） |
    | `Tags` | Multi-select |
    | `Metadata` | Text |

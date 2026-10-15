@@ -1,10 +1,11 @@
 import { APIErrorCode, APIResponseError, type PageObjectResponse } from '@notionhq/client';
 import type { NotionClient } from '../../../src/connectors/notion/client.js';
+import type { DataSourceProperty } from '../../../src/connectors/notion/schema.js';
 
 export const DATA_SOURCE_ID = '11111111-2222-3333-4444-555555555555';
 export const OTHER_DATA_SOURCE_ID = '99999999-8888-7777-6666-555555555555';
 
-export const COLLECTION_PROPERTIES: Record<string, { type: string }> = {
+export const COLLECTION_PROPERTIES: Record<string, DataSourceProperty> = {
   Name: { type: 'title' },
   Type: { type: 'select' },
   Status: { type: 'select' },
@@ -61,7 +62,9 @@ const joinRequestText = (items: { text: { content: string } }[] | undefined) =>
 export class FakeNotion {
   readonly calls: { method: Method; args: Args }[] = [];
   /** Data source ID → property schema. */
-  dataSourceSchemas = new Map<string, Record<string, { type: string }>>([[DATA_SOURCE_ID, COLLECTION_PROPERTIES]]);
+  dataSourceSchemas = new Map<string, Record<string, DataSourceProperty>>([
+    [DATA_SOURCE_ID, structuredClone(COLLECTION_PROPERTIES)],
+  ]);
   readonly storedPages = new Map<string, PageObjectResponse>();
   /** Page ID → its paragraphs, in order. */
   readonly storedBlocks = new Map<string, { type: string; text: string }[]>();
@@ -135,7 +138,9 @@ export class FakeNotion {
       const dataSourceId = args.parent.data_source_id;
       if (!this.dataSourceSchemas.has(dataSourceId)) throw apiError(404, APIErrorCode.ObjectNotFound);
       const id = this.nextId();
-      const page = this.pageObject(id, this.toResponseProperties(args.properties), { parentDataSourceId: dataSourceId });
+      const page = this.pageObject(id, this.toResponseProperties(args.properties, dataSourceId), {
+        parentDataSourceId: dataSourceId,
+      });
       this.storedPages.set(id, page);
       this.storedBlocks.set(id, (args.children ?? []).map(blockText));
       return page;
@@ -149,7 +154,7 @@ export class FakeNotion {
     update: (async (args: Args) => {
       this.record('pages.update', args);
       const page = this.findPage(args.page_id);
-      Object.assign(page.properties, this.toResponseProperties(args.properties ?? {}));
+      Object.assign(page.properties, this.toResponseProperties(args.properties ?? {}, this.parentOf(page)));
       page.last_edited_time = this.tick();
       return structuredClone(page);
     }) as any,
@@ -221,8 +226,25 @@ export class FakeNotion {
     } as unknown as PageObjectResponse;
   }
 
+  /**
+   * Like Notion, option names are unique regardless of case: an existing option is reused with its
+   * own spelling, and an unknown one is added to the data source.
+   */
+  private optionName(dataSourceId: string | undefined, property: string, name: string): string {
+    const schema = (dataSourceId ? this.dataSourceSchemas.get(dataSourceId)?.[property] : undefined) as
+      | Record<string, { options?: { name: string }[] } | string>
+      | undefined;
+    if (!schema || (schema.type !== 'select' && schema.type !== 'multi_select')) return name;
+    const config = (schema[schema.type] ??= {}) as { options?: { name: string }[] };
+    const options = (config.options ??= []);
+    const existing = options.find((option) => option.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.name;
+    options.push({ name });
+    return name;
+  }
+
   /** Request property values → response property values (as Notion stores them). */
-  private toResponseProperties(properties: Args): Record<string, unknown> {
+  private toResponseProperties(properties: Args, dataSourceId: string | undefined): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [name, value] of Object.entries(properties)) {
       if ('title' in value) out[name] = { id: name, type: 'title', title: richTextResponse(joinRequestText(value.title)) };
@@ -236,10 +258,18 @@ export class FakeNotion {
         out[name] = {
           id: name,
           type: 'multi_select',
-          multi_select: value.multi_select.map((option: { name: string }) => ({ id: 'o', name: option.name, color: 'default' })),
+          multi_select: value.multi_select.map((option: { name: string }) => ({
+            id: 'o',
+            name: this.optionName(dataSourceId, name, option.name),
+            color: 'default',
+          })),
         };
       } else if ('select' in value) {
-        out[name] = { id: name, type: 'select', select: value.select && { id: 'o', name: value.select.name, color: 'default' } };
+        out[name] = {
+          id: name,
+          type: 'select',
+          select: value.select && { id: 'o', name: this.optionName(dataSourceId, name, value.select.name), color: 'default' },
+        };
       }
     }
     return out;
