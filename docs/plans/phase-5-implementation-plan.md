@@ -917,7 +917,19 @@ Plan Reviewで判断をお願いした項目。PR #8 レビューでQ2〜Q7, Q9�
 | 書き込み | なし（Clientは `GET` のみ） |
 | rename / owner移管 | 手元にrename済みRepositoryがないため実APIでは未確認。Unit Test（§24.4 / §24.5）で担保 |
 
-### 31.2 Plan外の変更（Implementation Reviewで確認してほしい点）
+### 31.2 LLM Client Verification（Claude Code）
+
+`/mcp` で再接続した新しいSessionから実施。Tool呼び出しは折りたたみ表示のままのため、引数は応答内容からの推定を含む。
+
+| # | 発話 | Tool呼び出し | 結果 |
+|---|---|---|---|
+| 1 | 「physical-ai-robotの情報を確認して」 | 2回（`project_list` → 返却idで `project_get`） | `github:thanatos27/physical-ai-robot` のDetails（public / main / description null / archived・fork false / updated_at）を表示。README等は取得しない旨を説明 |
+| 2 | 「AI Foundationのプロジェクトを探して」 | 2回（`project_list({ query: "foundation" })` → `project_get`） | `github:thanatos27/ai-foundation` に到達。§6.2のTool description（単語1つで検索）に従い、`"AI Foundation"` ではなく最初から1単語で検索したとみられる（Q3の想定内） |
+| 3 | 「thanatos27のプロジェクトを一覧して」 | 1回（`project_list({ owner: "thanatos27" })`） | 27件をowner/repository順で表示（§31.1のDiscovery件数と一致）。一覧に公開設定等が含まれない点も説明 |
+
+いずれもIDを推測で組み立てず、Task / Knowledge等の他Toolへ誤ルーティングしなかった。
+
+### 31.3 Plan外の変更（Implementation Reviewで確認してほしい点）
 
 - **`User-Agent`**: §8.3の `ai-foundation/0.1.0` ではなく `ai-foundation` とした。Version番号を `package.json` / `SERVER_INFO` と三重管理しないため。
 - **`NonBlankSchema` の共通化**: §5.2のとおり `domain/knowledge.ts` から `domain/common.ts` へ移し、Projectと共有（挙動は不変）。
