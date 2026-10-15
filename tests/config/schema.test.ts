@@ -110,6 +110,62 @@ describe('ConfigSchema', () => {
     expect(issuePaths({ ...config, sources: { ...config.sources, collection } })).toEqual(['sources.collection']);
   });
 
+  describe('knowledge.obsidian', () => {
+    const vaultPath = process.platform === 'win32' ? 'C:/Users/me/Obsidian/Vault' : '/home/me/Obsidian/Vault';
+
+    function withObsidian(obsidian: Record<string, unknown>) {
+      const config = validConfig();
+      return { ...config, sources: { ...config.sources, knowledge: { ...config.sources.knowledge, obsidian } } };
+    }
+
+    it('accepts a filesystem vault with a knowledge directory', () => {
+      const result = ConfigSchema.safeParse(
+        withObsidian({ storage: 'filesystem', vault_path: vaultPath, knowledge_dir: 'AI Foundation/Knowledge' }),
+      );
+      expect(result.success && result.data.sources.knowledge.obsidian).toEqual({
+        storage: 'filesystem',
+        vault_path: vaultPath,
+        knowledge_dir: 'AI Foundation/Knowledge',
+      });
+    });
+
+    it('allows the block, vault_path and knowledge_dir to be omitted', () => {
+      expect(ConfigSchema.safeParse(validConfig()).success).toBe(true);
+      expect(ConfigSchema.safeParse(withObsidian({ storage: 'filesystem' })).success).toBe(true);
+    });
+
+    it('accepts a knowledge directory with dot-prefixed or Japanese segments', () => {
+      for (const knowledgeDir of ['.knowledge', 'ナレッジ/AI Foundation']) {
+        expect(ConfigSchema.safeParse(withObsidian({ storage: 'filesystem', knowledge_dir: knowledgeDir })).success).toBe(
+          true,
+        );
+      }
+    });
+
+    it.each(['google_drive', undefined])('rejects storage %s', (storage) => {
+      expect(issuePaths(withObsidian({ storage, knowledge_dir: 'K' }))).toEqual(['sources.knowledge.obsidian.storage']);
+    });
+
+    it.each(['relative/vault', './vault', ''])('rejects a vault_path that is not absolute: %j', (vault_path) => {
+      expect(issuePaths(withObsidian({ storage: 'filesystem', vault_path }))).toContain(
+        'sources.knowledge.obsidian.vault_path',
+      );
+    });
+
+    it.each(['', '.', '..', '../outside', 'AI Foundation/../..', '/abs', 'C:/abs', 'a\\b', 'a//b', 'a/', 'a/./b'])(
+      'rejects a knowledge_dir outside the vault or not in vault-relative form: %j',
+      (knowledge_dir) => {
+        expect(issuePaths(withObsidian({ storage: 'filesystem', knowledge_dir }))).toContain(
+          'sources.knowledge.obsidian.knowledge_dir',
+        );
+      },
+    );
+
+    it('rejects unknown keys', () => {
+      expect(issuePaths(withObsidian({ storage: 'filesystem', api_token: 'x' }))).toEqual(['sources.knowledge.obsidian']);
+    });
+  });
+
   it('rejects an invalid default area', () => {
     const config = validConfig();
     config.defaults.area = 'study';

@@ -30,7 +30,15 @@ sources:
     default: obsidian
     providers:
       - obsidian
-      - google_drive
+    obsidian:
+      storage: filesystem
+      # The only directory the knowledge tools read and write, relative to the vault.
+      knowledge_dir: "AI Foundation/Knowledge"
+      # The Obsidian vault on this machine (required by the knowledge tools). It may be
+      # inside a Google Drive (or other) sync folder; AI Foundation does not manage syncing.
+      # This repository is public: do not set it here. Set it in config.local.yaml
+      # (see README "Obsidian").
+      # vault_path: "C:/Users/you/Documents/Obsidian/MyVault"
 
   project:
     providers:
