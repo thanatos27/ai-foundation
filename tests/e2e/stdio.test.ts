@@ -51,7 +51,17 @@ async function withStdioClient<T>(run: (client: Client) => Promise<T>, args: str
 const listToolsOverStdio = (args: string[] = [], env = childEnv()) =>
   withStdioClient((client) => client.listTools(), args, env);
 
-const TOOL_NAMES = ['schedule_create', 'schedule_list', 'task_complete', 'task_create', 'task_list', 'task_update'];
+const TOOL_NAMES = [
+  'collection_create',
+  'collection_search',
+  'collection_update',
+  'schedule_create',
+  'schedule_list',
+  'task_complete',
+  'task_create',
+  'task_list',
+  'task_update',
+];
 const toolNames = ({ tools }: { tools: { name: string }[] }) => tools.map((tool) => tool.name).sort();
 
 async function runExpectingFailure(args: string[], env = childEnv()) {

@@ -1,4 +1,8 @@
 import type {
+  CollectionCreateInput,
+  CollectionItem,
+  CollectionSearchFilter,
+  CollectionUpdateInput,
   Schedule,
   ScheduleCreateInput,
   ScheduleListFilter,
@@ -34,8 +38,19 @@ export interface ScheduleConnector {
   list(filter: ScheduleListFilter): Promise<Schedule[]>;
 }
 
+/** Source of Truth: Notion. Reads and writes only the configured collection data source. */
+export interface CollectionConnector {
+  /** Creates the item, with `note` as the first paragraph of its page. */
+  create(input: CollectionCreateInput): Promise<CollectionItem>;
+  /** Items matching every given filter, by properties only (page content is not searched). */
+  search(filter: CollectionSearchFilter): Promise<CollectionItem[]>;
+  /** Updates the item with this exact ID and returns its state afterwards. */
+  update(input: CollectionUpdateInput): Promise<CollectionItem>;
+}
+
 /** Connectors available to tools. A missing entry means the provider is not wired. */
 export interface Connectors {
   task?: TaskConnector;
   schedule?: ScheduleConnector;
+  collection?: CollectionConnector;
 }
