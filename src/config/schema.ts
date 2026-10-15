@@ -24,7 +24,15 @@ export const ConfigSchema = z.strictObject({
   }),
   sources: z.strictObject({
     task: z.strictObject({ provider: z.enum(['todoist']) }),
-    schedule: z.strictObject({ provider: z.enum(['google_calendar']) }),
+    schedule: z.strictObject({
+      provider: z.enum(['google_calendar']),
+      /**
+       * The only calendar AI Foundation writes to. Not a secret, but personal: keep it in a
+       * local config file rather than the committed config.yaml. Optional so the server still
+       * starts (and schedule_list works) without it.
+       */
+      writable_calendar_id: z.string().min(1).optional(),
+    }),
     collection: z.strictObject({ provider: z.enum(['notion']) }),
     knowledge: z
       .strictObject({

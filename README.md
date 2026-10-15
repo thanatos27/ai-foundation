@@ -16,16 +16,25 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 1 — Foundation。MCP Server（stdio）、Domain Model、Config、Tool登録構造、Connector境界を実装済み。
+Phase 2 — Task / Schedule。TodoistとGoogle Calendarへ実際に接続し、以下のToolを公開している。
 
-外部Serviceとの実接続はPhase 2以降のため、現時点で公開しているToolは0件。
+| Tool | 内容 |
+|---|---|
+| `task_create` | Todoist InboxへTaskを作成（title / status / due / area / tags） |
+| `task_list` | Inbox内の未完了Taskを取得（status / area / due_before / due_after / tagsでFilter） |
+| `task_update` | `todoist:<id>` を指定して部分更新 |
+| `task_complete` | `todoist:<id>` を指定して完了 |
+| `schedule_create` | AI Foundation専用Calendarへ予定を作成（時刻予定 / 終日予定） |
+| `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得 |
+
+Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 22.12以上（開発環境: Node.js 24）
-- npm
+- Node.js 24以上
+- npm 11以上
 
 ### Install
 
@@ -46,6 +55,12 @@ npm run build
 ```sh
 npm run typecheck
 npm test
+```
+
+`npm test` は外部Serviceへ通信しない。実際のTodoist / Google Calendarに対するIntegration Testは、Credentialと `writable_calendar_id` を設定したうえで明示的に実行する。テストで作成したTask / Eventは終了時に削除する。
+
+```sh
+AI_FOUNDATION_INTEGRATION=1 npm run test:integration
 ```
 
 ### Start the MCP Server
@@ -76,7 +91,45 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
   - sources.task.provider: Invalid input: expected "todoist"
 ```
 
-認証情報は環境変数で渡す（Phase 2以降で使用）。変数名は [.env.example](.env.example) を参照。`.env` はCommitしない。
+### ローカル設定（`config.local.yaml`）
+
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+
+```yaml
+sources:
+  schedule:
+    provider: google_calendar
+    writable_calendar_id: "xxxxxxxx@group.calendar.google.com"
+```
+
+未設定でもServerは起動し、`schedule_create` だけがConfiguration Errorになる。
+
+## Credentials
+
+認証情報は環境変数で渡す。`config.yaml` には書けない（未知のKeyとして起動時にErrorになる）。変数名は [.env.example](.env.example) を参照。
+
+渡し方は次のいずれか。
+
+- Repository直下の `.env`（`.env.example` をコピー）。Serverは起動時に存在すれば読み込む。`.env` はCommitしない
+- MCP Client設定の `env`。`.env` より優先される
+
+Credentialが未設定でもServerは起動する。該当Toolを呼んだときに、不足している環境変数名を含むCredential Errorを返す。
+
+### Todoist
+
+Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app/settings/integrations/developer) でAPI Tokenを取得し、`TODOIST_API_TOKEN` に設定する。
+
+### Google Calendar
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でProjectを作成し、Google Calendar APIを有効化する
+2. OAuth同意画面を設定する。公開ステータスが「テスト中」のままだとRefresh Tokenが7日で失効するため、継続利用する場合は「本番環境」へ変更する（未確認アプリの警告は出るが個人利用は可能）
+3. 認証情報で「OAuth クライアント ID」（種類: デスクトップアプリ）を作成し、`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` に設定する
+4. `npm run auth:google` を実行し、表示されたURLをブラウザで開いて許可する。表示された `GOOGLE_OAUTH_REFRESH_TOKEN=...` を `.env` に追記する（ファイルへは自動で書き込まない）
+5. Google CalendarでAI Foundation専用のCalendarを作成し、「カレンダーの設定 → カレンダーの統合」にあるカレンダーIDを `config.local.yaml` の `writable_calendar_id` に設定する
+
+要求するScopeは `calendar.calendarlist.readonly` と `calendar.events`。`calendar.events` は技術的には全Calendarへ書き込めるが、AI Foundationは `writable_calendar_id` 以外へ書き込まない。
+
+`invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する。
 
 ## Register with an MCP Client
 
@@ -96,7 +149,13 @@ command = "node"
 args = ["/absolute/path/to/ai-foundation/dist/index.js"]
 ```
 
-別の場所のConfigを使う場合は `--config <path>` を引数に追加するか、`AI_FOUNDATION_CONFIG` を設定する。
+別の場所のConfigを使う場合は `--config <path>` を引数に追加するか、`AI_FOUNDATION_CONFIG` を設定する。`config.local.yaml` を使う例:
+
+```sh
+claude mcp add ai-foundation -- node /absolute/path/to/ai-foundation/dist/index.js --config /absolute/path/to/ai-foundation/config.local.yaml
+```
+
+`.env` を使わずMCP Client側でCredentialを渡す場合は、`claude mcp add` の `-e TODOIST_API_TOKEN=...` や、Codexの `env` を使う。`--no-env-file` を付けると `.env` を読み込まない。
 
 ## Development
 
@@ -104,19 +163,28 @@ args = ["/absolute/path/to/ai-foundation/dist/index.js"]
 
 ```text
 src/
-├─ domain/       Provider非依存のEntity Schema（Zod）
+├─ domain/       Provider非依存のEntity / Tool Input Schema（Zod）
 ├─ config/       config.yamlのSchemaとLoader
-├─ connectors/   Connector境界（Provider固有処理のInterface）
-├─ tools/        MCP Toolの登録
+├─ credentials/  CredentialProvider境界と環境変数実装
+├─ connectors/   Connector境界と実装（todoist/, google-calendar/）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts）
+├─ shared/       Timezone計算などの共通処理
+├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
 ├─ server.ts     MCP Serverの組み立て
-└─ index.ts      Entry Point（Config読込・stdio起動）
+└─ index.ts      Entry Point（.env / Config読込・Connector生成・stdio起動）
+scripts/
+└─ google-auth.ts  Google OAuth Refresh Tokenの取得
 tests/
+├─ integration/  実APIへのIntegration Test（npm run test:integration）
+└─ ...           通常のTest（外部通信なし）
 ```
 
-### Adding Tools (Phase 2以降)
+### Adding Tools
 
 Entityごとに `src/tools/<entity>.ts` を作成し、`register<Entity>Tools(server, context)` 内でSDKの `server.registerTool()` を直接呼ぶ。作成した関数を `src/tools/index.ts` の `registerTools` から呼び出す。Provider固有処理は `src/connectors/<provider>/` に置き、Toolからは `context.connectors` 経由で利用する。
+
+ConnectorはCredentialを `CredentialProvider` からのみ受け取り、`process.env` を直接読まない。失敗時は `src/errors.ts` のErrorを投げる。MCP SDKが `error.message` を `isError` 結果としてClientへ返すため、MessageにCredentialを含めない。
 
 ### Logging
 
@@ -127,5 +195,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [MVP v0.1仕様](docs/specs/mvp-v0.1.md)
 - [Phase 1 Design Issue](docs/specs/phase-1-foundation.md)
 - [Phase 1 Implementation Plan](docs/plans/phase-1-implementation-plan.md)
+- [Phase 2 Design Issue](docs/specs/phase-2-task-schedule.md)
+- [Phase 2 Implementation Plan](docs/plans/phase-2-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

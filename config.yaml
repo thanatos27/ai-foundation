@@ -13,6 +13,11 @@ sources:
 
   schedule:
     provider: google_calendar
+    # The only calendar AI Foundation writes to (required by schedule_create).
+    # This repository is public: do not set it here. Copy this file to
+    # config.local.yaml (git-ignored), set it there and start the server with
+    # --config config.local.yaml or AI_FOUNDATION_CONFIG.
+    # writable_calendar_id: "xxxxxxxx@group.calendar.google.com"
 
   collection:
     provider: notion

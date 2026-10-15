@@ -23,8 +23,22 @@ export const OptionalMetadataShape = {
   external_ref: z.string().min(1).nullable().optional(),
 };
 
-/** Rejects `end` earlier than `start`. Both are offset date-times, so Date.parse is unambiguous. */
+/**
+ * Rejects `end` earlier than `start`. Both must be the same kind (see `sameDateKind`): offset
+ * date-times compare as instants, and dates compare as UTC midnights, so Date.parse is unambiguous.
+ */
 export function endNotBeforeStart(value: { start: string; end?: string | null | undefined }): boolean {
   if (value.end == null) return true;
   return Date.parse(value.end) >= Date.parse(value.start);
+}
+
+/** True for a calendar date without time (`YYYY-MM-DD`). */
+export function isDateOnly(value: string): boolean {
+  return DateSchema.safeParse(value).success;
+}
+
+/** Rejects a `start` / `end` pair that mixes a date with a date-time. */
+export function sameDateKind(value: { start: string; end?: string | null | undefined }): boolean {
+  if (value.end == null) return true;
+  return isDateOnly(value.start) === isDateOnly(value.end);
 }

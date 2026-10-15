@@ -1,6 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import type { Config } from '../config/schema.js';
 import type { Connectors } from '../connectors/types.js';
+import { registerScheduleTools } from './schedule.js';
+import { registerTaskTools } from './task.js';
 
 /** What tool handlers may use. Tools reach providers only through `connectors`. */
 export interface ToolContext {
@@ -9,9 +11,13 @@ export interface ToolContext {
 }
 
 /**
- * Registers every public tool on `server`.
+ * Registers every public tool on `server`. Each entity has its own
+ * `register<Entity>Tools(server, context)` that calls `server.registerTool()` directly.
  *
- * Each entity adds its own `register<Entity>Tools(server, context)` that calls
- * `server.registerTool()` directly (Phase 2: task, schedule). Phase 1 exposes no tools.
+ * Tools are registered even when their connector is missing; calling one then returns a
+ * configuration error, so the AI client still sees the tool and the reason it cannot run.
  */
-export function registerTools(_server: McpServer, _context: ToolContext): void {}
+export function registerTools(server: McpServer, context: ToolContext): void {
+  registerTaskTools(server, context);
+  registerScheduleTools(server, context);
+}
