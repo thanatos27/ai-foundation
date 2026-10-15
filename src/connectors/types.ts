@@ -1,8 +1,15 @@
 import type {
+  Area,
   CollectionCreateInput,
   CollectionItem,
   CollectionSearchFilter,
   CollectionUpdateInput,
+  Knowledge,
+  KnowledgeAppendInput,
+  KnowledgeCreateInput,
+  KnowledgeDocument,
+  KnowledgeSearchFilter,
+  KnowledgeSearchResult,
   Schedule,
   ScheduleCreateInput,
   ScheduleListFilter,
@@ -48,9 +55,25 @@ export interface CollectionConnector {
   update(input: CollectionUpdateInput): Promise<CollectionItem>;
 }
 
+/** `knowledge_create` input once the tool has resolved the source and the default area. */
+export type KnowledgeCreate = Omit<KnowledgeCreateInput, 'source' | 'area'> & { area: Area | null };
+
+/** Source of Truth: Obsidian. Reads and writes only Markdown files under the configured knowledge_dir. */
+export interface KnowledgeConnector {
+  /** Creates a new note directly under knowledge_dir. Never overwrites an existing file. */
+  create(input: KnowledgeCreate): Promise<Knowledge>;
+  /** Knowledge under knowledge_dir (recursively) matching every given filter; malformed notes are skipped. */
+  search(filter: KnowledgeSearchFilter): Promise<KnowledgeSearchResult[]>;
+  /** Metadata and the full body of the knowledge with this exact ID. */
+  get(id: string): Promise<KnowledgeDocument>;
+  /** Appends to the end of the body without touching the frontmatter; returns the metadata. */
+  append(input: KnowledgeAppendInput): Promise<Knowledge>;
+}
+
 /** Connectors available to tools. A missing entry means the provider is not wired. */
 export interface Connectors {
   task?: TaskConnector;
   schedule?: ScheduleConnector;
   collection?: CollectionConnector;
+  knowledge?: KnowledgeConnector;
 }
