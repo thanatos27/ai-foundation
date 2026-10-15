@@ -1,11 +1,11 @@
 # Phase 5: Project — Implementation Plan
 
-- Status: **rev.2（PR #8 レビュー反映・再レビュー待ち）**
+- Status: **rev.2（Plan Review完了・User承認済み）**
 - 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: 2026-10-16 PR #8 レビュー反映）
 - 対象: [Phase 5 Design Issue](../specs/phase-5-project.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 4 Design Issue](../specs/phase-4-knowledge.md), [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-本PlanはPR #8 のPlan Review（rev.1）を反映したrev.2であり、本実装はまだ開始していない。実装はPlan承認後に `main` から作成する `feat/phase-5-project` で行う。仕様に明記がなく本Planで決めた箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
+ChatGPTによるPlan Review（PR #8、rev.2でOK）は完了し、User承認済み。実装は `main` から作成する `feat/phase-5-project` で行う。仕様に明記がなく本Planで決めた箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
 
 ---
 
