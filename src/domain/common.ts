@@ -5,6 +5,9 @@ export type Area = z.infer<typeof AreaSchema>;
 
 export const TagsSchema = z.array(z.string().min(1));
 
+/** Non-blank text, stored as given (not trimmed). */
+export const NonBlankSchema = z.string().refine((text) => text.trim().length > 0, { message: 'must not be blank' });
+
 /** Calendar date without time, e.g. `2026-10-16`. */
 export const DateSchema = z.iso.date();
 

@@ -1,11 +1,8 @@
 import { z } from 'zod';
-import { AreaSchema, TagsSchema } from './common.js';
+import { AreaSchema, NonBlankSchema, TagsSchema } from './common.js';
 
 export const KnowledgeSourceSchema = z.enum(['obsidian', 'google_drive']);
 export type KnowledgeSource = z.infer<typeof KnowledgeSourceSchema>;
-
-/** Non-blank text, stored as given (not trimmed). */
-const NonBlankSchema = z.string().refine((text) => text.trim().length > 0, { message: 'must not be blank' });
 
 /**
  * Reusable learning or insight. Source of Truth: Obsidian / Google Drive (spec §5.6).
