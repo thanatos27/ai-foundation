@@ -1,11 +1,11 @@
 # Phase 4: Knowledge — Implementation Plan
 
-- Status: **rev.3（PR #6 再レビュー反映。最終確認待ち）**
+- Status: **rev.3（Plan Review完了・User承認済み）**
 - 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #6 レビュー反映、rev.3: PR #6 再レビュー反映）
 - 対象: [Phase 4 Design Issue](../specs/phase-4-knowledge.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 3 Implementation Plan](phase-3-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-このPlanはReview用であり、本実装は開始していない。Plan Review・User承認後に `main` から `feat/phase-4-knowledge` を作成して実装する。仕様に明記がなく本Planで決めた箇所・判断を仰ぎたい箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q12はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
+ChatGPTによるPlan Reviewは完了し、User承認済み。実装は `main` から作成する `feat/phase-4-knowledge` で行う。仕様に明記がなく本Planで決めた箇所・判断を仰ぎたい箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q12はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
 
 ---
 
