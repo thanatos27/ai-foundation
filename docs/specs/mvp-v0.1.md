@@ -284,11 +284,12 @@ GitHub
 Google Drive
 ```
 
-MVPではProjectの詳細Metadata設計は行わない。
+Phase 5では **1 GitHub Repository = 1 Project** と定義し、GitHub Repositoryを動的にDiscoveryして参照する。
 
-最低限以下のみ扱う。
+共通Project Domainは最低限以下を扱う。
 
 ```yaml
+id: string
 type: project
 title: string
 
@@ -297,11 +298,15 @@ source: github | google_drive
 external_ref: string
 ```
 
-Project一覧を`config.yaml`へ記述しない。
+GitHub Project IDは以下とする。
 
-Projectは各SoT上に存在する動的データとして扱う。
+```text
+github:<owner>/<repository>
+```
 
-ProjectのDiscovery方法、Status、Area、複数Source間の関連付け等は将来設計する。
+Project一覧を`config.yaml`へ記述せず、各SoT上に存在する動的データとして扱う。
+
+Phase 5で実装するProject ProviderはGitHubのみとする。Google Drive Project Connector、Project Status / Area、複数Source間の関連付けは将来設計する。
 
 ---
 
@@ -636,6 +641,39 @@ exact IDでMarkdown本文末尾へ追記する。
 
 ---
 
+### project_list
+
+```json
+{
+  "query": "string",
+  "owner": "string"
+}
+```
+
+`query` / `owner` はOptional。
+
+Phase 5ではGitHub Tokenから参照可能なRepositoryを動的に列挙する。
+
+`query` はrepository name / owner/repository / descriptionへの大文字小文字を区別しない部分一致、`owner` はowner loginへの大文字小文字を区別しない完全一致とする。
+
+空Filter `{}` で参照可能なRepository一覧を取得する。
+
+---
+
+### project_get
+
+```json
+{
+  "id": "github:<owner>/<repository>"
+}
+```
+
+exact IDでRepository Metadataを取得する。
+
+README / Repository contents / Issue / Pull Requestは自動取得しない。
+
+---
+
 ## 10. Architecture
 
 AI Foundationは独自Agent Runtimeではなく、MCP Serverとして実装する。
@@ -709,8 +747,8 @@ Node.js File System
 → Obsidian Vault
 
 Project:
-GitHub API
-Google Drive API
+GitHub API (Phase 5)
+Google Drive API (Future)
 
 Config:
 YAML
@@ -803,7 +841,6 @@ sources:
   project:
     providers:
       - github
-      - google_drive
 ```
 
 認証情報はconfigへ保存しない。
@@ -1020,17 +1057,24 @@ Google Drive APIによるKnowledge対応は必要性に応じて追加する。
 
 ```text
 GitHub
-Google Drive
 ```
 
-MVPでは主に参照用途とする。
+対応操作：
 
 ```text
-project_get
 project_list
+project_get
 ```
 
-Project MetadataやDiscovery方式は将来設計する。
+Phase 5では1 GitHub Repository = 1 Projectとする。
+
+Project一覧をConfigurationへ列挙せず、GitHub Tokenから参照可能なRepositoryを動的にDiscoveryする。
+
+`project_list` は軽量なProject一覧、`project_get` はexact IDによるRepository Metadata取得を担当する。README / Repository contents / Issue / Pull Requestは自動取得しない。
+
+Google Drive Project Connectorは必要性に応じて将来追加する。
+
+詳細なScopeとAcceptance Criteriaは[Phase 5 Design Issue](phase-5-project.md)を参照する。
 
 ---
 
@@ -1108,7 +1152,9 @@ Knowledgeを検索し、exact IDで本文を取得できる。
 「physical-ai-robotの情報を確認」
 ```
 
-GitHubからProject情報を取得できる。
+GitHub Repositoryを検索し、exact IDで現在のProject Metadataを取得できる。
+
+README等の長いRepository contentsをProject Metadata取得時に自動で含めない。
 
 ---
 
@@ -1143,7 +1189,10 @@ Intent Classifier
 Dashboard
 Voice UI
 Robot UI
-Project Metadataの詳細設計
+Google Drive Project Connector
+Project作成 / 更新 / 削除
+Project README / Repository contents / Issue / Pull Requestの自動取得
+Project Status / Area / 複数Source間の関連付け
 高度なPermission / Risk Engine
 自動Scheduler
 ```
