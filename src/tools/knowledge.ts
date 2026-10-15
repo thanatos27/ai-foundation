@@ -22,6 +22,10 @@ const TAGS =
   `Tags follow Obsidian's rules: written without "#", no spaces, only letters, numbers, "_", "-", "/" ` +
   `(nested tags) and non-ASCII characters such as Japanese, and not numbers only.`;
 
+const READ_ONLY_METADATA =
+  `title, description, area and tags cannot be changed after creation: no tool updates them, ` +
+  `so do not offer to; the user edits them in Obsidian, and the next call reads the edited note.`;
+
 /**
  * Resolves the knowledge source a call runs against. Phase 4 runs only when it resolves to Obsidian:
  * an omitted or `auto` source uses `sources.knowledge.default`.
@@ -54,7 +58,7 @@ export function registerKnowledgeTools(server: McpServer, { config, connectors }
         `The file name comes from title, and an existing note is never overwritten: if one with the same name exists ` +
         `this fails, so to add to existing knowledge find it with knowledge_search and use knowledge_append. ` +
         `content is the Markdown body, saved as given. description is an optional one-line summary. ` +
-        `area defaults to "${defaultArea}"; null means no area. ${TAGS}`,
+        `area defaults to "${defaultArea}"; null means no area. ${TAGS} ${READ_ONLY_METADATA}`,
       inputSchema: KnowledgeCreateInputSchema,
       outputSchema: KnowledgeOutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -105,7 +109,7 @@ export function registerKnowledgeTools(server: McpServer, { config, connectors }
         `Add content to the end of an existing knowledge note by its exact id (from knowledge_search). ` +
         `content is appended as given, as a new paragraph; the frontmatter (title, description, area, tags) and the ` +
         `existing body are not changed. No date or heading is added, so include one in content if wanted. ` +
-        `Calling it again appends the content again.`,
+        `Calling it again appends the content again. ${READ_ONLY_METADATA}`,
       inputSchema: KnowledgeAppendInputSchema,
       outputSchema: KnowledgeOutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

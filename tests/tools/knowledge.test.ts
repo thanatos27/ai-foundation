@@ -52,6 +52,9 @@ describe('knowledge tools', () => {
 
     expect(byName.knowledge_append?.inputSchema).toMatchObject({ required: ['id', 'content'], additionalProperties: false });
     expect(byName.knowledge_append?.annotations).toMatchObject({ destructiveHint: false, idempotentHint: false });
+    for (const name of ['knowledge_create', 'knowledge_append']) {
+      expect(byName[name]?.description).toContain('cannot be changed after creation');
+    }
 
     for (const name of ['knowledge_create', 'knowledge_search', 'knowledge_get', 'knowledge_append']) {
       expect(byName[name]?.outputSchema).toBeDefined();
