@@ -161,7 +161,7 @@ AI Foundation専用のCollection Databaseを1つ用意し、Internal Connection�
 
 Propertyの不足・型の違い、Integrationが共有されていないData Sourceは、Collection Toolの初回呼び出し時にConfiguration Errorとして原因を返す。Propertyを直した後はServerを再起動する（Schemaの確認はProcessごとに1回）。
 
-StatusやTagにNotion上に存在しない値を指定すると、Select optionが自動で追加される。使われなくなったoptionは自動では削除されないため、必要に応じてNotion上で整理する。Select optionの名前にはカンマを使えない。
+StatusやTagにNotion上に存在しない値を指定すると、Select optionが自動で追加される。使われなくなったoptionは自動では削除されないため、必要に応じてNotion上で整理する。既存のoptionと大文字小文字だけが異なる値（例: 既存 `rpg` に対して `RPG`）は、既存のoptionとして扱われ、既存の表記で保存される。Select optionの名前にはカンマを使えない。
 
 Page本文の内容はAI Foundationからは変更・削除せず、`note` / `append_note` を末尾へ追記するだけ。Notion上で直接編集してよいが、`Metadata` はJSON Objectの形を保つ（JSONとして読めない場合、検索結果に `metadata` が含まれず、`metadata` の更新はErrorになる）。`Type` が空または4種以外のPageは検索結果に含まれない。
 

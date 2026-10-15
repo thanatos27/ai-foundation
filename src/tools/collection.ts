@@ -17,7 +17,8 @@ const ItemListOutputSchema = z.object({ items: z.array(CollectionItemSchema) });
 const STATUS =
   `status is free text chosen per collection, e.g. game: wishlist / playing / completed, ` +
   `book: wishlist / reading / read, movie: wishlist / watched. ` +
-  `Check the statuses existing items use (collection_search) and reuse them. Commas are not allowed in status or tags.`;
+  `Check the statuses existing items use (collection_search) and reuse them. Commas are not allowed in status or tags. ` +
+  `A status or tag that differs from an existing one only in case is stored with the existing spelling.`;
 
 /** Registers collection_create / collection_search / collection_update (Source of Truth: Notion). */
 export function registerCollectionTools(server: McpServer, { connectors }: ToolContext): void {

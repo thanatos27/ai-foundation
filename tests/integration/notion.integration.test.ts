@@ -61,25 +61,28 @@ describe.runIf(run)('Notion collection (real API)', () => {
       metadata: { platform: 'Xbox', rating: null, nested: { a: 1 } },
       tags: ['RPG', 'af-it'],
     });
-    expect(item.external_ref).toMatch(/^https:\/\/(www\.)?notion\.so\//);
+    // Notion's page URL (currently https://app.notion.com/p/<slug>-<id>), ending in the compact page ID.
+    expect(item.external_ref).toMatch(new RegExp(`^https://.+${pageIdOf(item).replaceAll('-', '')}$`));
     expect(await paragraphs(item)).toEqual(['セールになったら買いたい\n2行目']);
   });
 
   it('searches by title part, type, status and all tags', async () => {
+    // Other tests create items under the same run label: scope every query to this test's items.
+    const scope = `${runLabel} Search`;
     const game = remember(
-      await connector.create({ title: `${runLabel} Search Game`, collection_type: 'game', status: 'playing', tags: ['RPG', 'af-it'] }),
+      await connector.create({ title: `${scope} Game`, collection_type: 'game', status: 'playing', tags: ['RPG', 'af-it'] }),
     );
     const book = remember(
-      await connector.create({ title: `${runLabel} Search Book`, collection_type: 'book', status: 'reading', tags: ['af-it'] }),
+      await connector.create({ title: `${scope} Book`, collection_type: 'book', status: 'reading', tags: ['af-it'] }),
     );
     const ids = (items: CollectionItem[]) => items.map((item) => item.id);
 
-    expect(ids(await connector.search({ query: `${runLabel} Search` }))).toEqual(expect.arrayContaining([game.id, book.id]));
-    // Notion's title "contains" is expected to ignore case (recorded in the plan / README).
-    expect(ids(await connector.search({ query: `${runLabel} search game`.toLowerCase() }))).toContain(game.id);
-    expect(ids(await connector.search({ query: runLabel, collection_type: 'book' }))).toEqual([book.id]);
-    expect(ids(await connector.search({ query: runLabel, status: 'playing' }))).toEqual([game.id]);
-    expect(ids(await connector.search({ query: runLabel, tags: ['af-it', 'RPG'] }))).toEqual([game.id]);
+    expect(ids(await connector.search({ query: scope }))).toEqual(expect.arrayContaining([game.id, book.id]));
+    // Notion's title "contains" ignores case.
+    expect(ids(await connector.search({ query: `${scope} game`.toLowerCase() }))).toEqual([game.id]);
+    expect(ids(await connector.search({ query: scope, collection_type: 'book' }))).toEqual([book.id]);
+    expect(ids(await connector.search({ query: scope, status: 'playing' }))).toEqual([game.id]);
+    expect(ids(await connector.search({ query: scope, tags: ['af-it', 'RPG'] }))).toEqual([game.id]);
     expect(ids(await connector.search({}))).toEqual(expect.arrayContaining([game.id, book.id]));
   });
 
@@ -109,7 +112,7 @@ describe.runIf(run)('Notion collection (real API)', () => {
     expect(await paragraphs(item)).toEqual(['最初のメモ', '読了']);
   });
 
-  it('creates select options that do not exist yet, and records how case differences behave', async () => {
+  it('creates select options that do not exist yet and reuses existing ones regardless of case', async () => {
     const status = `af-it-status-${Date.now()}`;
     const longTag = `af-it-long-${'x'.repeat(150)}`;
     const item = remember(
@@ -117,9 +120,9 @@ describe.runIf(run)('Notion collection (real API)', () => {
     );
     expect(item).toMatchObject({ status, tags: ['af-it', longTag] });
 
+    // Notion matches an existing option case-insensitively and keeps its spelling.
     const recased = await connector.update({ id: item.id!, tags: ['AF-IT'] });
-    // Whatever Notion does here is recorded in the plan; the connector sends names as given.
-    console.error(`[notion integration] tag "AF-IT" was stored as ${JSON.stringify(recased.tags)}`);
+    expect(recased.tags).toEqual(['af-it']);
   });
 
   it('stores long metadata and notes split into 2,000-character chunks, and 100 tags', async () => {
