@@ -555,7 +555,8 @@ Input:
   "collection_type": "game | book | movie | other",
   "status": "string",
   "metadata": {},
-  "tags": []
+  "tags": [],
+  "note": "string | null"
 }
 ```
 
@@ -568,6 +569,7 @@ Input:
   "id": "string",
   "status": "string | null",
   "metadata": {},
+  "tags": ["string"],
   "append_note": "string | null"
 }
 ```
@@ -746,6 +748,7 @@ sources:
 
   collection:
     provider: notion
+    data_source_id: "<AI Foundation Collection Data Source ID>"
 
   knowledge:
     default: obsidian
@@ -936,6 +939,8 @@ collection_update
 ```
 
 本・ゲーム・映画の管理と、アイテム固有メモを扱えること。
+
+詳細なScopeとAcceptance Criteriaは[Phase 3 Design Issue](phase-3-collection.md)を参照する。
 
 ---
 
