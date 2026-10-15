@@ -16,7 +16,7 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 4 — Knowledge。Todoist・Google Calendar・Notion・Obsidian Vaultへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -33,12 +33,16 @@ Phase 4 — Knowledge。Todoist・Google Calendar・Notion・Obsidian Vaultへ�
 | `knowledge_search` | Knowledge Directory以下を再帰的に検索（query: title / description / tags / 本文の部分一致、area、tags（AND））。本文全文ではなくsnippetを返す |
 | `knowledge_get` | `obsidian:<vault-relative-path>` を指定してMetadataと本文全文を取得 |
 | `knowledge_append` | `obsidian:<vault-relative-path>` を指定して本文末尾へ追記（Frontmatterは変更しない） |
+| `project_list` | `GITHUB_TOKEN` から参照可能なGitHub RepositoryをProjectとして一覧（query: name / owner/repository / descriptionの部分一致、owner: 完全一致。いずれも大文字小文字を区別しない）。owner/repository順 |
+| `project_get` | `github:<owner>/<repository>` を指定してProjectとGitHub固有Details（description / owner / default_branch / visibility / archived / fork / updated_at）を取得（Read-only） |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
 
 CollectionItemの `status` は自由文字列（例: `wishlist` / `playing` / `read`）で、NotionのSelect optionとして保存する。`metadata` は自由形式のObjectで、`Metadata` PropertyにJSON文字列として保存する。感想・読書メモ等の長文は `note` / `append_note` でPage本文の末尾へParagraphとして追記する。
 
 Knowledgeは1件 = 1 Markdown file（UTF-8）で、`title` / `description` / `area` / `tags` をYAML Frontmatterに持つ。IDはVault相対パス（`obsidian:AI Foundation/Knowledge/CAP定理.md`）で、ローカルの絶対パスは含まない。ObsidianでファイルをKnowledge Directory内の別フォルダへ移動するとIDが変わる（旧IDはNot foundになり、`knowledge_search` で新しいIDが見つかる）。
+
+Projectは1 GitHub Repository = 1 Projectで、IDは `github:<owner>/<repository>`。Project一覧はConfigに書かず、Tool呼び出しのたびにGitHub APIから取得する（Cacheなし）。public / private / internal、archived、fork、Organization所有のRepositoryも区別せず含む。RepositoryをGitHub上でrename・移管すると、旧IDの `project_get` は現在のIDで結果を返す。README・ファイル・Issue・Pull Requestは取得しない。
 
 ## Getting Started
 
@@ -68,7 +72,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledgeのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vaultに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir`）で実行する。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledgeのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir`）で実行する。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -171,6 +175,19 @@ Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app
 
 `invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する。
 
+### GitHub
+
+`GITHUB_TOKEN` から参照可能なRepositoryがそのままProjectになる。AI Foundationにはallowlistがないため、**Tokenに付与するRepository accessでProjectの範囲を決める**。`project_get` も `project_list` に出るRepositoryだけを返す（Token対象外のpublic RepositoryはNot found）。
+
+1. GitHubの [Fine-grained personal access tokens](https://github.com/settings/personal-access-tokens) で新しいTokenを作成する
+2. Resource ownerを選び、Repository accessで「Only select repositories」からAI Foundationに見せるRepositoryを選ぶ（すべてを見せる場合は「All repositories」）
+3. Repository permissionsは **Metadata: Read-only** だけを付与する（AI FoundationはRepositoryへ書き込まない）
+4. 作成したTokenを `GITHUB_TOKEN` に設定する
+
+Classic Tokenも使えるが、private Repositoryを含めるには `repo` scope（書き込み権限を含む）が必要になるため、Fine-grained Tokenを推奨する。Organization所有のRepositoryは、Resource ownerにそのOrganizationを選んだTokenで参照する（Organization側でTokenの承認が必要な場合がある）。SAML SSOを要求するOrganizationでは、TokenのSSO承認が済むまで該当Repositoryが一覧に出ず、`project_get` もNot foundになる。
+
+Rate Limitに達した場合はProvider API Errorとして解除時刻を返す（自動で待機・再試行しない）。`project_get` は境界の確認のためにRepository一覧も取得するので、1回あたり「1 + 一覧のページ数（100件ごと）」回のRequestになる。
+
 ### Notion
 
 AI Foundation専用のCollection Databaseを1つ用意し、Internal Connection（Integration）を共有する。種類（book / game 等）ごとにDatabaseを分けず、種類別・Status別の一覧はNotionのViewで作る。
@@ -221,7 +238,7 @@ args = ["/absolute/path/to/ai-foundation/dist/index.js"]
 claude mcp add ai-foundation -- node /absolute/path/to/ai-foundation/dist/index.js --config /absolute/path/to/ai-foundation/config.local.yaml
 ```
 
-`.env` を使わずMCP Client側でCredentialを渡す場合は、`claude mcp add` の `-e TODOIST_API_TOKEN=...`（Notionは `-e NOTION_API_TOKEN=...`） や、Codexの `env` を使う。`--no-env-file` を付けると `.env` を読み込まない。
+`.env` を使わずMCP Client側でCredentialを渡す場合は、`claude mcp add` の `-e TODOIST_API_TOKEN=...`（Notionは `-e NOTION_API_TOKEN=...`、GitHubは `-e GITHUB_TOKEN=...`） や、Codexの `env` を使う。`--no-env-file` を付けると `.env` を読み込まない。
 
 ## Development
 
@@ -232,8 +249,8 @@ src/
 ├─ domain/       Provider非依存のEntity / Tool Input Schema（Zod）
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
-├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/）
-├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts）
+├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/, github/）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts）
 ├─ shared/       Timezone計算などの共通処理
 ├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
@@ -267,5 +284,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Phase 3 Implementation Plan](docs/plans/phase-3-implementation-plan.md)
 - [Phase 4 Design Issue](docs/specs/phase-4-knowledge.md)
 - [Phase 4 Implementation Plan](docs/plans/phase-4-implementation-plan.md)
+- [Phase 5 Design Issue](docs/specs/phase-5-project.md)
+- [Phase 5 Implementation Plan](docs/plans/phase-5-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)
