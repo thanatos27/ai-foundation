@@ -13,4 +13,6 @@ export interface GoogleOAuthCredentials {
 export interface CredentialProvider {
   getTodoistApiToken(): Promise<string>;
   getGoogleOAuthCredentials(): Promise<GoogleOAuthCredentials>;
+  /** Internal integration token of the AI Foundation Notion connection. */
+  getNotionApiToken(): Promise<string>;
 }

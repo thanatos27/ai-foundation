@@ -20,6 +20,10 @@ export class EnvCredentialProvider implements CredentialProvider {
     return { clientId, clientSecret, refreshToken };
   }
 
+  async getNotionApiToken(): Promise<string> {
+    return this.require('Notion', ['NOTION_API_TOKEN'])[0];
+  }
+
   /** Returns the values in order, or throws naming every missing variable (never a value). */
   private require<const N extends readonly string[]>(provider: string, names: N): { [K in keyof N]: string } {
     const missing = names.filter((name) => !this.env[name]?.trim());

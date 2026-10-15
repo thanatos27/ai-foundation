@@ -46,6 +46,20 @@ describe('EnvCredentialProvider', () => {
     expect(error.message).toBe('Credential error: Todoist credential is not configured: set TODOIST_API_TOKEN');
   });
 
+  it('reads the Notion API token', async () => {
+    const provider = new EnvCredentialProvider({ NOTION_API_TOKEN: ' ntn_secret\n' });
+    await expect(provider.getNotionApiToken()).resolves.toBe('ntn_secret');
+  });
+
+  it.each([
+    ['unset', {}],
+    ['empty', { NOTION_API_TOKEN: '' }],
+    ['blank', { NOTION_API_TOKEN: '   ' }],
+  ])('reports a %s Notion token by variable name', async (_label, env) => {
+    const error = await credentialError(new EnvCredentialProvider(env).getNotionApiToken());
+    expect(error.message).toBe('Credential error: Notion credential is not configured: set NOTION_API_TOKEN');
+  });
+
   it('names every missing Google variable without leaking the ones that are set', async () => {
     const env = { GOOGLE_OAUTH_CLIENT_ID: 'client-id', GOOGLE_OAUTH_CLIENT_SECRET: 'client-secret' };
     const error = await credentialError(new EnvCredentialProvider(env).getGoogleOAuthCredentials());
