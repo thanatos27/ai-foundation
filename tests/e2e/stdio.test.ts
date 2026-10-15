@@ -57,6 +57,10 @@ const TOOL_NAMES = [
   'collection_create',
   'collection_search',
   'collection_update',
+  'knowledge_append',
+  'knowledge_create',
+  'knowledge_get',
+  'knowledge_search',
   'schedule_create',
   'schedule_list',
   'task_complete',
@@ -80,7 +84,7 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and lists the task, schedule and collection tools', async () => {
+  it('starts with the repository config.yaml and lists the task, schedule, collection and knowledge tools', async () => {
     expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
   });
 

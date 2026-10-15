@@ -1,5 +1,17 @@
-import type { CollectionConnector, ScheduleConnector, TaskConnector } from '../../src/connectors/types.js';
-import { type CollectionItem, mergeMetadata, type Schedule, type Task } from '../../src/domain/index.js';
+import type {
+  CollectionConnector,
+  KnowledgeConnector,
+  ScheduleConnector,
+  TaskConnector,
+} from '../../src/connectors/types.js';
+import {
+  type CollectionItem,
+  type Knowledge,
+  type KnowledgeSearchResult,
+  mergeMetadata,
+  type Schedule,
+  type Task,
+} from '../../src/domain/index.js';
 
 /** In-memory task connector that records the domain input of every call. */
 export class FakeTaskConnector implements TaskConnector {
@@ -127,5 +139,64 @@ export class FakeCollectionConnector implements CollectionConnector {
       ...(input.metadata ? { metadata: mergeMetadata(current.metadata ?? {}, input.metadata) } : {}),
       ...(input.tags ? { tags: input.tags } : {}),
     };
+  }
+}
+
+/** In-memory knowledge connector that records the domain input of every call. */
+export class FakeKnowledgeConnector implements KnowledgeConnector {
+  readonly calls: { method: keyof KnowledgeConnector; arg: unknown }[] = [];
+  failWith: Error | undefined;
+  items: Knowledge[] = [];
+
+  private record(method: keyof KnowledgeConnector, arg: unknown): void {
+    this.calls.push({ method, arg });
+    if (this.failWith) throw this.failWith;
+  }
+
+  async create(input: Parameters<KnowledgeConnector['create']>[0]): Promise<Knowledge> {
+    this.record('create', input);
+    const path = `AI Foundation/Knowledge/${input.title}.md`;
+    const knowledge: Knowledge = {
+      id: `obsidian:${path}`,
+      type: 'knowledge',
+      title: input.title,
+      description: input.description ?? null,
+      source: 'obsidian',
+      external_ref: path,
+      area: input.area,
+      tags: input.tags ?? [],
+    };
+    this.items.push(knowledge);
+    return knowledge;
+  }
+
+  async search(filter: Parameters<KnowledgeConnector['search']>[0]): Promise<KnowledgeSearchResult[]> {
+    this.record('search', filter);
+    return this.items.map((item) => ({ ...item, snippet: 'snippet' }));
+  }
+
+  async get(id: string): Promise<{ knowledge: Knowledge; content: string }> {
+    this.record('get', id);
+    return { knowledge: this.find(id), content: 'full body\n' };
+  }
+
+  async append(input: Parameters<KnowledgeConnector['append']>[0]): Promise<Knowledge> {
+    this.record('append', input);
+    return this.find(input.id);
+  }
+
+  private find(id: string): Knowledge {
+    return (
+      this.items.find((item) => item.id === id) ?? {
+        id,
+        type: 'knowledge',
+        title: 'existing',
+        description: null,
+        source: 'obsidian',
+        external_ref: id.slice('obsidian:'.length),
+        area: null,
+        tags: [],
+      }
+    );
   }
 }
