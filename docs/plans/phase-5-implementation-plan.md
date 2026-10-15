@@ -1,11 +1,11 @@
 # Phase 5: Project — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-15
+- Status: **rev.2（PR #8 レビュー反映・再レビュー待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: 2026-10-16 PR #8 レビュー反映）
 - 対象: [Phase 5 Design Issue](../specs/phase-5-project.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 4 Design Issue](../specs/phase-4-knowledge.md), [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-本PlanはChatGPTによるPlan Review前のrev.1であり、本実装はまだ開始していない。実装はPlan承認後に `main` から作成する `feat/phase-5-project` で行う。仕様に明記がなく本Planで決めた箇所・判断を仰ぎたい箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている。
+本PlanはPR #8 のPlan Review（rev.1）を反映したrev.2であり、本実装はまだ開始していない。実装はPlan承認後に `main` から作成する `feat/phase-5-project` で行う。仕様に明記がなく本Planで決めた箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q11はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
 
 ---
 
@@ -42,13 +42,14 @@
 ## 2. 設計方針
 
 1. **Phase 1〜4の構造をそのまま使う。** Tool → `ToolContext.connectors.project` → `GitHubProjectConnector` → `GitHubClient`（HTTP）。
-2. **GitHubが唯一の正本。** Project Registry / Cache / Index / allowlistを持たない。`project_list` / `project_get` は毎回GitHub APIを呼び、Process内にもResponseを保持しない（Credentialを持つClient instanceのMemoizeのみ）。
-3. **構造的にRead-only。** `GitHubClient` Interfaceは「Repository一覧の全件取得」「Repository 1件取得」の2メソッドだけを持ち、HTTP Methodは `GET` 固定。書き込みAPIを呼ぶコードパスを作らない。
-4. **SDKを使わず `fetch` で薄く実装する。** 必要なEndpointは2つだけで、Pagination（Link Header）・Redirect・Error分類・Header（Token）の扱いを自前で明示的に制御したいため（§23、Q2）。
-5. **明示したFieldだけを取り出す。** GitHub API ResponseはZodで必要Fieldだけparseし、Domain / Detailsへ手で詰め替える。Response全体や未知Fieldを返さない（`temp_clone_token`、`permissions` 等を含め得るため）。
-6. **Secretを外へ出さない。** Tokenは `Authorization` Headerにのみ載せ、Error Message / `cause` / Log / Tool Resultへ入れない。Token送信先は `https://api.github.com` のみに限定する（Pagination / RedirectのURLも検証、§21）。
-7. **起動時にGitHubへアクセスしない。** Credential取得・API呼び出しはTool呼び出し時（Phase 2〜4方針）。
-8. **独自Retry / Sleepを持たない。** Rate Limit・5xxは即 `ProviderApiError`。応答待ちが無限にならないよう、1 Requestごとのtimeoutのみ設ける（Retryではない）。
+2. **Discovery集合 = アクセス境界。** `project_list` が返す集合（`GET /user/repos`）と `project_get` で取得できる集合を一致させる。`project_get` はexact IDで直接取得したうえで、そのRepositoryがDiscovery集合に含まれることを確認する（§11.1）。これによりFine-grained PATのRepository選択がそのままPhase 5のアクセス境界になる。
+3. **GitHubが唯一の正本。** Project Registry / Cache / Index / allowlistを持たない。`project_list` / `project_get` は毎回GitHub APIを呼び、Process内にもResponseを保持しない（Credentialを持つClient instanceのMemoizeのみ）。
+4. **構造的にRead-only。** `GitHubClient` Interfaceは「Repository一覧の全件取得」「Repository 1件取得」の2メソッドだけを持ち、HTTP Methodは `GET` 固定。書き込みAPIを呼ぶコードパスを作らない。
+5. **SDKを使わず `fetch` で薄く実装する。** 必要なEndpointは2つだけで、Pagination（Link Header）・Redirect・Error分類・Header（Token）の扱いを自前で明示的に制御したいため（§23、Q2）。
+6. **明示したFieldだけを取り出す。** GitHub API ResponseはZodで必要Fieldだけparseし、Domain / Detailsへ手で詰め替える。Response全体や未知Fieldを返さない（`temp_clone_token`、`permissions` 等を含め得るため）。
+7. **Secretを外へ出さない。** Tokenは `Authorization` Headerにのみ載せ、Error Message / `cause` / Log / Tool Resultへ入れない。Token送信先は `https://api.github.com` のみに限定する（Pagination / RedirectのURLも検証、§21）。
+8. **起動時にGitHubへアクセスしない。** Credential取得・API呼び出しはTool呼び出し時（Phase 2〜4方針）。
+9. **独自Retry / Sleepを持たない。** Rate Limit・5xxは即 `ProviderApiError`。応答待ちが無限にならないよう、1 Requestごとのtimeoutのみ設ける（Retryではない）。
 
 ---
 
@@ -215,7 +216,7 @@ function githubConnector(config: Config, connectors: Connectors): ProjectConnect
 Description（案。英語、既存Toolと同じ書き方）:
 
 - `project_list`: "List projects: GitHub repositories the configured token can access (1 repository = 1 project). Every filter is optional and narrows the result: query is a case-insensitive substring of the repository name, owner/repository or description; owner matches the owner login (user or organization) exactly, ignoring case. An empty filter lists every repository. Repository names often use '-' instead of spaces, so prefer a single distinctive word as query, or list all and choose. Results are sorted by owner/repository and carry no README or contents: pass the returned id to project_get for details."
-- `project_get`: "Get one project by its exact id ("github:<owner>/<repository>", from project_list) with GitHub details (description, owner, default branch, visibility, archived, fork, updated_at). Do not guess ids: find the project with project_list first. If the repository was renamed or transferred, the current id is returned. README, files, issues and pull requests are not included."
+- `project_get`: "Get one project by its exact id ("github:<owner>/<repository>", from project_list) with GitHub details (description, owner, default branch, visibility, archived, fork, updated_at). Do not guess ids: find the project with project_list first. If the repository was renamed or transferred, the current id is returned. Only repositories that project_list can return are available; any other repository is reported as not found. README, files, issues and pull requests are not included."
 
 Handler:
 
@@ -233,7 +234,10 @@ async ({ id }) => jsonResult(await githubConnector(config, connectors).get(id))
 export interface ProjectConnector {
   /** Every project the credential can access that matches `filter`, sorted by canonical owner/repository. */
   list(filter: ProjectListFilter): Promise<ProjectResult[]>;
-  /** The project with this exact id and its provider details, as the provider currently resolves it. */
+  /**
+   * The project with this exact id and its provider details, as the provider currently resolves it.
+   * Only projects that `list` can return are available (the same access boundary); others are not found.
+   */
   get(id: string): Promise<ProjectGetResult>;
 }
 
@@ -289,7 +293,7 @@ export function lazyGitHubClient(credentials: CredentialProvider, factory = crea
 |---|---|
 | Base URL | `https://api.github.com`（定数。設定可能にしない＝GHESはPhase 5対象外） |
 | Method | `GET` 固定 |
-| Header | `Authorization: Bearer <token>`、`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2022-11-28`（固定。SDK既定に任せず明示、Notionと同方針。Q8）、`User-Agent: ai-foundation/0.1.0`（GitHub APIは必須） |
+| Header | `Authorization: Bearer <token>`、`Accept: application/vnd.github+json`、`X-GitHub-Api-Version: 2022-11-28`（安定性優先で固定。SDK既定に任せず明示、Notionと同方針。Q8）、`User-Agent: ai-foundation/0.1.0`（GitHub APIは必須） |
 | Redirect | `redirect: 'manual'`。`301` / `302` / `307` / `308` の `Location` が `https://api.github.com` Originの場合のみ追従（最大3回）。それ以外のOriginは `ProviderApiError`（Tokenを付けて別Hostへ送らない） |
 | timeout | `AbortSignal.timeout(30_000)` / Request。超過は `ProviderApiError`（Retryしない） |
 | 成功判定 | `200` のみ成功。Body JSON parse失敗は `ProviderApiError` |
@@ -310,13 +314,18 @@ export class GitHubProjectConnector implements ProjectConnector {
   async get(id: string): Promise<ProjectGetResult> {
     const { owner, repo } = parseGitHubProjectId(id);       // InputValidationError, before any credential / API use
     const api = await this.options.client();
+    // 1. Resolve the exact id directly (follows rename / transfer redirects; 404 / 403 -> NotFoundError).
     const repository = parseRepository(await api.getRepository(owner, repo).catch(notFoundAs(id)));
+    // 2. Same access boundary as list: the repository must be in the token's discovery set.
+    const discovered = (await api.listRepositories()).map(parseRepository);  // any page failure -> ProviderApiError
+    if (!discovered.some((r) => r.repositoryId === repository.repositoryId)) throw projectNotFound(id);
     return { project: toProject(repository), details: toDetails(repository) };
   }
 }
 ```
 
 - Connectorは `process.env` もLogも使わない。`warn` も持たない（除外して続行するケースがないため）。
+- `get` の境界確認は §11.1。直接取得 → Discovery確認の順に **逐次** 実行する（存在しないIDは1 Requestで `NotFoundError` を返せる。直接取得が成功した場合のみ全件Paginationする）。
 
 ---
 
@@ -385,7 +394,19 @@ GET https://api.github.com/user/repos?per_page=100&visibility=all&affiliation=ow
 - archived / fork はAPI側で除外されないため、そのまま含まれる。
 - `owner` 指定時も `/users/{owner}/repos` や `/orgs/{org}/repos` は使わず、常に `/user/repos` を取得してローカルで絞る。理由: 前者は「Tokenから参照可能な範囲」とは別の集合（他人のpublic Repository全体など）を返し、仕様の「Token accessをアクセス境界とする」と意味が変わるため。
 - GitHub Search APIは使わない（仕様）。
-- Discoveryの集合とアクセス境界の関係（`project_get` は `/user/repos` に出ない任意のpublic Repositoryも取得できる点）は Q1 で確認する。
+
+### 11.1 Discovery集合をアクセス境界にする（rev.2、PR #8 [P1]）
+
+`GET /user/repos` は認証ユーザーが明示的なRepository権限を持つRepository（Fine-grained PATでは選択したRepository）を列挙する。一方 `GET /repos/{owner}/{repo}` はpublic RepositoryであればTokenの選択対象外でも取得できる。直接取得だけでは「Token access = アクセス境界」を満たせないため、`project_get` は次の手順とする。
+
+1. exact IDで `GET /repos/{owner}/{repo}` を直接取得する（rename / owner移管の301追従を維持、§18）。`404` / `403` / `451` は `NotFoundError`（§19）。
+2. 取得できた場合、`GET /user/repos` を最後までPaginationしてDiscovery集合を得る（`project_list` と同じ `listRepositories()`）。
+3. 1のRepositoryがDiscovery集合に含まれなければ `NotFoundError`（不存在・アクセス権なしと同一Message）。含まれれば1のResponseからProject / Detailsを返す。
+
+- 照合はGitHubの数値Repository ID（Responseの `id`。Mapping内部の `repositoryId` としてのみ保持し、Tool Resultには出さない）で行う。owner / name文字列での照合と違い、大文字小文字の差・rename・owner移管・照合中の改名に影響されない。
+- 2のPaginationが途中で失敗した場合は `ProviderApiError`（境界を確認できないままRepositoryを返さない）。
+- コスト: `project_get` 1回あたり 1 + Discoveryのページ数 のRequestになる。MVPでは許容する（PR #8 レビューで合意）。Cacheは導入しない（§2）。
+- 結果として `project_list` に出ないRepository（他人のpublic Repository等。仕様例の `github:openai/example` もTokenのDiscovery集合に含まれない限りNot found）は `project_get` でも取得できない。
 
 ---
 
@@ -479,6 +500,7 @@ github:<owner>/<repository>
 
 ```ts
 const GitHubRepositorySchema = z.object({
+  id: z.number().int().positive(),          // 境界確認（§11.1）専用。Tool Resultへ出さない
   name: z.string().min(1),
   owner: z.object({ login: z.string().min(1) }),
   html_url: z.url({ protocol: /^https$/ }),
@@ -532,6 +554,7 @@ const GitHubRepositorySchema = z.object({
 - `GET /repos/{old-owner}/{old-name}` に対しGitHubは `301 Moved Permanently`（`Location: https://api.github.com/repositories/{numeric-id}`）を返す。Clientは同一Originのため追従し（§8.3）、現在のRepositoryを取得する。
 - 返却する `id` / `title` / `external_ref` / `details.owner` はすべて **取得したResponse** から作るため、自動的に新しいcanonical値になる（例: `github:thanatos27/old-name` → `github:thanatos27/new-name`）。
 - 旧IDとの対応表は持たない。旧IDのRedirectをGitHubがやめた場合（旧名で新Repository作成等）はGitHubの解決結果に従う。
+- 境界確認（§11.1）は数値Repository IDで行うため、旧IDで解決したRepositoryも、Discovery集合に現在の名前で含まれていれば取得できる。
 - `project_list` は常に現在の名前で返す（Redirectは発生しない）。
 - Unit Test: Fake fetchで `301` → `/repositories/123` → 新名のResponse を返し、結果がcanonical IDになること、Redirect先でも `Authorization` が付くこと、別Originへの `Location` は追従せず `ProviderApiError` になること。
 
@@ -545,6 +568,7 @@ const GitHubRepositorySchema = z.object({
 | private Repositoryへのアクセス権がない | `404`（GitHubは存在を隠す） | `NotFoundError` |
 | Fine-grained Tokenの対象外 / SSO未承認 / Organizationのポリシーで拒否 | `403`（Rate Limit以外） | `NotFoundError` |
 | DMCA等で利用不可 | `451` | `NotFoundError`（Q9） |
+| 直接取得はできるがTokenのDiscovery集合（`/user/repos`）に含まれない（Fine-grained PATの選択対象外のpublic Repository、他人のpublic Repository等） | `200`（境界確認で不一致） | `NotFoundError`（§11.1） |
 
 - Messageは全ケース同一: `Not found: project github:<owner>/<repo> (it does not exist or the GitHub token cannot access it)`。外向けには不存在とアクセス権なしを区別しない。区別に使ったStatusは `cause` のみに残す。
 - `project_list` では対象外Repositoryは単に一覧に現れない。
@@ -649,7 +673,7 @@ Test: 既知のダミーToken（例 `ghp_TESTSECRET0000`）を使い、Client / 
 | File | 主なケース |
 |---|---|
 | `id.test.ts` | 正常（大文字小文字混在、`.`/`_`/`-` を含む名前、EMU owner `a_b`）、§15.2の各拒否、format round trip |
-| `mapping.test.ts` | public / private / internal、`visibility` 欠落時の補完、archived / fork、Organization所有、`description: null`、日本語description、**不要Fieldを返さない**（`permissions`, `temp_clone_token`, `owner.avatar_url` 等を含むResponseから5 Field / 7 Fieldだけになる）、必須Field欠落・型違い → `ProviderApiError`（Messageに値を含まない） |
+| `mapping.test.ts` | public / private / internal、`visibility` 欠落時の補完、archived / fork、Organization所有、`description: null`、日本語description、**不要Fieldを返さない**（`permissions`, `temp_clone_token`, `owner.avatar_url` 等を含むResponseから5 Field / 7 Fieldだけになる）、必須Field欠落・型違い → `ProviderApiError`（Messageに値を含まない）、数値 `id` がTool Result（Project / Details）に出ないこと |
 | `filter.test.ts` | query: name / owner/repository / description・大文字小文字無視・`null` description・未Hit。owner: 完全一致・大文字小文字無視・部分一致しない（`thanatos` は `thanatos27` にHitしない）・User / Org区別なし。query + owner AND。sort: Provider順と無関係・大文字小文字混在・副キー。重複除去 |
 | `errors.test.ts` | 401、403 Rate Limit（`remaining: 0`、resetのISO化）、403 secondary（`retry-after`）、429、403 access denied（get → NotFound / list → Credential）、404（get / list）、451、410、5xx、Network（`code` のみ）、timeout、GitHub Body `message` がErrorMessageに入らないこと |
 
@@ -679,7 +703,10 @@ Test: 既知のダミーToken（例 `ghp_TESTSECRET0000`）を使い、Client / 
 | project_get exact ID | `getRepository('thanatos27', 'physical-ai-robot')` が呼ばれ、`{ project, details }` |
 | invalid ID | `InputValidationError`、Client（Credential取得含む）を呼ばない |
 | rename後のcanonical mapping | `github:thanatos27/old-name` で新名のResponse → `id` / `title` / `external_ref` が新名 |
-| 404 / access denied | Clientの `NotFoundError` が同一Messageで伝播 |
+| 404 / access denied | Clientの `NotFoundError` が同一Messageで伝播し、Discovery（`listRepositories`）を呼ばない |
+| Discovery集合 = アクセス境界（[P1]） | 直接取得は成功するがDiscovery集合に含まれないpublic Repository → `NotFoundError`（不存在と同一Message）。含まれる場合のみ返す |
+| 境界確認は数値IDで照合 | 大文字小文字違いのID・rename後の旧IDで直接取得したRepositoryが、Discovery集合に新名 / canonical表記で含まれていれば取得できる。同名でも数値IDが違えば `NotFoundError` |
+| 境界確認中のPagination失敗 | 直接取得は成功し `listRepositories` が `ProviderApiError` → `ProviderApiError`、Repositoryを返さない |
 | 外部変更の反映 | Fakeの内容を書き換えた後の次回呼び出しに反映される（Cacheなし） |
 | Provider生Responseの不要Field | Tool Resultに未知Fieldが出ない |
 
@@ -709,6 +736,7 @@ Test: 既知のダミーToken（例 `ghp_TESTSECRET0000`）を使い、Client / 
   - `get('github:thanatos27/ai-foundation')` の `details`（`default_branch: 'main'`、`visibility: 'public'`、`archived: false`、`fork: false`、`updated_at` 形式）。
   - private Repository（設定時）が `list` に含まれ、`get` で `visibility: 'private'`。
   - 存在しないRepository（`github:thanatos27/af-it-missing-<timestamp>`）で `NotFoundError`。
+  - Discovery集合に含まれないpublic Repository（既定 `github:octocat/Hello-World`。任意の環境変数 `AI_FOUNDATION_IT_GITHUB_OUTSIDE_REPO` で上書き可）で `NotFoundError`。Test冒頭で `list({})` に含まれないことを確認し、含まれる環境ではskipする。
   - 無効Token（`ghp_invalid...` を渡したClient）で `CredentialError`、MessageにTokenを含まない。
 - rename / owner移管は書き込みが必要なため自動Integrationでは扱わず、Unit Test（§24.4, §24.5）で担保する。過去にrenameしたRepositoryが手元にあれば手動で旧IDの `project_get` を確認し、結果をPRに記録する。
 
@@ -717,7 +745,7 @@ Test: 既知のダミーToken（例 `ghp_TESTSECRET0000`）を使い、Client / 
 | 項目 | 手順 |
 |---|---|
 | Repository一覧取得 | `project_list {}` の件数がGitHub上で見えるRepository数（Token対象範囲）と一致 |
-| Token access境界 | Fine-grained PATで対象Repositoryを限定した場合、対象外が一覧に出ず `project_get` も `NotFoundError` |
+| Token access境界 | Fine-grained PATで対象Repositoryを限定した場合、対象外（自分のpublic Repositoryを含む）が一覧に出ず、`project_get` も `NotFoundError`（§11.1） |
 | Metadata取得 | GitHub上でdescriptionを変更 → 次回 `project_get` に反映 |
 
 ---
@@ -729,7 +757,7 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 | # | 発話 | 期待するTool呼び出し |
 |---|---|---|
 | 1 | 「physical-ai-robotの情報を確認して」 | `project_list`（query等）→ 返却されたexact `id` → `project_get`（IDを推測で組み立てない） |
-| 2 | 「AI Foundationのプロジェクトを探して」 | `project_list({ query: "AI Foundation" })`。Hitしない場合に `query: "foundation"` や `{}` で再検索して `ai-foundation` に辿り着くこと（Q3） |
+| 2 | 「AI Foundationのプロジェクトを探して」 | `project_list({ query: "AI Foundation" })`。Hitしない場合に `query: "foundation"` や `{}` で再検索して `ai-foundation` に辿り着くこと（Q3。Repository descriptionは変更しない） |
 | 3 | 「thanatos27のプロジェクトを一覧して」 | `project_list({ owner: "thanatos27" })` |
 
 加えて、Project以外の発話（「Rustをいつか触りたい」等）でProject Toolが呼ばれず、既存Toolへのルーティングが変わらないことを1〜2件確認する。
@@ -757,8 +785,8 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 | rename / owner移管後のcanonical ID / URL | §18 | §24.4, §24.5 |
 | public / private / internal / archived / fork / Organization | §11, §16 | §24.3, §24.5, §25.1 |
 | 次回呼び出しで現在状態を反映（Cacheなし） | §2 | §24.5, §25.2 |
-| 削除済み / アクセス権喪失で `NotFoundError` | §19 | §24.3, §25.1 |
-| Token access = アクセス境界 | §11 | §25.2（Q1） |
+| 削除済み / アクセス権喪失で `NotFoundError` | §11.1, §19 | §24.3, §24.5, §25.1 |
+| Token access = アクセス境界 | §11, §11.1 | §24.5 境界確認、§25.1 Discovery外public Repository、§25.2 Fine-grained PAT |
 | Token / Authorization HeaderをResult / Error / Logへ出さない | §9, §20, §21 | §24.1 共通Assertion、§24.4 |
 | Response全体を返さず定義済みFieldのみ | §16 | §24.3 |
 | 不存在とアクセス権なしを区別しない | §19 | §24.3 |
@@ -793,62 +821,64 @@ Phase 5ではUnion化・複数Provider集約は作らない。
 
 ## 29. 懸念点 / 未確定事項
 
-Plan Reviewで判断をお願いしたい項目。各Qに提案を記載している。
+Plan Reviewで判断をお願いした項目。PR #8 レビューでQ2〜Q7, Q9〜Q11は提案どおり合意、Q1は [P1] を受けて修正、Q8は値を確定した（rev.2）。
 
-### Q1. 一覧の範囲とgetの範囲の差
+### Q1. 一覧の範囲とgetの範囲の差（rev.2で修正済み: §11.1）
 
-- 事実: `project_list` は `/user/repos`（Tokenの所有者が owner / collaborator / organization member のRepository）を返す。一方 `project_get` は `/repos/{owner}/{repo}` なので、**Tokenで読める任意のpublic Repository**（例: 仕様例の `github:openai/example`）も取得できる。Fine-grained PATでも「Public repositories (read-only)」設定の場合は同様。
-- 提案: 仕様の例と「Tokenから参照可能」の定義どおり、この差を許容する（getで任意のpublic Repositoryを参照できる）。listとの一致を強制するallowlist的な制限は入れない。
-- 代替: `project_get` 結果がlistに含まれるか確認する → 毎回全件Paginationが必要になり、仕様のexact ID直接取得に反するため非推奨。
+- rev.1の提案: `project_get` は `/repos/{owner}/{repo}` の直接取得のみとし、`project_list` に出ない任意のpublic Repositoryも取得できる差を許容する。
+- PR #8 [P1]: Fine-grained PATのRepository選択がアクセス境界にならず、仕様（Token access = 境界）と §25.2 の手動Verificationとも矛盾する。
+- rev.2の決定: 直接取得後、数値Repository IDがDiscovery集合（`/user/repos`）に含まれることを確認し、含まれなければ `NotFoundError`。get時の全件Paginationは許容する。
 
-### Q2. SDK（Octokit）を使わず `fetch` で実装する
+### Q2. SDK（Octokit）を使わず `fetch` で実装する（合意済み）
 
 - 提案: §23のとおり依存追加なし。
 - 代替: `@octokit/rest` + `octokit.paginate`。Redirect / Origin検証・Error分類は結局自前のラップが要り、Phase 5の2 Endpointには過剰と判断。
 
-### Q3. query の空白と `-` を同一視しない
+### Q3. query の空白と `-` を同一視しない（合意済み）
 
 - 懸念: LLM Client Verification例「AI Foundationのプロジェクトを探して」→ `query: "AI Foundation"` は、Repository名 `ai-foundation` に仕様どおりの部分一致ではHitしない（descriptionに "AI Foundation" が含まれない限り）。
-- 提案: 仕様（大文字小文字無視の部分一致、fuzzyなし）を厳守し、Tool descriptionで「名前は `-` 区切りが多いので単語1つで検索するか全件から選ぶ」と案内する。LLMの再検索で到達できることをVerificationで確認する。併せて本Repositoryの GitHub description に "AI Foundation" を含めることを推奨（Repository設定でありコード変更ではない）。
+- 決定: 仕様（大文字小文字無視の部分一致、fuzzyなし）を厳守し、Tool descriptionで「名前は `-` 区切りが多いので単語1つで検索するか全件から選ぶ」と案内する。LLMの再検索で到達できることをVerificationで確認する。Test都合でRepository descriptionは変更しない（PR #8 レビュー）。
 - 代替: 照合時に空白・`-`・`_` を同一視する正規化を入れる（仕様の「部分一致」の解釈拡張になるため、採用する場合は仕様側の確認が必要）。
 
-### Q4. 空文字・空白のみの `query` / `owner` を拒否する
+### Q4. 空文字・空白のみの `query` / `owner` を拒否する（合意済み）
 
 - 提案: Phase 4 `knowledge_search.query` と同じく `NonBlankSchema`（Schema Error）。空文字queryは「全件一致」になり意図と異なる可能性が高いため。
 - 代替: 空文字を「指定なし」と同じ扱いにする。
 
-### Q5. sortの比較方法
+### Q5. sortの比較方法（合意済み）
 
 - 提案: 大文字小文字を無視した序数比較 + 元文字列の序数比較（§14）。owner / repository名はASCIIのみなので実質的にアルファベット順。
 - 代替: 大文字小文字を区別する純粋な序数比較（`Zeta` が `alpha` より前になる）。
 
-### Q6. `config.yaml` の `project.providers` から `google_drive` を外す
+### Q6. `config.yaml` の `project.providers` から `google_drive` を外す（合意済み）
 
 - 提案: `[github]` のみにする。Phase 5では実装がなく、Phase 4でknowledgeの `google_drive` を外した前例に合わせる。Schemaは `google_drive` を受け付けたまま（将来互換）。
 - 代替: そのまま残す（Phase 5では `github` が含まれていれば動作するため挙動は変わらない）。
 
-### Q7. 大文字小文字だけ異なるIDの `project_get`
+### Q7. 大文字小文字だけ異なるIDの `project_get`（合意済み）
 
 - 事実: GitHubは `GET /repos/Thanatos27/AI-Foundation` を正しく解決する。
 - 提案: GitHubの解決に任せて取得し、canonical表記のIDを返す（rename時と同じ扱い）。これは「Foundationによる変換・fuzzy matching」ではなくProviderのcanonical化と整理する。
 - 代替: 入力IDと返却IDが大文字小文字まで一致しない場合 `NotFoundError` → rename時のcanonical mapping要件と整合しないため非推奨。
 
-### Q8. `X-GitHub-Api-Version` の固定値
+### Q8. `X-GitHub-Api-Version` の固定値（rev.2で確定）
 
-- 提案: `2022-11-28` に固定する（Notionと同じくSDK / 既定値に任せない）。実装時点でGitHubが新しいREST API versionを公開している場合は、`/user/repos` / `/repos/{owner}/{repo}` の該当Fieldに破壊的変更がないことを確認したうえで新しい値を採用し、本Planに記録する。
+- 決定: **`2022-11-28` を安定性優先で固定する**。実装時判断には残さない。
+- 理由: Plan承認時点の最新は `2026-03-10` だが、`2022-11-28` も現在サポート中（GitHubは新version公開後も旧versionを最低24か月サポートする）。Phase 5で使う `/user/repos` / `/repos/{owner}/{repo}` のFieldを、公開情報・事例が最も多いversionで実装・検証する。
+- 将来: `2022-11-28` のサポート終了告知時、または必要なFieldが新versionにしかない場合に、別PRで更新する（`client.ts` の定数1か所）。
 
-### Q9. `451`（DMCA等）を `NotFoundError` とする
+### Q9. `451`（DMCA等）を `NotFoundError` とする（合意済み）
 
 - 提案: 外部から利用できない点はアクセス不可と同じため `NotFoundError`。
 - 代替: `ProviderApiError`。
 
-### Q10. `project_list` の `403`（Rate Limit以外）を `CredentialError` とする
+### Q10. `project_list` の `403`（Rate Limit以外）を `CredentialError` とする（合意済み）
 
 - 背景: 仕様の表は `project_get` 視点（アクセス権なし → NotFound）。一覧APIの `403` はToken / OrganizationポリシーによりRepository一覧自体が許可されていない状況と考えられる。
 - 提案: `CredentialError`（Token側の設定見直しを促すMessage）。
 - 代替: `ProviderApiError`。
 
-### Q11. Request timeout 30秒
+### Q11. Request timeout 30秒（合意済み）
 
 - 提案: 1 Requestあたり30秒で `ProviderApiError`。Retryではなく、MCP Tool呼び出しが無期限に止まるのを防ぐため。Pagination全体の上限は設けない。
 
@@ -857,3 +887,15 @@ Plan Reviewで判断をお願いしたい項目。各Qに提案を記載して�
 - GitHub App Installation Token（`/installation/repositories` で列挙する方式）はPhase 5対象外。PAT（Fine-grained推奨 / Classic可）を前提とし、READMEに記載する。Classic PATでprivate Repositoryを含める場合は `repo` scopeが必要（Read-onlyに限定できない）ため、READMEでFine-grained PATを推奨する理由として明記する。
 - GitHub Enterprise Server（Base URL変更）は対象外。Base URLは定数とし、Configに持たない。
 - Organizationが「SAML SSO」を要求している場合、未承認Tokenでは該当OrganizationのRepositoryが一覧に出ない / `project_get` が `NotFoundError` になる。仕様どおり区別しないが、READMEのTroubleshootingに記載する。
+
+---
+
+## 30. Review対応履歴
+
+### rev.2（PR #8 レビュー反映）
+
+| 指摘 | 対応 |
+|---|---|
+| [P1] `project_get` がFine-grained PATのRepository選択をアクセス境界として守れない（直接取得で選択外のpublic Repositoryも返る。§25.2とも矛盾） | §11.1を追加。直接取得（Redirect追従は維持）→ `/user/repos` 全件Pagination → 数値Repository IDで所属確認 → 不所属は `NotFoundError`。§2（方針2追加）、§6.2 Tool description、§7、§8.4、§16.1（`id` をparse・非公開）、§18、§19、§24.3、§24.5、§25.1、§25.2、§27、Q1を更新 |
+| Q8: API versionを実装時判断に残さず明記 | `2022-11-28` を安定性優先で固定と確定（§8.3、Q8） |
+| Q2〜Q7, Q9〜Q11 | 提案どおり合意。Q3はRepository descriptionを変更しない旨に修正（§26、Q3） |
