@@ -1,6 +1,6 @@
 import { constants, type Dirent } from 'node:fs';
 import { lstat, open, readdir, readFile, realpath, stat, unlink } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../errors.js';
 import { isKnowledgeFileName, isValidSegment, quoteId, segmentsBelow, type VaultPath, vaultPathBelow } from './id.js';
 import type { VaultFile, VaultStorage } from './storage.js';
@@ -15,10 +15,10 @@ export interface FilesystemVaultStorageOptions {
 const errnoOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | null)?.code;
 const isMissing = (error: unknown) => errnoOf(error) === 'ENOENT' || errnoOf(error) === 'ENOTDIR';
 
-/** True when `target` is strictly inside `root` (both real paths). */
+/** True when `target` is strictly inside `root` (both real paths). `..note.md` is a name, not a parent. */
 function isInside(root: string, target: string): boolean {
   const rel = relative(root, target);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**

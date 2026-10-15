@@ -146,6 +146,18 @@ describe('list', () => {
   });
 });
 
+describe('names starting with ".."', () => {
+  it('treats ..note.md and ..archive as names inside the knowledge directory', async () => {
+    await vault.write(p('..note.md'), 'a');
+    await vault.write(p('..archive/note.md'), 'b');
+    expect((await storage.list()).map((file) => file.path).sort()).toEqual([p('..archive/note.md'), p('..note.md')].sort());
+    expect((await storage.read(p('..note.md'))).text).toBe('a');
+    expect((await storage.read(p('..archive/note.md'))).text).toBe('b');
+    await storage.append(p('..archive/note.md'), 'c');
+    expect(await vault.read(p('..archive/note.md'))).toBe('bc');
+  });
+});
+
 describe('read', () => {
   it('reads UTF-8 text without a byte order mark', async () => {
     await vault.write(p('AI/RAG.md'), '﻿---\ntitle: RAG\n---\n本文\n');

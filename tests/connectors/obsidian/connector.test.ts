@@ -321,6 +321,24 @@ describe('append', () => {
   });
 });
 
+describe('names starting with ".." (not parent directories)', () => {
+  it('searches, gets and appends ..note.md and ..archive/note.md', async () => {
+    await vault.write(k('normal.md'), 'normal\n');
+    await vault.write(k('..note.md'), '---\ntitle: dots\n---\n\nfile\n');
+    await vault.write(k('..archive/note.md'), 'archived\n');
+
+    const ids = (await connector.search({})).map((item) => item.id).sort();
+    expect(ids).toEqual([id('..archive/note.md'), id('..note.md'), id('normal.md')].sort());
+
+    expect(await connector.get(id('..note.md'))).toMatchObject({ knowledge: { title: 'dots' }, content: 'file\n' });
+    expect((await connector.get(id('..archive/note.md'))).content).toBe('archived\n');
+    await connector.append({ id: id('..note.md'), content: 'more' });
+    await connector.append({ id: id('..archive/note.md'), content: 'more' });
+    expect(await vault.read(k('..note.md'))).toBe('---\ntitle: dots\n---\n\nfile\n\nmore\n');
+    expect(await vault.read(k('..archive/note.md'))).toBe('archived\n\nmore\n');
+  });
+});
+
 describe('external moves and deletes', () => {
   it('reports the old id as not found after a move and finds the note under its new id', async () => {
     await connector.create(cap);
