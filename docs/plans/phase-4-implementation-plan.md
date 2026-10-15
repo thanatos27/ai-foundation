@@ -1,11 +1,11 @@
 # Phase 4: Knowledge — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-15
+- Status: **rev.2（PR #6 レビュー反映。再レビュー待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #6 レビュー反映）
 - 対象: [Phase 4 Design Issue](../specs/phase-4-knowledge.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 3 Implementation Plan](phase-3-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-このPlanはReview用であり、本実装は開始していない。Plan Review・User承認後に `main` から `feat/phase-4-knowledge` を作成して実装する。仕様に明記がなく本Planで決めた箇所・判断を仰ぎたい箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている。
+このPlanはReview用であり、本実装は開始していない。Plan Review・User承認後に `main` から `feat/phase-4-knowledge` を作成して実装する。仕様に明記がなく本Planで決めた箇所・判断を仰ぎたい箇所は [§29 懸念点 / 未確定事項](#29-懸念点--未確定事項) にQとしてまとめている（rev.2時点でQ1〜Q12はすべて判断済み）。レビュー指摘への対応は [§30 Review対応履歴](#30-review対応履歴) を参照。
 
 ---
 
@@ -43,7 +43,7 @@
 ## 2. 設計方針
 
 1. **Phase 1〜3の構造をそのまま使う。** Tool → `ToolContext.connectors.knowledge` → `ObsidianKnowledgeConnector` → `VaultStorage`（Filesystem実装）。
-2. **Obsidian（論理SoT）とFilesystem（Storage Access）を分ける。** Markdown / Frontmatter / ID / filename / 検索は「Obsidian Vault内のVault相対パスとテキスト」だけを扱う純粋処理とし、OSパス・`fs` 呼び出し・errno・symlink判定は `FilesystemVaultStorage` 1ファイルに閉じ込める（§8）。汎用Storage Frameworkは作らず、Obsidian Connector内部のInterface 1つに留める。
+2. **Obsidian（論理SoT）とFilesystem（Storage Access）を分ける。** Markdown / Frontmatter / ID / filename / 検索は「Obsidian Vault内のVault相対パスとテキスト」だけを扱う純粋処理とし、`node:fs` 呼び出し・OS実パス解決（realpath / lstat）・errno・symlink判定は `FilesystemVaultStorage` 1ファイルに閉じ込める（§8）。例外として、Config Schemaは `vault_path` の絶対パス形式判定に `node:path` の `isAbsolute` だけを使う（I/Oなし。§11.1）。汎用Storage Frameworkは作らず、Obsidian Connector内部のInterface 1つに留める。
 3. **ローカル絶対パスを外へ出さない。** ID / `external_ref` / Tool Result / Error MessageはVault相対パスのみ。errnoの生Message（絶対パスを含む）はMessageへ入れず `cause` にのみ保持する。
 4. **Tool実行時のファイル状態だけを見る。** Cache / Index / Watcher / 独自DBを持たない。毎回Directoryを走査・ファイルを読む。
 5. **書き込みは「新規作成（排他）」と「末尾追記」だけ。** 既存ファイルの書き換え（read-modify-write）はしない。Frontmatterを変更しないことを構造的に保証する（§19）。
@@ -81,10 +81,11 @@
 | `src/connectors/index.ts` | 変更 | Obsidian Connectorの生成 |
 | `src/connectors/obsidian/connector.ts` | 新規 | `ObsidianKnowledgeConnector`。設定検証、ID検証、Storage呼び出し、Domain変換、Filter / snippet適用 |
 | `src/connectors/obsidian/storage.ts` | 新規 | `VaultStorage` Interface（Vault相対パスだけを受け渡す境界、§8.1） |
-| `src/connectors/obsidian/filesystem-storage.ts` | 新規 | `FilesystemVaultStorage`。パス解決、実パス検証、symlink拒否、排他作成、追記、走査、errno → Foundation Error変換。**`node:fs` / `node:path` を使うのはこのファイルだけ** |
+| `src/connectors/obsidian/filesystem-storage.ts` | 新規 | `FilesystemVaultStorage`。パス解決、実パス検証、symlink拒否、排他作成、追記、走査、errno → Foundation Error変換。**`node:fs` とOS実パス解決を使うのはこのファイルだけ**（`node:path` はConfig Schemaの絶対パス形式判定でも使う） |
 | `src/connectors/obsidian/id.ts` | 新規 | Knowledge IDのformat / parse、Vault相対パスの検証（純粋関数） |
 | `src/connectors/obsidian/markdown.ts` | 新規 | Frontmatterの分離・parse・既知Field検証・serialize、作成テキスト生成、append区切り計算（純粋関数） |
 | `src/connectors/obsidian/filename.ts` | 新規 | title → filename（純粋関数） |
+| `src/connectors/obsidian/tags.ts` | 新規 | Obsidian Tag規則の検証と比較Key（純粋関数。create / Frontmatter parse / search filterで共用、§12.6） |
 | `src/connectors/obsidian/search.ts` | 新規 | query / area / tags の照合とsnippet生成（純粋関数） |
 | `src/config/schema.ts` | 変更 | §11 |
 | `src/tools/knowledge.ts` | 新規 | `knowledge_create` / `knowledge_search` / `knowledge_get` / `knowledge_append` の登録、source / area解決 |
@@ -99,6 +100,7 @@
 | `tests/connectors/obsidian/id.test.ts` | 新規 | ID parse / format / 拒否パターン |
 | `tests/connectors/obsidian/markdown.test.ts` | 新規 | Frontmatterあり / なし / Malformed、serialize、append区切り |
 | `tests/connectors/obsidian/filename.test.ts` | 新規 | 安全化ルール・日本語・予約名・長さ |
+| `tests/connectors/obsidian/tags.test.ts` | 新規 | Tag規則（§12.6） |
 | `tests/connectors/obsidian/search.test.ts` | 新規 | 照合・snippet |
 | `tests/connectors/obsidian/filesystem-storage.test.ts` | 新規 | 一時Directoryで実Filesystemの境界・symlink・errno |
 | `tests/connectors/obsidian/connector.test.ts` | 新規 | 一時Directoryの検証用Vaultでcreate / search / get / append / 外部編集 |
@@ -335,12 +337,13 @@ export interface VaultStorage {
 | 対象 | 解決 |
 |---|---|
 | Vault Root | `vault_path` をそのまま `path.resolve`（絶対パスであることはConfig Schemaで検証済み、§11）→ `fs.realpath`。ENOENT / ENOTDIR / EACCES → `ConfigurationError('the Obsidian vault (sources.knowledge.obsidian.vault_path) does not exist or cannot be read')`（絶対パスはMessageに含めない） |
-| Knowledge Directory | `path.join(vaultReal, ...knowledgeDir.split('/'))` → `fs.realpath` → `stat().isDirectory()`。不在 / Directoryでない → `ConfigurationError('the knowledge directory "AI Foundation/Knowledge" does not exist in the vault')`（Vault相対の設定値は出してよい） |
+| Knowledge Directory | `vaultReal` から `knowledge_dir` のsegmentを1つずつ辿り、各要素を `fs.lstat`。**symlink / Junction → `ConfigurationError`**（`the knowledge directory "AI Foundation/Knowledge" goes through a symbolic link or junction, which is not supported`）、不在 / Directoryでない → `ConfigurationError('the knowledge directory "AI Foundation/Knowledge" does not exist in the vault')`（Vault相対の設定値は出してよい）。最後に `knowledgeDirReal = fs.realpath(...)` が `vaultReal` 配下（`path.relative` が空でなく `..` で始まらず絶対パスでない）であることを確認し、外れていれば `ConfigurationError` |
 | 対象ファイル | `path.join(knowledgeDirReal, ...(VaultPathのknowledge_dir以降のsegment))`（§20の検証込み） |
 
 - Vault Root / Knowledge Directoryの実パスは **呼び出しごとに解決する**（Cacheしない。人間がVaultを移動・同期フォルダを再マウントしても次回呼び出しで追従し、方針4に従う）。
 - Knowledge Directoryの自動作成はしない（Q4）。
-- `vault_path` や `knowledge_dir` 自体がsymlink / Junction（例: 同期フォルダへのリンク）であることは許可する。境界の基準は「`knowledge_dir` の実パス」で、その **内側** のsymlinkだけを拒否する（§20）。
+- symlink / Junctionを許可するのは **`vault_path` で指定したVault Rootそのもの（とその上位）だけ**（例: 同期フォルダへのリンク。利用者が設定した値のため信頼する）。`vaultReal` から `knowledge_dir` までの途中segment、`knowledge_dir` 自体、その内側のsymlinkはすべて拒否する。`knowledge_dir` はVault相対パスであり、Vault外を指すリンクを置くとVault外を正規のKnowledge Directoryとしてread / writeできてしまうため（PR #6 [P1]）。
+- この検証は `checkKnowledgeDir()` で行い、`list` / `read` / `createExclusive` / `append` はすべて先にこれを通す（呼び出しごと、Cacheなし）。
 
 ---
 
@@ -366,8 +369,8 @@ function resolveSource(source: 'auto' | 'obsidian' | undefined, config: Config):
 
 | Tool | Annotations | Description要点 |
 |---|---|---|
-| `knowledge_create` | `readOnlyHint: false, destructiveHint: false, openWorldHint: false` | Obsidian VaultにKnowledge（再利用する学習・気づき・考察）を1 Markdownとして新規作成。既存ファイルは上書きしない。同名が既にある場合はErrorになるので、追記したいときは `knowledge_search` でidを得て `knowledge_append` を使う。`area` 省略時は既定area（Configの値をDescriptionに埋め込む）、`null` でなし。tagsに空白は使えない。Task / Schedule / Collectionとの使い分け |
-| `knowledge_search` | `readOnlyHint: true, openWorldHint: false` | 全Filter optional。`query` はtitle / description / tags / 本文の大文字小文字無視の部分一致、`area` 完全一致（null=なし）、`tags` はすべて持つもの。`{}` で一覧。結果は本文全文を含まずsnippetのみ。本文は `knowledge_get`、追記は `knowledge_append` へ返却idを渡す |
+| `knowledge_create` | `readOnlyHint: false, destructiveHint: false, openWorldHint: false` | Obsidian VaultにKnowledge（再利用する学習・気づき・考察）を1 Markdownとして新規作成。既存ファイルは上書きしない。同名が既にある場合はErrorになるので、追記したいときは `knowledge_search` でidを得て `knowledge_append` を使う。`area` 省略時は既定area（Configの値をDescriptionに埋め込む）、`null` でなし。tagsはObsidianのTag規則に従う（`#` なし、空白なし、英字・数字・`_` `-` `/`・日本語等、数字のみ不可）。Task / Schedule / Collectionとの使い分け |
+| `knowledge_search` | `readOnlyHint: true, openWorldHint: false` | 全Filter optional。`query` はtitle / description / tags / 本文の大文字小文字無視の部分一致、`area` 完全一致（null=なし）、`tags` はすべて持つもの（大文字小文字無視）。`{}` で一覧。結果は本文全文を含まずsnippetのみ。本文は `knowledge_get`、追記は `knowledge_append` へ返却idを渡す |
 | `knowledge_get` | `readOnlyHint: true, openWorldHint: false` | exact id（`obsidian:<vault-relative-path>`）でMetadataと本文全文を取得。idは推測せず `knowledge_search` で得る。ファイルが移動されると旧idはNot foundになるので再検索する |
 | `knowledge_append` | `readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false` | exact idの本文末尾へ `content` をそのまま追記。Frontmatterや既存本文は変更しない。日時・見出しは付与しないので必要なら `content` に含める。同じ呼び出しを繰り返すと重複して追記される |
 
@@ -508,11 +511,12 @@ type ParsedFile =
 | `title` | 拡張子を除いたfilename | 空白のみでない文字列 | 文字列以外、空白のみ |
 | `description` | `null` | 文字列（空文字は `null` として扱う） | 文字列以外 |
 | `area` | `null` | `work` / `personal` | それ以外の値（`Work` も含む） |
-| `tags` | `[]` | 非空文字列の配列 | 配列以外、要素が文字列以外・空 |
+| `tags` | `[]` | §12.6のTag規則を満たす文字列の配列 | 配列以外、要素が文字列以外・Tag規則違反（`#ai`、`1984`、空白を含む等） |
 
 - Key不在と `null` を同じ扱いにするのは、ObsidianのProperty UIが値を消したときに `key:`（null）を残すため。
 - `tags` に単一文字列（`tags: ai`）が書かれている場合はMalformedとする（仕様「既知Fieldが不正な型」。Obsidianは受け付けるが、AI Foundationの `tags: string[]` に一致しない。Q2）。
 - YAMLのDate / 数値等がtitleに入った場合（`title: 2026-10-15`）はYAML 1.2 coreでは `2026-10-15` が文字列になる。`title: 123` は数値のためMalformed。
+- Tag規則違反をMalformedとするのは、create / parse / search filterで「有効なTag」の意味を揃えるため（PR #6 [P2]）。人間が書いた `tags: ["#ai"]` はMalformedとしてsearchから除外され、get / appendはErrorになる（Obsidianで `ai` へ直せば次回から読める）。
 - **Frontmatterなし** → `{ title: filename, description: null, area: null, tags: [] }`、本文=全テキスト。
 
 ### 12.4 get の本文
@@ -531,6 +535,33 @@ function createFileText(meta: { title; description; area; tags }, content: strin
 - 改行はLF: `content` の `\r\n` / `\r` を `\n` に変換する。YAML出力もLF。
 - `content` が `\n` で終わらない場合は末尾に `\n` を1つ付ける（POSIXテキストファイルの慣習。内容の整形ではない）。
 - 書き込み前に生成テキストを §12.3 のparserに通し、title / description / area / tags が入力と一致することを確認する（serializerの自己検証。不一致は実装バグとして `ProviderApiError`）。
+
+### 12.6 Obsidian Tag規則（`tags.ts`）
+
+[Obsidian Help / Tags](https://obsidian.md/help/tags) に沿った規則を1箇所に集約し、**create（入力検証）・Frontmatter parse（§12.3）・search filter（§16）の3箇所で同じ関数を使う**。Domainの `TagsSchema`（非空文字列配列）はProvider非依存のまま変更せず、Obsidian固有の規則はConnector側に置く（Phase 3のNotion Select名制約と同じ扱い）。
+
+```ts
+/** Why `tag` is not a valid Obsidian tag, or undefined when it is. */
+export function tagProblem(tag: string): string | undefined;
+/** Comparison key: Obsidian tags are case-insensitive. */
+export function tagKey(tag: string): string;   // tag.toLowerCase()
+```
+
+| 規則 | 根拠 | 例（拒否） |
+|---|---|---|
+| 空でない | — | `""` |
+| 空白類（`\s`。全角空白を含む）を含まない | Obsidian: Tags can't contain blank spaces | `distributed systems` |
+| `#` を含まない（Frontmatterのtagsは `#` なしで書く） | Obsidian: YAMLではlistで `#` なしの例 | `#ai` |
+| ASCII記号は `_` `-` `/` 以外を含まない（`!` `"` `$` `%` `&` `'` `(` `)` `*` `+` `,` `.` `:` `;` `<` `=` `>` `?` `@` `[` `\` `]` `^` `` ` `` `{` `\|` `}` `~`） | Obsidian: 許可文字は英字・数字・`_`・`-`・`/`・一般的なUnicode | `c++`, `a,b`, `v1.0` |
+| 英字以外のUnicode（日本語・絵文字等）は許可 | Obsidian: Commonly accepted Unicode characters | （許可）`分散システム`, `📚` |
+| 数字と `/` 以外の文字を1つ以上含む | Obsidian: at least one non-numerical character | `1984`, `2024/10` |
+| Nested tagの `/` は先頭・末尾・連続に置かない | Nested tagは `parent/child` | `/ai`, `ai/`, `ai//rag` |
+
+- **create**: 違反するtagがあれば `InputValidationError`（`tag "1984" is not a valid Obsidian tag: must contain at least one non-numeric character`）。保存は入力の表記のまま（小文字化しない）。
+- **Frontmatter parse**: 違反する要素があれば **Malformed**（§12.3）。
+- **search filter**: `filter.tags` に違反するtagがあれば `InputValidationError`（保存されたtagはすべて規則を満たすため、違反tagは決して一致しない。黙って0件にせず誤りを返す）。比較は `tagKey()` 同士（大文字小文字を区別しない）。
+- Nested tagの親による一致（`inbox` で `inbox/to-read` に一致）はしない。完全一致（大文字小文字無視）のみ。
+- 一般的なUnicodeの範囲は厳密に列挙しない（Obsidian自身も明示していない）。上表で拒否するのはASCII記号・空白・数字のみのtagだけで、非ASCII文字は許可する。
 
 ---
 
@@ -569,7 +600,7 @@ function createFileText(meta: { title; description; area; tags }, content: strin
 
 1. Tool Layerで source / area を解決（§9.1）。
 2. Connector: `knowledgeDir` 確認 → `storage.checkKnowledgeDir()`。
-3. tagsのObsidian制約を検証（空白を含むtag・`#` 始まり・`,` を含むtagは `InputValidationError`。ObsidianのTagとして認識されないため。Q7）。
+3. tagsをObsidian Tag規則（§12.6）で検証し、違反は `InputValidationError`（Q7）。
 4. `toFileName(title)` → `VaultPath = knowledgeDir + '/' + filename`（`knowledge_dir` **直下**のみ。サブDirectoryは作らない）。
 5. `createFileText(...)` → `storage.createExclusive(path, text)`。
 6. 返却: 書いた内容から組み立てたKnowledge（再読込はしない。作成直後に同期クライアント等が触る可能性を考慮しても、書いた内容が正）。
@@ -623,7 +654,7 @@ function matches(meta, body, filter): boolean
 |---|---|
 | `query` | `fold(x) = x.toLowerCase()` とし、`fold(query)` が `fold(title)` / `fold(description ?? '')` / 各 `fold(tag)` / `fold(body)` のいずれかの部分文字列ならHit。本文はFrontmatterを除いたもの（未知Frontmatter Keyは検索しない）。queryはtrimしない |
 | `area` | 値 → `meta.area === area`。`null` → `meta.area === null` |
-| `tags` | 指定されたすべてのtagを持つ（AND）。比較は大文字小文字を区別しない（ObsidianのTagは大文字小文字を区別しないため。Q7） |
+| `tags` | 指定されたすべてのtagを持つ（AND）。各tagを §12.6 で検証（違反は `InputValidationError`）し、`tagKey()` 同士で比較する（大文字小文字を区別しない。Q7）。Nested tagの親一致はしない |
 | 空Filter `{}` | 全件（Malformed除く） |
 
 - `toLowerCase()` はロケール非依存。全角英字も小文字化される。ひらがな / カタカナの同一視、Unicode正規化、fuzzyはしない（仕様Out of Scope）。
@@ -712,7 +743,7 @@ content: "PACELCについても関連して調べた。"
 
 対象ファイルへアクセスする前に毎回行う。
 
-1. `rootReal = realpath(vault/knowledge_dir)`（§8.2）。
+1. `rootReal = knowledgeDirReal`（§8.2の検証済み実パス。Vault Rootから `knowledge_dir` までにsymlink / Junctionがなく、`vaultReal` 配下であることを確認済み。違反は `ConfigurationError`）。
 2. `rootReal` からVaultPathの残りsegmentを1つずつ辿り、各要素を `fs.lstat`:
    - `isSymbolicLink()`（Windows Junction含む）→ `InputValidationError('"obsidian:<path>" goes through a symbolic link, which is not supported')`。
    - 途中のsegmentがDirectoryでない / `ENOENT` → `NotFoundError`。
@@ -735,6 +766,7 @@ content: "PACELCについても関連して調べた。"
 | `knowledge_dir` 未設定 | — | `ConfigurationError` |
 | Vault不在・Directoryでない・読めない | `ENOENT` / `ENOTDIR` / `EACCES` / `EPERM`（Root解決時） | `ConfigurationError`（絶対パスなし） |
 | Knowledge Directory不在・Directoryでない | 同上 | `ConfigurationError`（Vault相対の `knowledge_dir` を示す） |
+| Vault Rootから `knowledge_dir` までにsymlink / Junction、または実パスがVault外 | §8.2 | `ConfigurationError`（Tool呼び出し時の環境不正） |
 | 不正ID形式・範囲外・非.md・symlink経由 | §10 / §20 | `InputValidationError` |
 | 同名ファイルが存在（create） | `EEXIST` | `InputValidationError`（idと `knowledge_append` を案内） |
 | 生成filenameが不正・長すぎる | §13 | `InputValidationError` |
@@ -773,7 +805,7 @@ content: "PACELCについても関連して調べた。"
 | 用途 | 利用 |
 |---|---|
 | YAML Frontmatter parse / serialize | 既存 `yaml ^2.9.1`（Configでも使用中） |
-| Filesystem | `node:fs/promises`, `node:path`（`filesystem-storage.ts` のみ） |
+| Filesystem | `node:fs/promises`, `node:path`（`filesystem-storage.ts`。Config Schemaは `path.isAbsolute` のみ） |
 | Test用一時Directory | `node:fs/promises.mkdtemp` + `node:os.tmpdir()` |
 
 Markdown parser（remark等）は使わない。本文はテキストとして扱い、Frontmatter区切りだけを解釈する。
@@ -802,12 +834,14 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 |---|---|
 | `id.test.ts` | 正常（日本語・サブDirectory）、§10.2の各拒否（prefix違い、`..`、`/`始まり、`C:/`、`\`、NUL、`.txt`、`.md`のみ、`knowledge_dir` 外、`Knowledge2` のprefix類似、隠しsegment） |
 | `filename.test.ts` | §13の例、禁止文字、制御文字・改行、先頭`.`、末尾`.`、予約名（`con`, `COM1.md`）、200 byte境界（日本語で境界前後）、空になるtitle |
-| `markdown.test.ts` | Frontmatterあり（全Key / 一部Key / 未知Key / `key:` null / 空Frontmatter）、Frontmatterなし（filename→title）、Malformed（不正YAML、重複Key、閉じなし、Rootが配列、`area: Work`、`tags: ai`、`tags: [1]`、`title: 123`）、CRLFファイル、BOM付き、serialize round trip（`:` `#` 含むtitle、`yes`、日本語、null / []の省略）、`computeAppendText` の表（§19.2）全行、CRLF既存ファイルへのappend |
-| `search.test.ts` | query: title / description / tag / 本文、大文字小文字、未Hit、Frontmatter中の未知Keyにのみ含まれる語はHitしない。area値 / null、tags AND・大文字小文字無視、snippet: Hit周辺・先頭・`…`・空本文・160 code point上限・サロゲートペア非分断 |
+| `markdown.test.ts` | Frontmatterあり（全Key / 一部Key / 未知Key / `key:` null / 空Frontmatter）、Frontmatterなし（filename→title）、Malformed（不正YAML、重複Key、閉じなし、Rootが配列、`area: Work`、`tags: ai`、`tags: [1]`、`tags: ["#ai"]`、`tags: ["1984"]`、`title: 123`）、CRLFファイル、BOM付き、serialize round trip（`:` `#` 含むtitle、`yes`、日本語、null / []の省略）、`computeAppendText` の表（§19.2）全行、CRLF既存ファイルへのappend |
+| `tags.test.ts` | §12.6の各規則（許可: `ai`, `distributed-systems`, `inbox/to-read`, `y1984`, `分散システム`, 絵文字 / 拒否: 空、空白・全角空白、`#ai`, `c++`, `a,b`, `1984`, `2024/10`, `/ai`, `ai/`, `ai//rag`）、`tagKey` |
+| `search.test.ts` | query: title / description / tag / 本文、大文字小文字、未Hit、Frontmatter中の未知Keyにのみ含まれる語はHitしない。area値 / null、tags AND・大文字小文字無視・違反tagのfilterは `InputValidationError`、snippet: Hit周辺・先頭・`…`・空本文・160 code point上限・サロゲートペア非分断 |
 
 ### 24.4 Storage（`filesystem-storage.test.ts`、一時Directory）
 
 - `checkKnowledgeDir`: vault不在 / knowledge_dir不在 / ファイルだった → `ConfigurationError`、Messageに一時Directoryの絶対パスを含まないこと。
+- **knowledge_dir経由の境界外アクセス（PR #6 [P1] 回帰Test）**: (a) `knowledge_dir` 自体がVault外DirectoryへのJunction / symlink、(b) 途中segment（`AI Foundation`）がVault外へのJunction / symlink、の各ケースで `checkKnowledgeDir` / `list` / `read` / `createExclusive` / `append` がすべて `ConfigurationError` になり、Vault外Directoryにファイルが作成・変更されないこと。(c) Vault Root自体がJunction / symlinkの場合は正常に動作すること。
 - `list`: 再帰、`.md` のみ（`.txt` / `.MD` / 拡張子なしを除外）、隠しDirectory・ファイル除外、symlinkファイル・Directory（Junction）を辿らない。
 - `read`: 不在 → `NotFoundError`、Directory → `NotFoundError`、BOM除去。
 - `createExclusive`: 新規作成、既存ファイル / 既存Directory / 既存symlink → `InputValidationError`、内容が上書きされていないこと。
@@ -821,7 +855,7 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 
 | 仕様の項目 | Test |
 |---|---|
-| create | Frontmatter + 空行 + 本文、UTF-8 / LF（CRLF入力もLFで保存）、末尾改行、返却Metadata、null / []のKey省略 |
+| create | 違反tag（`1984`, `#ai`, 空白）で `InputValidationError` かつファイル未作成、Frontmatter + 空行 + 本文、UTF-8 / LF（CRLF入力もLFで保存）、末尾改行、返却Metadata、null / []のKey省略 |
 | recursive search | 直下・サブDirectory・2階層以上 |
 | query / area / tags filter | §16の規則をVault上で |
 | get | Metadata + 本文、FrontmatterなしMarkdown |
@@ -831,7 +865,7 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 | 日本語filename / content | create → search → get → append |
 | 同名File上書き防止 | 2回目のcreateが `InputValidationError`、1回目の内容が不変 |
 | Path Traversal / 絶対パス / 非.md | get / append が `InputValidationError`、Vault外のファイルが不変 |
-| symlink等の境界外アクセス | §24.4と同様をConnector経由で |
+| symlink等の境界外アクセス | §24.4と同様をConnector経由で（`knowledge_dir` 自体・途中segmentのJunctionでcreate / appendが `ConfigurationError` となりVault外へ書かないことを含む） |
 | 外部移動 / 削除後 | Testから `fs.rename` でサブDirectoryへ移動 → 旧idのget / appendが `NotFoundError`、searchで新id。削除 → get / append `NotFoundError` |
 | 外部編集 | Testからファイルを書き換え → 次回get / searchに反映（Cacheがないこと） |
 | 設定 | `knowledgeDir` / `vault_path` 未設定 → `ConfigurationError` |
@@ -893,7 +927,7 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 
 | Acceptance Criteria | 対応箇所 | Test / Verification |
 |---|---|---|
-| Obsidianを論理SoT、Storage AccessはFilesystem | §2, §8 | 構造（`fs` は `filesystem-storage.ts` のみ）をReviewで確認 |
+| Obsidianを論理SoT、Storage AccessはFilesystem | §2, §8 | 構造（`node:fs` / 実パス解決は `filesystem-storage.ts` のみ）をReviewで確認 |
 | 絶対パスをID / Tool Resultへ漏らさない | §10, §21 | §24.5 Error Message共通Assertion、id / external_refの形式 |
 | Filesystem依存をConnector内に閉じ込める | §8.1 | 同上 |
 | 同期Vaultを利用可・同期は管理しない | §8.2, §25.2 | 手動Verification |
@@ -901,7 +935,7 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 | `vault_path` 実値をCommitしない | §11.2 | `config.yaml` はコメント例示のみ |
 | `storage: filesystem` | §11.1 | §24.2 |
 | 1 Knowledge = 1 Markdown、UTF-8 / LF | §12.5 | §24.5 create |
-| Frontmatter ↔ Domain Mapping | §12.3, §12.5 | §24.3 markdown |
+| Frontmatter ↔ Domain Mapping | §12.3, §12.5, §12.6 | §24.3 markdown / tags |
 | 本文をMetadataへ複製しない | §5.1, §5.3 | Result Schema |
 | 未知Frontmatter Keyを許容 | §12.3 | §24.3 |
 | ID `obsidian:<vault-relative-path>`、移動で新ID | §10 | §24.5 外部移動 |
@@ -916,7 +950,7 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 | FrontmatterなしのMarkdown（Default Mapping） | §12.3 | §24.3, §24.5 |
 | Malformed: search除外・get / append Error・append非書込・自動修復なし | §12.3, §15.2, §18, §19.1 | §24.5 |
 | 独自DB / Cacheなし、外部編集・移動・削除の反映 | §2, §8.2 | §24.5 |
-| Read / Write範囲をknowledge_dirに限定、Traversal・絶対パス・非.md・範囲外・symlink拒否 | §10, §20 | §24.3, §24.4, §24.5 |
+| Read / Write範囲をknowledge_dirに限定、Traversal・絶対パス・非.md・範囲外・symlink拒否 | §8.2, §10, §20 | §24.3, §24.4, §24.5 |
 | createで上書きしない | §14.2 | §24.4, §24.5 |
 | Error分類（4分類）、Credential Error不要、Messageに絶対パス / Secretなし | §21 | §24.4, §24.5 |
 | Tool LayerはFake Connector、Connectorは一時Directory、個人Vault非依存 | §24.1 | `npm test` |
@@ -947,60 +981,63 @@ Phase 4ではGoogle Drive実装・判別Unionは作らない（`storage: z.liter
 
 ## 29. 懸念点 / 未確定事項
 
-Plan Reviewで判断をお願いしたい項目。各Qに本Planの提案を書いている。
+Plan Reviewで判断をお願いした項目。PR #6 レビューでQ1〜Q6, Q8〜Q12は提案どおり合意、Q7は [P2] を受けて修正した（rev.2）。
 
-### Q1. 作成時、値のないKey（description / area / tags）を省略する
+### Q1. 作成時、値のないKey（description / area / tags）を省略する（合意済み）
 
 - 提案: `description: null`、`area: null`、`tags: []` のKeyはFrontmatterに書かない。`title` は常に書く。
 - 理由: Obsidianで `description: null` と表示されるのを避け、人間が読むFrontmatterを簡潔に保つ。読み取り時は不在 = 既定値のためDomain上の差はない。
 - 代替: 常に4 Keyを書く（`description:` 空、`tags: []`）。
 
-### Q2. `tags: ai`（単一文字列）・`tags:` に `#` 付き文字列
+### Q2. `tags: ai`（単一文字列）・`tags:` に `#` 付き文字列（合意済み。`#` 付きはrev.2でMalformedに変更）
 
-- 提案: 単一文字列はMalformed（仕様「既知Fieldが不正な型」）。配列要素の `#` は除去せずそのまま扱う。
+- 決定: 単一文字列はMalformed（仕様「既知Fieldが不正な型」）。配列要素の `#ai` はrev.2で §12.6 のTag規則違反としてMalformedにする（rev.1の「そのまま扱う」から変更。[P2]）。
 - 懸念: Obsidianは `tags: ai` やカンマ区切りを受け付けるため、人間が手書きしたノートがsearchから外れる可能性がある。寛容に `[ai]` として読む案もあるが、仕様文言に合わせて厳格側を提案する。
 
-### Q3. 開始 `---` はあるが閉じ区切りがないファイル
+### Q3. 開始 `---` はあるが閉じ区切りがないファイル（合意済み）
 
 - 提案: Malformed（search除外・get / append Error）。
 - 理由: 本文の先頭が水平線 `---` のノートとFrontmatter書きかけの区別がつかず、appendで誤って書き込むより安全側に倒す。Obsidianはこの場合Frontmatterなしとして表示する点が異なる。
 
-### Q4. Knowledge Directoryが存在しない場合に自動作成しない
+### Q4. Knowledge Directoryが存在しない場合に自動作成しない（合意済み）
 
 - 提案: 自動作成せず `ConfigurationError`（仕様Error Mapping「Vault / Knowledge Directoryが利用不能」）。READMEのSetupで作成手順を示す。
 - 代替: `knowledge_create` 時のみ `mkdir -p` する。誤った `vault_path` で意図しない場所にDirectoryを作るリスクがあるため提案しない。
 
-### Q5. `vault_path` は絶対パス必須、`~` / 環境変数の展開なし
+### Q5. `vault_path` は絶対パス必須、`~` / 環境変数の展開なし（合意済み）
 
 - 提案: 絶対パスのみ（相対パスはServerの作業Directoryに依存し、MCP Clientから起動すると予測しにくいため）。展開機能は追加しない。
 
-### Q6. filename: 予約名・200 byte超はError（truncateしない）
+### Q6. filename: 予約名・200 byte超はError（truncateしない）（合意済み）
 
 - 提案: Windows予約名と、名前部分がUTF-8で200 byteを超えるtitleは `InputValidationError`。
 - 理由: 黙って別名（`CON_` や切り詰め）にすると、AIとUserがファイル名を予測できず同名チェックの意味も変わる。200 byteは255 byte制限（ext4 / Google Drive）に余裕を持たせた値。
 
-### Q7. tagsのObsidian制約と大文字小文字
+### Q7. tagsのObsidian制約と大文字小文字（rev.2で修正済み: §12.6）
+
+- 決定（rev.2）: Obsidian公式のTag規則（§12.6）を `tags.ts` に集約し、create（`InputValidationError`）・Frontmatter parse（Malformed）・search filter（`InputValidationError`）で同じ規則を使う。比較は大文字小文字を区別しない。
+- 以下はrev.1の提案（create時のみ検証しparseと不整合、数字のみtagを見ていなかったため [P2] で修正）。
 
 - 提案: create時、空白・`,` を含むtag、`#` 始まりのtagは `InputValidationError`（Obsidian上でTagとして認識されないため）。search の `tags` Filterは大文字小文字を区別しない（Obsidianの挙動に合わせる）。保存は入力の表記のまま。
 - 代替: 制約なし・完全一致。
 
-### Q8. 同名チェックは `knowledge_dir` 直下のみ
+### Q8. 同名チェックは `knowledge_dir` 直下のみ（合意済み）
 
 - 仕様どおり直下へ作成し、直下の同名だけを防ぐ。サブDirectoryへ整理済みの同名ノートがあっても新規作成される。Tool Descriptionで「作成前に `knowledge_search` で既存を確認する」ことを案内するに留め、Foundation側では全体の同名検索をしない（作成のたびに全走査になるため）。
 
-### Q9. Unicode正規化しない
+### Q9. Unicode正規化しない（合意済み）
 
 - ID・filename・検索でNFC / NFD正規化をしない。macOS上のNFDファイル名でもOSが返すcode pointのままIDにする。IDはsearchから得たものをそのまま使う前提のため実害は小さい。
 
-### Q10. `.md` は小文字のみ
+### Q10. `.md` は小文字のみ（合意済み）
 
 - `.MD` / `.Md` は対象外（search除外・ID拒否）。Obsidianも `.md` を前提とする。
 
-### Q11. appendの区切りは空行1つ
+### Q11. appendの区切りは空行1つ（合意済み）
 
 - 仕様「必要な改行のみ補う」を「段落が結合しない最小の改行（空行1つ）」と解釈した（§19.2）。既存末尾が空行ならなにも足さない。単一改行のみにする（リスト項目の追記で空行が入らない）案もあるが、段落結合を防ぐ方を提案する。
 
-### Q12. searchの並び順と件数
+### Q12. searchの並び順と件数（合意済み）
 
 - 提案: 更新日時（mtime）降順、上限なし。同期フォルダではmtimeが同期で変わり得るが、並び順の参考値として許容する。
 
@@ -1017,4 +1054,11 @@ Plan Reviewで判断をお願いしたい項目。各Qに本Planの提案を書�
 
 ## 30. Review対応履歴
 
-（Plan Review後に追記する）
+### rev.2（PR #6 レビュー反映）
+
+| 指摘 | 対応 |
+|---|---|
+| [P1] `knowledge_dir` 自体・途中segmentのsymlink / JunctionでVault外へ抜けられる | §8.2: symlinkを許可するのはVault Root（`vault_path`）のみとし、`vaultReal` から `knowledge_dir` までの各segmentを `lstat` してsymlink / Junctionを `ConfigurationError` で拒否、`knowledgeDirReal` が `vaultReal` 配下であることを検証。§20.2 / §21を整合。§24.4 / §24.5に回帰Test（knowledge_dir自体・途中segmentのJunction / symlinkで書き込めない、Vault Root自体のJunctionは動作する）を追加 |
+| [P2] Tag validationがcreate / readで不整合、Obsidian規則（数字のみ不可等）の一部しか見ていない | §12.6を新設し、Obsidian公式規則に沿った `tagProblem` / `tagKey` を `tags.ts` に集約。create・Frontmatter parse・search filterで同じ規則を使う。§12.3 / §14.1 / §16 / §9.2 / Q2 / Q7 / Testを更新 |
+| 軽微: `node:path` の利用範囲の記述不整合 | §2 / §4.1 / §23 / §27を「`node:fs` とOS実パス解決はStorageに閉じ込め、Config Schemaは絶対パス形式判定に `node:path` を使う」に統一 |
+| Q1〜Q12 | Q7以外は提案どおり合意として記録（§29） |
