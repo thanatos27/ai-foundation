@@ -899,3 +899,27 @@ Plan Reviewで判断をお願いした項目。PR #8 レビューでQ2〜Q7, Q9�
 | [P1] `project_get` がFine-grained PATのRepository選択をアクセス境界として守れない（直接取得で選択外のpublic Repositoryも返る。§25.2とも矛盾） | §11.1を追加。直接取得（Redirect追従は維持）→ `/user/repos` 全件Pagination → 数値Repository IDで所属確認 → 不所属は `NotFoundError`。§2（方針2追加）、§6.2 Tool description、§7、§8.4、§16.1（`id` をparse・非公開）、§18、§19、§24.3、§24.5、§25.1、§25.2、§27、Q1を更新 |
 | Q8: API versionを実装時判断に残さず明記 | `2022-11-28` を安定性優先で固定と確定（§8.3、Q8） |
 | Q2〜Q7, Q9〜Q11 | 提案どおり合意。Q3はRepository descriptionを変更しない旨に修正（§26、Q3） |
+
+---
+
+## 31. 実装・Integration Verificationで確定した事項
+
+実装（`feat/phase-5-project`）、実GitHub APIに対するIntegration Test、Claude CodeからのLLM Client Verificationで確定した事項。
+
+### 31.1 Verification結果
+
+| 項目 | 結果 |
+|---|---|
+| Automated Test（`npm test`） | 963件中959件成功、4件skip（Phase 4からの既存skip: Windowsでファイルsymlinkの作成権限がない環境のケース） |
+| Integration Test（`tests/integration/github.integration.test.ts`） | 7件成功、1件skip（private Repository名を渡す `AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO` が未設定のため）。一覧取得・canonical順sort・query（name / 大文字 / owner/repository）・owner絞り込み・exact IDによる `project_get` とDetails・存在しないRepositoryの `NotFoundError`・Token対象外のpublic Repository（`octocat/Hello-World`）の `NotFoundError`・無効Tokenの `CredentialError`（MessageにTokenなし） |
+| Discovery集合 | Tokenから27件（public 25 / private 2 / fork 1 / archived 0 / internal 0、owner 1）。`physical-ai-robot` と `ai-foundation` を含む |
+| private Repository | Repository名を記録しない形で、private 2件がいずれも `project_list` に含まれ、`project_get` で `visibility: private` かつ同一IDで取得できることを確認 |
+| 書き込み | なし（Clientは `GET` のみ） |
+| rename / owner移管 | 手元にrename済みRepositoryがないため実APIでは未確認。Unit Test（§24.4 / §24.5）で担保 |
+
+### 31.2 Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- **`User-Agent`**: §8.3の `ai-foundation/0.1.0` ではなく `ai-foundation` とした。Version番号を `package.json` / `SERVER_INFO` と三重管理しないため。
+- **`NonBlankSchema` の共通化**: §5.2のとおり `domain/knowledge.ts` から `domain/common.ts` へ移し、Projectと共有（挙動は不変）。
+- **Tokenの文字種検証の必要性を確認**: Node 24の `fetch` で不正なHeader値を送ると、Error Messageに値そのもの（`Headers.append: "Bearer a\nb" is an invalid header value.`）が含まれることを実機で確認した。§9の事前検証で、この経路でTokenが漏れないようにしている。
+- **timeout Message**: 秒数は切り上げで表示する（`no response within 30 seconds`）。
