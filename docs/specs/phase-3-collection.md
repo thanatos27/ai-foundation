@@ -183,7 +183,7 @@ collection_type:
   movie |
   other
 
-status: string
+status: string | null
 
 metadata: object
 
@@ -218,6 +218,8 @@ title
 collection_type
 status
 ```
+
+`collection_create` では `status` は非空文字列を必須とする。Entityとしては、`collection_update(status: null)` でクリアされたItemを表現するため `string | null` を許可する。
 
 Optional:
 
