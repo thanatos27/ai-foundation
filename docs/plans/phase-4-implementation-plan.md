@@ -1,7 +1,7 @@
 # Phase 4: Knowledge — Implementation Plan
 
-- Status: **rev.2（PR #6 レビュー反映。再レビュー待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #6 レビュー反映）
+- Status: **rev.3（PR #6 再レビュー反映。最終確認待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-15（rev.2: PR #6 レビュー反映、rev.3: PR #6 再レビュー反映）
 - 対象: [Phase 4 Design Issue](../specs/phase-4-knowledge.md)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 1 Design Issue](../specs/phase-1-foundation.md), [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 3 Implementation Plan](phase-3-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
@@ -317,7 +317,7 @@ export interface VaultFile {
 export interface VaultStorage {
   /** Throws ConfigurationError when the vault or knowledge_dir is not usable. */
   checkKnowledgeDir(): Promise<void>;
-  /** Every regular .md file under knowledge_dir, recursively (symlinks and hidden entries skipped). */
+  /** Every regular .md file under knowledge_dir, recursively, at any depth (symlinks are not followed). */
   list(): Promise<{ path: VaultPath; modifiedAt: number }[]>;
   /** NotFoundError when it does not exist (or is not a regular file). */
   read(path: VaultPath): Promise<VaultFile>;
@@ -405,9 +405,9 @@ obsidian:<vault-relative-path>
 | 5 | segmentに空（`//`）・`.`・`..` がない | `obsidian:AI Foundation/Knowledge/../a.md` |
 | 6 | 末尾segmentが `.md` で終わり、`.md` 以外の名前部分がある | `obsidian:AI Foundation/Knowledge/a.txt`, `.../.md` |
 | 7 | segment列の先頭が `knowledgeDir` のsegment列と **segment単位で完全一致** し、その後に1つ以上のsegmentがある（文字列prefix比較はしない。`AI Foundation/Knowledge2/a.md` を拒否） | `obsidian:AI Foundation/Other/a.md`, `obsidian:Daily/a.md` |
-| 8 | `knowledge_dir` 以降の各segmentが `.` で始まらない（隠しファイル・Directoryは検索対象外のため、getでも対象外。§15.1） | `obsidian:AI Foundation/Knowledge/.trash/a.md` |
 
 - `.md` の判定は大文字小文字を区別する（`.MD` は対象外。Q10）。
+- `.` で始まるsegment（`.archive/note.md` 等）は拒否しない。searchが返すIDはすべてそのままget / appendできる（§15.1と対称。PR #6 再レビュー [P2]）。
 - この検証はIDの「論理形式」の検証。実ファイルの位置（symlink等）は §20 でStorageが別途検証する（二重防御）。
 - `knowledgeDir` 側も同じsegment規則でConfig Schemaにより検証済み（§11）。
 
@@ -437,7 +437,7 @@ knowledge: z
   .refine(/* 既存: default は providers に含まれる */),
 ```
 
-- `VaultRelativeDirSchema`: 非空、`\` / 制御文字なし、絶対パスでない、先頭・末尾 `/` なし、空・`.`・`..` segmentなし、`.` 始まりsegmentなし。`.` / 空（Vault全体）は拒否（仕様Out of Scope「Vault全体のRead / Write」）。
+- `VaultRelativeDirSchema`: 非空、`\` / 制御文字なし、絶対パスでない、先頭・末尾 `/` なし、空・`.`・`..` segmentなし。`.` / 空（Vault全体）は拒否（仕様Out of Scope「Vault全体のRead / Write」）。
 - `isAbsolutePath`: `path.isAbsolute`（実行OSの規則）。`~` 展開はしない（Q5）。
 - `storage` は `filesystem` のみ（Phase 4）。`google_drive` 等は起動時Config Error。
 - **未設定は起動時Errorにしない**（`vault_path` / `knowledge_dir` / `obsidian` Block）。仕様のError Mappingどおり、Tool呼び出し時に `ConfigurationError`。既存の `config.local.yaml`（Phase 3以前に作ったもの）でServerが起動しなくなるのを防ぐ。
@@ -624,11 +624,11 @@ export function tagKey(tag: string): string;   // tag.toLowerCase()
 - 対象: `Dirent.isFile()` かつ名前が `.md` で終わるもの。
 - 除外:
   - symlink / Junction（`Dirent.isSymbolicLink()`。Windows JunctionもNodeではsymlinkとして報告される）: ファイル・Directoryとも辿らない（§20）。
-  - `.` で始まる名前（`.obsidian`, `.trash`, `.DS_Store` 等。Obsidianも隠しエントリを表示しない）。
   - その他（FIFO等）。
+- `.` で始まる名前のFile / Directory（`.archive/note.md` 等）は **除外しない**。仕様は「`knowledge_dir` 以下を再帰的に検索」「対象は `.md`」のみを定めており、dot-prefixによる除外は定義していないため。`.obsidian` 等を除外したい要件が出た場合は、明示的なignore仕様として別途追加する（PR #6 再レビュー [P2]）。
 - 各ファイルの `mtime` を `fs.stat` で取得（並び順用）。
 - 走査中に消えたエントリ（`ENOENT`）は黙ってスキップ（同期・人間の操作との競合）。それ以外のerrnoは `ProviderApiError`（§21）。
-- 深さ上限: 32階層（循環はsymlinkを辿らないため起きないが、異常なDirectory構造への保険）。超えた部分はスキップして `warn`。
+- 深さ上限は設けない。symlink / Junctionを辿らないためDirectory循環は起きない。再帰はDirectoryごとの非同期呼び出し（またはDirectoryのstack）で行い、深いDirectory構造でもcall stackに依存しない実装にする。
 
 ### 15.2 読み込みと照合（Connector）
 
@@ -832,7 +832,7 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 
 | File | 主なケース |
 |---|---|
-| `id.test.ts` | 正常（日本語・サブDirectory）、§10.2の各拒否（prefix違い、`..`、`/`始まり、`C:/`、`\`、NUL、`.txt`、`.md`のみ、`knowledge_dir` 外、`Knowledge2` のprefix類似、隠しsegment） |
+| `id.test.ts` | 正常（日本語・サブDirectory）、§10.2の各拒否（prefix違い、`..`、`/`始まり、`C:/`、`\`、NUL、`.txt`、`.md`のみ、`knowledge_dir` 外、`Knowledge2` のprefix類似）、`.archive/a.md` のようなdot始まりsegmentは受け付ける |
 | `filename.test.ts` | §13の例、禁止文字、制御文字・改行、先頭`.`、末尾`.`、予約名（`con`, `COM1.md`）、200 byte境界（日本語で境界前後）、空になるtitle |
 | `markdown.test.ts` | Frontmatterあり（全Key / 一部Key / 未知Key / `key:` null / 空Frontmatter）、Frontmatterなし（filename→title）、Malformed（不正YAML、重複Key、閉じなし、Rootが配列、`area: Work`、`tags: ai`、`tags: [1]`、`tags: ["#ai"]`、`tags: ["1984"]`、`title: 123`）、CRLFファイル、BOM付き、serialize round trip（`:` `#` 含むtitle、`yes`、日本語、null / []の省略）、`computeAppendText` の表（§19.2）全行、CRLF既存ファイルへのappend |
 | `tags.test.ts` | §12.6の各規則（許可: `ai`, `distributed-systems`, `inbox/to-read`, `y1984`, `分散システム`, 絵文字 / 拒否: 空、空白・全角空白、`#ai`, `c++`, `a,b`, `1984`, `2024/10`, `/ai`, `ai/`, `ai//rag`）、`tagKey` |
@@ -842,7 +842,7 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 
 - `checkKnowledgeDir`: vault不在 / knowledge_dir不在 / ファイルだった → `ConfigurationError`、Messageに一時Directoryの絶対パスを含まないこと。
 - **knowledge_dir経由の境界外アクセス（PR #6 [P1] 回帰Test）**: (a) `knowledge_dir` 自体がVault外DirectoryへのJunction / symlink、(b) 途中segment（`AI Foundation`）がVault外へのJunction / symlink、の各ケースで `checkKnowledgeDir` / `list` / `read` / `createExclusive` / `append` がすべて `ConfigurationError` になり、Vault外Directoryにファイルが作成・変更されないこと。(c) Vault Root自体がJunction / symlinkの場合は正常に動作すること。
-- `list`: 再帰、`.md` のみ（`.txt` / `.MD` / 拡張子なしを除外）、隠しDirectory・ファイル除外、symlinkファイル・Directory（Junction）を辿らない。
+- `list`: 再帰、`.md` のみ（`.txt` / `.MD` / 拡張子なしを除外）、dot始まりのDirectory・ファイル（`.archive/a.md`, `.hidden.md`）も返す、深い階層（例: 40階層）も返す、symlinkファイル・Directory（Junction）を辿らない。
 - `read`: 不在 → `NotFoundError`、Directory → `NotFoundError`、BOM除去。
 - `createExclusive`: 新規作成、既存ファイル / 既存Directory / 既存symlink → `InputValidationError`、内容が上書きされていないこと。
 - `append`: 末尾追記のみ（先頭バイト列が不変）、不在 → `NotFoundError`（ファイルが作成されないこと）。
@@ -856,7 +856,7 @@ Markdown parser（remark等）は使わない。本文はテキストとして�
 | 仕様の項目 | Test |
 |---|---|
 | create | 違反tag（`1984`, `#ai`, 空白）で `InputValidationError` かつファイル未作成、Frontmatter + 空行 + 本文、UTF-8 / LF（CRLF入力もLFで保存）、末尾改行、返却Metadata、null / []のKey省略 |
-| recursive search | 直下・サブDirectory・2階層以上 |
+| recursive search | 直下・サブDirectory・2階層以上・dot始まりDirectory（`.archive/`）。searchで返したIDでget / appendできること |
 | query / area / tags filter | §16の規則をVault上で |
 | get | Metadata + 本文、FrontmatterなしMarkdown |
 | append | 本文末尾追記・Frontmatterバイト列不変・区切り改行 |
@@ -1062,3 +1062,9 @@ Plan Reviewで判断をお願いした項目。PR #6 レビューでQ1〜Q6, Q8�
 | [P2] Tag validationがcreate / readで不整合、Obsidian規則（数字のみ不可等）の一部しか見ていない | §12.6を新設し、Obsidian公式規則に沿った `tagProblem` / `tagKey` を `tags.ts` に集約。create・Frontmatter parse・search filterで同じ規則を使う。§12.3 / §14.1 / §16 / §9.2 / Q2 / Q7 / Testを更新 |
 | 軽微: `node:path` の利用範囲の記述不整合 | §2 / §4.1 / §23 / §27を「`node:fs` とOS実パス解決はStorageに閉じ込め、Config Schemaは絶対パス形式判定に `node:path` を使う」に統一 |
 | Q1〜Q12 | Q7以外は提案どおり合意として記録（§29） |
+
+### rev.3（PR #6 再レビュー反映）
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] recursive searchが仕様より狭い（dot-prefixed entry除外 + depth 32上限） | §15.1: dot始まりのFile / Directoryを除外せず、固定の深さ上限も撤廃（symlinkを辿らないため循環しない）。§10.2: dot始まりsegmentの拒否（旧規則8）を削除し、searchで返したIDをそのままget / appendできるようにした。§11.1の `knowledge_dir` 形式検証からもdot始まりsegmentの禁止を外して整合。§8.1のdoc comment、§24.3 / §24.4 / §24.5のTestを更新。将来 `.obsidian` 等を除外する場合は明示的なignore仕様として追加する |
