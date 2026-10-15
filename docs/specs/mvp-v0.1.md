@@ -381,6 +381,7 @@ Schema:
 ```yaml
 type: knowledge
 title: string
+description: string | null
 
 source:
   obsidian |
@@ -487,6 +488,7 @@ collection_update
 ```text
 knowledge_create
 knowledge_search
+knowledge_get
 knowledge_append
 ```
 
@@ -581,20 +583,56 @@ Input:
 ```json
 {
   "title": "string",
+  "description": "string | null",
   "content": "string",
-  "source": "obsidian | google_drive | auto",
+  "source": "obsidian | auto",
   "area": "work | personal | null",
   "tags": ["string"]
 }
 ```
 
-MVPでは、
+Phase 4では `source` の省略または `auto` をConfigurationの既定Providerへ解決する。
+未実装のGoogle Drive Knowledge ConnectorはTool Inputとして公開しない。
 
-```text
-source = auto
+---
+
+### knowledge_search
+
+```json
+{
+  "query": "string",
+  "area": "work | personal | null",
+  "tags": ["string"]
+}
 ```
 
-の場合、Obsidianを既定値としてよい。
+`query` はtitle / description / tags / Markdown本文を対象にする。
+検索結果には本文全文を含めず、Metadataとsnippetを返す。
+
+---
+
+### knowledge_get
+
+```json
+{
+  "id": "obsidian:<vault-relative-path>"
+}
+```
+
+exact IDで1件のMetadataとMarkdown本文全文を取得する。
+
+---
+
+### knowledge_append
+
+```json
+{
+  "id": "obsidian:<vault-relative-path>",
+  "content": "string"
+}
+```
+
+exact IDでMarkdown本文末尾へ追記する。
 
 ---
 
@@ -621,7 +659,10 @@ ChatGPT / Codex / Claude Code / Gemini / Future UI
     Todoist  Calendar Notion Obsidian  GitHub
 ```
 
-MVPではローカル利用を前提とする。
+MVPのTransportはstdioとする。
+
+Phase 4のObsidian ConnectorはFilesystem経由でVaultへアクセスするが、VaultはGoogle Drive等で同期されていてよい。
+FilesystemをKnowledgeの論理的なSource of Truthとはみなさず、将来的なCloud Storage Accessへの差し替えを妨げない。
 
 Transport:
 
@@ -754,7 +795,10 @@ sources:
     default: obsidian
     providers:
       - obsidian
-      - google_drive
+    obsidian:
+      storage: filesystem
+      vault_path: "<Obsidian Vault Path>"
+      knowledge_dir: "AI Foundation/Knowledge"
 
   project:
     providers:
@@ -957,10 +1001,16 @@ Obsidian
 ```text
 knowledge_create
 knowledge_search
+knowledge_get
 knowledge_append
 ```
 
-Google Drive対応は必要性に応じて追加する。
+Phase 4ではObsidian VaultへFilesystem経由でアクセスする。
+VaultはGoogle Drive等で同期されていてよいが、同期処理自体はAI Foundationの責務としない。
+
+Google Drive APIによるKnowledge対応は必要性に応じて追加する。
+
+詳細なScopeとAcceptance Criteriaは[Phase 4 Design Issue](phase-4-knowledge.md)を参照する。
 
 ---
 
@@ -1037,6 +1087,18 @@ Notion上の既存Itemが更新され、感想が追記される。
 ```
 
 ObsidianへKnowledgeが保存される。
+
+```text
+「CAP定理について前に何をメモした？」
+```
+
+Knowledgeを検索し、exact IDで本文を取得できる。
+
+```text
+「CAP定理のメモにPACELCについて追記して」
+```
+
+既存Knowledge本文末尾へ非破壊的に追記できる。
 
 ---
 
