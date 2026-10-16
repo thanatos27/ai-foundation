@@ -29,7 +29,8 @@ export function registerProjectTools(server: McpServer, { config, connectors }: 
     {
       title: 'List projects',
       description:
-        `List projects: the GitHub repositories the configured token can access (1 repository = 1 project). ` +
+        `List projects: the GitHub repositories the configured token's user owns or takes part in, as GitHub's /user/repos ` +
+        `returns them for the token (1 repository = 1 project). ` +
         `Every filter is optional and narrows the result: query is a case-insensitive substring of the repository name, ` +
         `owner/repository or description; owner matches the owner login (user or organization) exactly, ignoring case. ` +
         `An empty filter lists every repository. Repository names often use "-" instead of spaces, so prefer a single ` +
