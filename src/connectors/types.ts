@@ -10,6 +10,9 @@ import type {
   KnowledgeDocument,
   KnowledgeSearchFilter,
   KnowledgeSearchResult,
+  ProjectGetResult,
+  ProjectListFilter,
+  ProjectResult,
   Schedule,
   ScheduleCreateInput,
   ScheduleListFilter,
@@ -70,10 +73,22 @@ export interface KnowledgeConnector {
   append(input: KnowledgeAppendInput): Promise<Knowledge>;
 }
 
+/** Source of Truth: GitHub. Read-only: projects are discovered from the provider on every call. */
+export interface ProjectConnector {
+  /** Every project the credential can access that matches `filter`, sorted by canonical owner/repository. */
+  list(filter: ProjectListFilter): Promise<ProjectResult[]>;
+  /**
+   * The project with this exact id and its provider details, as the provider currently resolves it.
+   * Only projects that `list` can return are available (the same access boundary); others are not found.
+   */
+  get(id: string): Promise<ProjectGetResult>;
+}
+
 /** Connectors available to tools. A missing entry means the provider is not wired. */
 export interface Connectors {
   task?: TaskConnector;
   schedule?: ScheduleConnector;
   collection?: CollectionConnector;
   knowledge?: KnowledgeConnector;
+  project?: ProjectConnector;
 }

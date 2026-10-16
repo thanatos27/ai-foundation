@@ -22,6 +22,7 @@ const CREDENTIAL_VARS = [
   'GOOGLE_OAUTH_CLIENT_SECRET',
   'GOOGLE_OAUTH_REFRESH_TOKEN',
   'NOTION_API_TOKEN',
+  'GITHUB_TOKEN',
 ];
 
 function childEnv(extra: Record<string, string> = {}): Record<string, string> {
@@ -61,6 +62,8 @@ const TOOL_NAMES = [
   'knowledge_create',
   'knowledge_get',
   'knowledge_search',
+  'project_get',
+  'project_list',
   'schedule_create',
   'schedule_list',
   'task_complete',
@@ -84,7 +87,7 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and lists the task, schedule, collection and knowledge tools', async () => {
+  it('starts with the repository config.yaml and lists the task, schedule, collection, knowledge and project tools', async () => {
     expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
   });
 
@@ -92,6 +95,19 @@ describe('stdio server (e2e)', { timeout: 30_000 }, () => {
     const result = await withStdioClient((client) => client.callTool({ name: 'task_list', arguments: {} }));
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain('Credential error: Todoist credential is not configured');
+  });
+
+  it('reports a missing GitHub token on use, after validating the project id', async () => {
+    const [list, invalid] = await withStdioClient((client) =>
+      Promise.all([
+        client.callTool({ name: 'project_list', arguments: {} }),
+        client.callTool({ name: 'project_get', arguments: { id: 'physical-ai-robot' } }),
+      ]),
+    );
+    expect(list.isError).toBe(true);
+    expect(JSON.stringify(list.content)).toContain('Credential error: GitHub credential is not configured: set GITHUB_TOKEN');
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid.content)).toContain('Invalid input: project id must be');
   });
 
   it('reports a missing collection data source on use', async () => {

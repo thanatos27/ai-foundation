@@ -42,7 +42,7 @@ ChatGPTによるPlan Review（PR #8、rev.2でOK）は完了し、User承認済�
 ## 2. 設計方針
 
 1. **Phase 1〜4の構造をそのまま使う。** Tool → `ToolContext.connectors.project` → `GitHubProjectConnector` → `GitHubClient`（HTTP）。
-2. **Discovery集合 = アクセス境界。** `project_list` が返す集合（`GET /user/repos`）と `project_get` で取得できる集合を一致させる。`project_get` はexact IDで直接取得したうえで、そのRepositoryがDiscovery集合に含まれることを確認する（§11.1）。これによりFine-grained PATのRepository選択がそのままPhase 5のアクセス境界になる。
+2. **Discovery集合 = アクセス境界。** `project_list` が返す集合（`GET /user/repos`）と `project_get` で取得できる集合を一致させる。`project_get` はexact IDで直接取得したうえで、そのRepositoryがDiscovery集合に含まれることを確認する（§11.1）。Fine-grained PATのRepository選択はprivate Repositoryの範囲を絞るが、自分が所有・参加するpublic Repositoryは選択と関係なくDiscovery集合に含まれる（§11.2、Issue #10）。
 3. **GitHubが唯一の正本。** Project Registry / Cache / Index / allowlistを持たない。`project_list` / `project_get` は毎回GitHub APIを呼び、Process内にもResponseを保持しない（Credentialを持つClient instanceのMemoizeのみ）。
 4. **構造的にRead-only。** `GitHubClient` Interfaceは「Repository一覧の全件取得」「Repository 1件取得」の2メソッドだけを持ち、HTTP Methodは `GET` 固定。書き込みAPIを呼ぶコードパスを作らない。
 5. **SDKを使わず `fetch` で薄く実装する。** 必要なEndpointは2つだけで、Pagination（Link Header）・Redirect・Error分類・Header（Token）の扱いを自前で明示的に制御したいため（§23、Q2）。
@@ -347,7 +347,7 @@ async getGitHubToken(): Promise<string> {
 
 - 未設定・空白のみ → `CredentialError: GitHub credential is not configured: set GITHUB_TOKEN`（既存 `require()` の挙動。値はMessageに入らない）。
 - **Header値として送れない文字の事前検証**: `createGitHubClient` で Tokenが可視ASCII（`/^[\x21-\x7e]+$/`）以外を含む場合は `CredentialError('GITHUB_TOKEN contains characters that cannot be sent in an HTTP header')` とする。理由: Nodeの `fetch`（undici）は不正なHeader値のErrorMessageに **値そのもの** を含めるため、検証せずに送るとTokenがError Messageへ漏れ得る（§21）。
-- `.env.example`: `GITHUB_TOKEN=` を「Phase 5 and later (not used yet)」から `--- Project: GitHub ---` 節へ移し、Fine-grained PAT（Repository access: 対象Repositoryを選択、Repository permissions: Metadata Read-only）を推奨するコメントを付ける。
+- `.env.example`: `GITHUB_TOKEN=` を「Phase 5 and later (not used yet)」から `--- Project: GitHub ---` 節へ移し、Fine-grained PAT（Repository access: 対象Repositoryを選択、Repository permissions: Metadata Read-only）を推奨するコメントを付ける。選択で絞れるのはprivate Repositoryで、自分のpublic Repositoryは含まれる旨も書く（§11.2）。
 - `src/index.ts` は変更不要（`new EnvCredentialProvider(process.env)` がそのまま `getGitHubToken` を提供する）。
 
 ---
@@ -392,12 +392,14 @@ GET https://api.github.com/user/repos?per_page=100&visibility=all&affiliation=ow
 | `sort=full_name&direction=asc` | Pagination中の順序を安定させ、取りこぼし・重複を減らす（最終的な順序はローカルでsortする、§14） |
 
 - archived / fork はAPI側で除外されないため、そのまま含まれる。
-- `owner` 指定時も `/users/{owner}/repos` や `/orgs/{org}/repos` は使わず、常に `/user/repos` を取得してローカルで絞る。理由: 前者は「Tokenから参照可能な範囲」とは別の集合（他人のpublic Repository全体など）を返し、仕様の「Token accessをアクセス境界とする」と意味が変わるため。
+- `owner` 指定時も `/users/{owner}/repos` や `/orgs/{org}/repos` は使わず、常に `/user/repos` を取得してローカルで絞る。理由: 前者はDiscovery集合とは別の集合（他人のpublic Repository全体など）を返し、仕様の「Discovery集合 = アクセス境界」と意味が変わるため。
 - GitHub Search APIは使わない（仕様）。
 
 ### 11.1 Discovery集合をアクセス境界にする（rev.2、PR #8 [P1]）
 
-`GET /user/repos` は認証ユーザーが明示的なRepository権限を持つRepository（Fine-grained PATでは選択したRepository）を列挙する。一方 `GET /repos/{owner}/{repo}` はpublic RepositoryであればTokenの選択対象外でも取得できる。直接取得だけでは「Token access = アクセス境界」を満たせないため、`project_get` は次の手順とする。
+`GET /user/repos` は認証ユーザーが owner / collaborator / organization member として関係するRepositoryを列挙する。一方 `GET /repos/{owner}/{repo}` はpublic Repositoryであれば関係のない他人のものでも取得できる。直接取得だけでは「Discovery集合 = アクセス境界」を満たせないため、`project_get` は次の手順とする。
+
+（rev.2時点では「Fine-grained PATでは選択したRepositoryを列挙する」と記載していたが、実APIでは成り立たなかった。§11.2）
 
 1. exact IDで `GET /repos/{owner}/{repo}` を直接取得する（rename / owner移管の301追従を維持、§18）。`404` / `403` / `451` は `NotFoundError`（§19）。
 2. 取得できた場合、`GET /user/repos` を最後までPaginationしてDiscovery集合を得る（`project_list` と同じ `listRepositories()`）。
@@ -407,6 +409,21 @@ GET https://api.github.com/user/repos?per_page=100&visibility=all&affiliation=ow
 - 2のPaginationが途中で失敗した場合は `ProviderApiError`（境界を確認できないままRepositoryを返さない）。
 - コスト: `project_get` 1回あたり 1 + Discoveryのページ数 のRequestになる。MVPでは許容する（PR #8 レビューで合意）。Cacheは導入しない（§2）。
 - 結果として `project_list` に出ないRepository（他人のpublic Repository等。仕様例の `github:openai/example` もTokenのDiscovery集合に含まれない限りNot found）は `project_get` でも取得できない。
+
+### 11.2 Fine-grained PATのRepository selectionとDiscovery集合（Issue #10）
+
+PR #9 のImplementation Reviewで未検証とされた「選択対象外の自分のpublic Repository」を実APIで確認した結果、`/user/repos` はFine-grained PATの選択と関係なく、自分が所有・参加するpublic Repositoryを返した。Issue #10 の決定により、アクセス境界は **`/user/repos` のDiscovery集合** と定義し、実装（§11.1）は変更しない。
+
+| Repository | Discovery集合 / `project_list` | `project_get` |
+|---|---|---|
+| Tokenで選択したRepository（public / private） | 含まれる | 取得できる |
+| 選択していない自分が所有・参加するprivate Repository | 含まれない | `NotFoundError` |
+| 選択していない自分が所有・参加するpublic Repository | **含まれる** | **取得できる** |
+| 関係のない他人のpublic Repository | 含まれない | `NotFoundError`（§11.1の境界確認） |
+
+- Fine-grained PATは引き続き推奨する。Repository selectionはprivate Repositoryの可視範囲の制御に利用できるが、自分のpublic Repositoryの除外は保証しない。この制約をREADMEに明記する。
+- Repositoryごとの追加RequestでTokenの選択状態を推測する方式（Metadata権限のendpointが `403` を返すかで判定する等）は採用しない。GitHubが正式な判定手段として保証しない挙動への依存と、Repository数に比例したRequest増加を避けるため。
+- Foundation独自のallowlist / Project RegistryによるProject範囲の制御もPhase 5対象外のまま。必要になれば将来Phaseで別途設計する。
 
 ---
 
@@ -566,9 +583,11 @@ const GitHubRepositorySchema = z.object({
 |---|---|---|
 | Repositoryが存在しない / 削除済み | `404` | `NotFoundError` |
 | private Repositoryへのアクセス権がない | `404`（GitHubは存在を隠す） | `NotFoundError` |
-| Fine-grained Tokenの対象外 / SSO未承認 / Organizationのポリシーで拒否 | `403`（Rate Limit以外） | `NotFoundError` |
+| Fine-grained Tokenの対象外のprivate Repository / SSO未承認 / Organizationのポリシーで拒否 | `403` / `404`（Rate Limit以外） | `NotFoundError` |
 | DMCA等で利用不可 | `451` | `NotFoundError`（Q9） |
-| 直接取得はできるがTokenのDiscovery集合（`/user/repos`）に含まれない（Fine-grained PATの選択対象外のpublic Repository、他人のpublic Repository等） | `200`（境界確認で不一致） | `NotFoundError`（§11.1） |
+| 直接取得はできるがTokenのDiscovery集合（`/user/repos`）に含まれない（関係のない他人のpublic Repository等） | `200`（境界確認で不一致） | `NotFoundError`（§11.1） |
+
+選択していない自分のpublic RepositoryはDiscovery集合に含まれるため、`project_get` で取得できる（§11.2）。
 
 - Messageは全ケース同一: `Not found: project github:<owner>/<repo> (it does not exist or the GitHub token cannot access it)`。外向けには不存在とアクセス権なしを区別しない。区別に使ったStatusは `cause` のみに残す。
 - `project_list` では対象外Repositoryは単に一覧に現れない。
@@ -745,7 +764,7 @@ Test: 既知のダミーToken（例 `ghp_TESTSECRET0000`）を使い、Client / 
 | 項目 | 手順 |
 |---|---|
 | Repository一覧取得 | `project_list {}` の件数がGitHub上で見えるRepository数（Token対象範囲）と一致 |
-| Token access境界 | Fine-grained PATで対象Repositoryを限定した場合、対象外（自分のpublic Repositoryを含む）が一覧に出ず、`project_get` も `NotFoundError`（§11.1） |
+| Discovery集合とRepository selection | Fine-grained PATで対象Repositoryを限定した場合、選択していないprivate Repositoryは一覧に出ず `project_get` も `NotFoundError`。選択していない自分のpublic Repositoryは一覧に出て取得できる（§11.2） |
 | Metadata取得 | GitHub上でdescriptionを変更 → 次回 `project_get` に反映 |
 
 ---
@@ -786,7 +805,7 @@ Claude CodeからAI Foundation（stdio）へ接続し、以下を確認してPR�
 | public / private / internal / archived / fork / Organization | §11, §16 | §24.3, §24.5, §25.1 |
 | 次回呼び出しで現在状態を反映（Cacheなし） | §2 | §24.5, §25.2 |
 | 削除済み / アクセス権喪失で `NotFoundError` | §11.1, §19 | §24.3, §24.5, §25.1 |
-| Token access = アクセス境界 | §11, §11.1 | §24.5 境界確認、§25.1 Discovery外public Repository、§25.2 Fine-grained PAT |
+| `/user/repos` のDiscovery集合 = アクセス境界（Issue #10で明確化） | §11, §11.1, §11.2 | §24.5 境界確認、§25.1 Discovery外public Repository、§25.2 / §31.4 Fine-grained PAT |
 | Token / Authorization HeaderをResult / Error / Logへ出さない | §9, §20, §21 | §24.1 共通Assertion、§24.4 |
 | Response全体を返さず定義済みFieldのみ | §16 | §24.3 |
 | 不存在とアクセス権なしを区別しない | §19 | §24.3 |
@@ -828,6 +847,7 @@ Plan Reviewで判断をお願いした項目。PR #8 レビューでQ2〜Q7, Q9�
 - rev.1の提案: `project_get` は `/repos/{owner}/{repo}` の直接取得のみとし、`project_list` に出ない任意のpublic Repositoryも取得できる差を許容する。
 - PR #8 [P1]: Fine-grained PATのRepository選択がアクセス境界にならず、仕様（Token access = 境界）と §25.2 の手動Verificationとも矛盾する。
 - rev.2の決定: 直接取得後、数値Repository IDがDiscovery集合（`/user/repos`）に含まれることを確認し、含まれなければ `NotFoundError`。get時の全件Paginationは許容する。
+- Issue #10（実装後）: `/user/repos` はFine-grained PATで選択していない自分のpublic Repositoryも返すと判明。境界を「Discovery集合」と定義し直し、実装は維持（§11.2）。
 
 ### Q2. SDK（Octokit）を使わず `fetch` で実装する（合意済み）
 
@@ -899,3 +919,48 @@ Plan Reviewで判断をお願いした項目。PR #8 レビューでQ2〜Q7, Q9�
 | [P1] `project_get` がFine-grained PATのRepository選択をアクセス境界として守れない（直接取得で選択外のpublic Repositoryも返る。§25.2とも矛盾） | §11.1を追加。直接取得（Redirect追従は維持）→ `/user/repos` 全件Pagination → 数値Repository IDで所属確認 → 不所属は `NotFoundError`。§2（方針2追加）、§6.2 Tool description、§7、§8.4、§16.1（`id` をparse・非公開）、§18、§19、§24.3、§24.5、§25.1、§25.2、§27、Q1を更新 |
 | Q8: API versionを実装時判断に残さず明記 | `2022-11-28` を安定性優先で固定と確定（§8.3、Q8） |
 | Q2〜Q7, Q9〜Q11 | 提案どおり合意。Q3はRepository descriptionを変更しない旨に修正（§26、Q3） |
+
+---
+
+## 31. 実装・Integration Verificationで確定した事項
+
+実装（`feat/phase-5-project`）、実GitHub APIに対するIntegration Test、Claude CodeからのLLM Client Verificationで確定した事項。
+
+### 31.1 Verification結果
+
+| 項目 | 結果 |
+|---|---|
+| Automated Test（`npm test`） | 963件中959件成功、4件skip（Phase 4からの既存skip: Windowsでファイルsymlinkの作成権限がない環境のケース） |
+| Integration Test（`tests/integration/github.integration.test.ts`） | 7件成功、1件skip（private Repository名を渡す `AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO` が未設定のため）。一覧取得・canonical順sort・query（name / 大文字 / owner/repository）・owner絞り込み・exact IDによる `project_get` とDetails・存在しないRepositoryの `NotFoundError`・Token対象外のpublic Repository（`octocat/Hello-World`）の `NotFoundError`・無効Tokenの `CredentialError`（MessageにTokenなし） |
+| Discovery集合 | Tokenから27件（public 25 / private 2 / fork 1 / archived 0 / internal 0、owner 1）。`physical-ai-robot` と `ai-foundation` を含む |
+| private Repository | Repository名を記録しない形で、private 2件がいずれも `project_list` に含まれ、`project_get` で `visibility: private` かつ同一IDで取得できることを確認 |
+| 書き込み | なし（Clientは `GET` のみ） |
+| rename / owner移管 | 手元にrename済みRepositoryがないため実APIでは未確認。Unit Test（§24.4 / §24.5）で担保 |
+
+### 31.2 LLM Client Verification（Claude Code）
+
+`/mcp` で再接続した新しいSessionから実施。Tool呼び出しは折りたたみ表示のままのため、引数は応答内容からの推定を含む。
+
+| # | 発話 | Tool呼び出し | 結果 |
+|---|---|---|---|
+| 1 | 「physical-ai-robotの情報を確認して」 | 2回（`project_list` → 返却idで `project_get`） | `github:thanatos27/physical-ai-robot` のDetails（public / main / description null / archived・fork false / updated_at）を表示。README等は取得しない旨を説明 |
+| 2 | 「AI Foundationのプロジェクトを探して」 | 2回（`project_list({ query: "foundation" })` → `project_get`） | `github:thanatos27/ai-foundation` に到達。§6.2のTool description（単語1つで検索）に従い、`"AI Foundation"` ではなく最初から1単語で検索したとみられる（Q3の想定内） |
+| 3 | 「thanatos27のプロジェクトを一覧して」 | 1回（`project_list({ owner: "thanatos27" })`） | 27件をowner/repository順で表示（§31.1のDiscovery件数と一致）。一覧に公開設定等が含まれない点も説明 |
+
+いずれもIDを推測で組み立てず、Task / Knowledge等の他Toolへ誤ルーティングしなかった。
+
+### 31.3 Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- **`User-Agent`**: §8.3の `ai-foundation/0.1.0` ではなく `ai-foundation` とした。Version番号を `package.json` / `SERVER_INFO` と三重管理しないため。
+- **`NonBlankSchema` の共通化**: §5.2のとおり `domain/knowledge.ts` から `domain/common.ts` へ移し、Projectと共有（挙動は不変）。
+- **Tokenの文字種検証の必要性を確認**: Node 24の `fetch` で不正なHeader値を送ると、Error Messageに値そのもの（`Headers.append: "Bearer a\nb" is an invalid header value.`）が含まれることを実機で確認した。§9の事前検証で、この経路でTokenが漏れないようにしている。
+- **timeout Message**: 秒数は切り上げで表示する（`no response within 30 seconds`）。
+
+### 31.4 Implementation Review（PR #9）と Issue #10
+
+Codexによる独立したImplementation Review（対象 `b9f5e1d`）: **修正必須の不具合なし**。`User-Agent` と `NonBlankSchema` の変更も問題なし。実APIで未検証の事項として以下2点が残された。
+
+| 未検証事項 | 対応 |
+|---|---|
+| 1. Repositoryを限定したFine-grained PATで、選択対象外の自分のpublic Repositoryが `project_list` に現れず `project_get` もNotFoundになるか | 実APIで確認。「Only select repositories」のTokenで、選択していない自分のpublic Repository 21件が `/user/repos` に含まれ、`project_get` でも取得できた（例: `thanatos27/test`）。選択していないprivate Repositoryは含まれなかった（`gh` CLIで見える自分のprivate Repository 7件のうち、Discovery集合に含まれたのは選択した2件のみ。選択していない5件は一覧に出ず、`project_get` も5件すべて `NotFoundError`。Repository名は記録しない）。他人のpublic Repository（`octocat/Hello-World`）は `NotFoundError`。Plan §11.1の前提が成り立たないため、仕様判断として **Issue #10** を作成。決定（A案）: アクセス境界を `/user/repos` のDiscovery集合と定義し直し、実装は変更しない。仕様・Plan（§2, §9, §11, §11.1, §11.2, §19, §25.2, §27, Q1）・README・`.env.example`・Integration Testの記述を実挙動に合わせて修正 |
+| 2. rename / owner移管後の旧IDによる取得 | 手元にrename済みRepositoryがなく、Integration TestはRepositoryへ書き込まないため、実APIでは未確認のまま。Unit Test（§24.4 / §24.5）で担保 |

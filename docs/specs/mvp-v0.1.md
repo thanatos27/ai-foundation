@@ -652,11 +652,11 @@ exact IDでMarkdown本文末尾へ追記する。
 
 `query` / `owner` はOptional。
 
-Phase 5ではGitHub Tokenから参照可能なRepositoryを動的に列挙する。
+Phase 5ではGitHub Tokenで `GET /user/repos` が返すRepository（Discovery集合）を動的に列挙する。
 
 `query` はrepository name / owner/repository / descriptionへの大文字小文字を区別しない部分一致、`owner` はowner loginへの大文字小文字を区別しない完全一致とする。
 
-空Filter `{}` で参照可能なRepository一覧を取得する。
+空Filter `{}` でDiscovery集合のRepository一覧を取得する。
 
 ---
 
@@ -1068,7 +1068,7 @@ project_get
 
 Phase 5では1 GitHub Repository = 1 Projectとする。
 
-Project一覧をConfigurationへ列挙せず、GitHub Tokenから参照可能なRepositoryを動的にDiscoveryする。
+Project一覧をConfigurationへ列挙せず、GitHub Tokenで `GET /user/repos` が返すRepositoryを動的にDiscoveryする。
 
 `project_list` は軽量なProject一覧、`project_get` はexact IDによるRepository Metadata取得を担当する。README / Repository contents / Issue / Pull Requestは自動取得しない。
 

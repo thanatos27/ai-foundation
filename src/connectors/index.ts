@@ -1,5 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { CredentialProvider } from '../credentials/types.js';
+import { lazyGitHubClient } from './github/client.js';
+import { GitHubProjectConnector } from './github/connector.js';
 import { lazyCalendarApi } from './google-calendar/client.js';
 import { GoogleCalendarScheduleConnector } from './google-calendar/connector.js';
 import { lazyNotionClient } from './notion/client.js';
@@ -38,5 +40,6 @@ export function createConnectors(config: Config, credentials: CredentialProvider
       dataSourceId: config.sources.collection.data_source_id,
     }),
     knowledge: knowledgeConnector(config),
+    project: new GitHubProjectConnector({ client: lazyGitHubClient(credentials) }),
   };
 }

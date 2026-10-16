@@ -41,6 +41,7 @@ sources:
       # vault_path: "C:/Users/you/Documents/Obsidian/MyVault"
 
   project:
+    # Projects are the GitHub repositories GITHUB_TOKEN can access (1 repository = 1 project).
+    # Do not list projects or repositories here; limit them with the token's repository access.
     providers:
       - github
-      - google_drive
