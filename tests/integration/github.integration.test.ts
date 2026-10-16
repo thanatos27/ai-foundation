@@ -9,7 +9,12 @@ import { credentials, enabled, hasEnv } from './setup.js';
  * Read-only: these tests only list and get repositories, never write to GitHub.
  * AI_FOUNDATION_IT_GITHUB_REPO (default thanatos27/ai-foundation) must be a public repository the token can access.
  * AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO (optional) is a private one; its name is personal, so it is not committed.
- * AI_FOUNDATION_IT_GITHUB_OUTSIDE_REPO (default octocat/Hello-World) is a public repository outside the token's access.
+ * AI_FOUNDATION_IT_GITHUB_OUTSIDE_REPO (default octocat/Hello-World) is a public repository the token's user has no
+ * relation to, so it is outside the discovery set (GET /user/repos).
+ *
+ * The discovery set is the access boundary (Issue #10). A fine-grained token's repository selection limits private
+ * repositories only: the user's own public repositories are in the set whether selected or not, so no test here
+ * expects an unselected public repository to be missing.
  */
 const run = enabled && hasEnv('GITHUB_TOKEN');
 const publicRepo = process.env.AI_FOUNDATION_IT_GITHUB_REPO?.trim() || 'thanatos27/ai-foundation';
@@ -28,7 +33,7 @@ describe.runIf(run)('GitHub projects (real API)', () => {
 
   const ids = (items: ProjectResult[]) => items.map((item) => item.id.toLowerCase());
 
-  it('lists the repositories the token can access, sorted by owner/repository', () => {
+  it('lists the discovery set, sorted by owner/repository', () => {
     expect(all.length).toBeGreaterThan(0);
     expect(ids(all)).toContain(`github:${publicRepo}`.toLowerCase());
     const keys = all.map((item) => item.id.toLowerCase());
@@ -73,7 +78,13 @@ describe.runIf(run)('GitHub projects (real API)', () => {
     await expect(connector.get(`github:${publicOwner}/af-it-missing-${Date.now()}`)).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('reports a public repository outside the token’s access as not found', async (context) => {
+  it('gets the repositories it lists (list and get share the boundary)', async () => {
+    for (const item of all.slice(0, 3)) {
+      expect((await connector.get(item.id)).project).toEqual(item);
+    }
+  });
+
+  it('reports a public repository outside the discovery set as not found', async (context) => {
     if (ids(all).includes(`github:${outsideRepo}`.toLowerCase())) context.skip();
     await expect(connector.get(`github:${outsideRepo}`)).rejects.toBeInstanceOf(NotFoundError);
   });

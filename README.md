@@ -33,7 +33,7 @@ Phase 5 — Project。Todoist・Google Calendar・Notion・Obsidian Vault・GitH
 | `knowledge_search` | Knowledge Directory以下を再帰的に検索（query: title / description / tags / 本文の部分一致、area、tags（AND））。本文全文ではなくsnippetを返す |
 | `knowledge_get` | `obsidian:<vault-relative-path>` を指定してMetadataと本文全文を取得 |
 | `knowledge_append` | `obsidian:<vault-relative-path>` を指定して本文末尾へ追記（Frontmatterは変更しない） |
-| `project_list` | `GITHUB_TOKEN` から参照可能なGitHub RepositoryをProjectとして一覧（query: name / owner/repository / descriptionの部分一致、owner: 完全一致。いずれも大文字小文字を区別しない）。owner/repository順 |
+| `project_list` | `GITHUB_TOKEN` の `/user/repos` が返すGitHub Repository（Discovery集合）をProjectとして一覧（query: name / owner/repository / descriptionの部分一致、owner: 完全一致。いずれも大文字小文字を区別しない）。owner/repository順 |
 | `project_get` | `github:<owner>/<repository>` を指定してProjectとGitHub固有Details（description / owner / default_branch / visibility / archived / fork / updated_at）を取得（Read-only） |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
@@ -177,10 +177,22 @@ Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app
 
 ### GitHub
 
-`GITHUB_TOKEN` から参照可能なRepositoryがそのままProjectになる。AI Foundationにはallowlistがないため、**Tokenに付与するRepository accessでProjectの範囲を決める**。`project_get` も `project_list` に出るRepositoryだけを返す（Token対象外のpublic RepositoryはNot found）。
+`GITHUB_TOKEN` でGitHub APIの `GET /user/repos` が返すRepository（Discovery集合）がそのままProjectになる。AI Foundationにはallowlistがなく、`project_get` も `project_list` に出るRepositoryだけを返す。
+
+Discovery集合に含まれるかどうかは次のとおり。
+
+| Repository | `project_list` / `project_get` |
+|---|---|
+| Tokenで選択したRepository（public / private） | 含まれる |
+| Tokenで選択していない、自分が所有・参加するprivate Repository | 含まれない（Not found） |
+| Tokenで選択していない、自分が所有・参加する**public** Repository | **含まれる**（GitHubの仕様上、Fine-grained Tokenは選択と関係なくpublic Repositoryを読めるため） |
+| 関係のない他人のpublic Repository | 含まれない（Not found） |
+
+**Fine-grained TokenのRepository selectionで絞れるのはprivate Repositoryだけ**で、自分のpublic RepositoryをProject一覧から除外することはできない。public Repositoryの中身は公開情報だが、AI ClientのProject一覧にどのRepositoryが出るかには影響するため、一覧に出したくないRepositoryがある場合はこの点に注意する（Phase 5にはAI Foundation側で除外する仕組みはない）。
+
 
 1. GitHubの [Fine-grained personal access tokens](https://github.com/settings/personal-access-tokens) で新しいTokenを作成する
-2. Resource ownerを選び、Repository accessで「Only select repositories」からAI Foundationに見せるRepositoryを選ぶ（すべてを見せる場合は「All repositories」）
+2. Resource ownerを選び、Repository accessで「Only select repositories」からAI Foundationに見せるprivate Repositoryを選ぶ（すべてを見せる場合は「All repositories」）。自分のpublic Repositoryは選択と関係なく一覧に含まれる
 3. Repository permissionsは **Metadata: Read-only** だけを付与する（AI FoundationはRepositoryへ書き込まない）
 4. 作成したTokenを `GITHUB_TOKEN` に設定する
 

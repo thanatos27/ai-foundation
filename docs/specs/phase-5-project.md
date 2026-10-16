@@ -76,14 +76,29 @@ AI Foundation独自のProject RegistryやRepository allowlistは持たない。
 ```text
 GITHUB_TOKEN
     ↓
-GitHub API
+GitHub API（GET /user/repos）
     ↓
-Tokenから参照可能なRepository
+Discovery集合
     ↓
 Project Discovery
 ```
 
-GitHub TokenのRepository accessをPhase 5のアクセス境界とする。
+認証済みGitHub APIの `GET /user/repos` が返すRepositoryの集合（以下 **Discovery集合**）をPhase 5のアクセス境界とする。`project_list` はDiscovery集合を返し、`project_get` もDiscovery集合に含まれるRepositoryだけを返す（Issue #10）。
+
+### Discovery集合とFine-grained PATのRepository selection
+
+Discovery集合は、Tokenの所有者が owner / collaborator / organization member として関係するRepositoryである。Fine-grained PATのRepository selectionとの関係は以下のとおり。
+
+| Repository | Discovery集合 |
+|---|---|
+| Tokenで選択したRepository（public / private） | 含まれる |
+| Tokenで選択していない自分が所有・参加するprivate Repository | 含まれない |
+| Tokenで選択していない自分が所有・参加するpublic Repository | **含まれる**（GitHubの仕様上、Fine-grained PATは選択と関係なくpublic Repositoryを読めるため） |
+| 関係のない他人のpublic Repository | 含まれない |
+
+Fine-grained PATのRepository selectionはprivate Repositoryの可視範囲の制御には利用できるが、自分が所有・参加するpublic RepositoryをDiscovery集合から除外する境界としては保証しない。
+
+Repositoryごとに追加のRequestを送ってTokenの選択状態を推測する方式は採用しない（GitHubが正式な判定手段として保証しない挙動への依存と、Repository数に比例したRequest増加を避けるため）。
 
 ## Project Definition
 
@@ -95,7 +110,7 @@ Phase 5では以下をProjectと定義する。
 
 Repositoryが個人所有かOrganization所有か、public / private / internalか、archivedか、forkかはProject判定に影響しない。
 
-Tokenから参照可能であればProjectとして扱う。
+Discovery集合に含まれればProjectとして扱う。
 
 ## Project Domain
 
@@ -159,7 +174,7 @@ ID形式が不正な場合は `InputValidationError` とする。
 
 Project一覧を `config.yaml` に記述しない。
 
-`project_list` は認証済みGitHub Tokenから参照可能なRepositoryをGitHub APIで動的に列挙する。
+`project_list` は認証済みGitHub Tokenで `GET /user/repos` を呼び、Discovery集合を動的に列挙する。
 
 AI Foundation独自のRepository allowlistはPhase 5では持たない。
 
@@ -179,7 +194,7 @@ query: string | undefined
 owner: string | undefined
 ```
 
-空Filter `{}` でTokenから参照可能な全Repositoryを対象とする。
+空Filter `{}` でDiscovery集合の全Repositoryを対象とする。
 
 ### query
 
@@ -263,7 +278,7 @@ Input:
 }
 ```
 
-exact IDでGitHub APIからRepositoryを直接取得する。
+exact IDでGitHub APIからRepositoryを直接取得し、取得したRepositoryがDiscovery集合に含まれることを確認する。含まれなければ `NotFoundError` とする。
 
 Resultは共通ProjectとGitHub固有Detailsを分離する。
 
@@ -337,11 +352,11 @@ owner移管
 Token権限変更
 ```
 
-削除済み、または現在のTokenからアクセスできないRepositoryへの `project_get` は `NotFoundError` とする。
+削除済み、現在のTokenからアクセスできない、またはDiscovery集合に含まれないRepositoryへの `project_get` は `NotFoundError` とする。
 
 ## Repository Types
 
-Tokenから参照可能であれば以下を除外しない。
+Discovery集合に含まれれば以下を除外しない。
 
 ```text
 public Repository
@@ -372,7 +387,7 @@ CredentialProvider
 GitHubProjectConnector
 ```
 
-Fine-grained Personal Access Token等、対象Repositoryを限定できるRead-only Credentialの利用を推奨する。
+Fine-grained Personal Access Token等、対象Repositoryを限定できるRead-only Credentialの利用を推奨する。ただしRepository selectionで限定できるのはprivate Repositoryであり、自分が所有・参加するpublic Repositoryは選択と関係なくDiscovery集合に含まれる（§Architecture）。
 
 実Token値を `config.yaml`、Public Repository、Tool Result、Logへ保存・出力しない。
 
@@ -454,7 +469,7 @@ project_get  → Read
 
 Write / Delete / External Sendは存在しないため、追加Confirmationは不要とする。
 
-Repository accessの制御はGitHub Token側で行う。
+Repository accessの制御はGitHub Token側で行う。public RepositoryについてはTokenで除外できない範囲がある（§Architecture）。
 
 Phase 5ではAI Foundation独自allowlistや詳細Permission Engineを追加しない。
 
@@ -471,7 +486,9 @@ Secretを含むProvider生Error
 
 Repository Mappingでは明示的に定義したProject / Details項目だけを取り出す。
 
-Private RepositoryもTokenから参照可能であればProjectとして返すため、利用者はTokenへ付与するRepository accessを意図的に制限する。
+Private RepositoryもDiscovery集合に含まれればProjectとして返すため、利用者はTokenへ付与するRepository accessを意図的に制限する。
+
+自分が所有・参加するpublic RepositoryはTokenの選択と関係なくProject一覧に含まれる。public Repositoryの内容自体は公開情報だが、「AI FoundationのProject一覧に何を含めるか」は整理・プライバシー上の意味を持つため、この制約をREADMEに明記する。
 
 ## Acceptance Criteria
 
@@ -527,7 +544,7 @@ README / Repository contents / Issue / Pull Requestを自動取得しない。
 
 ### project_list
 
-Tokenから参照可能なRepositoryを動的に列挙できる。
+認証済みTokenの `GET /user/repos` が返すDiscovery集合を動的に列挙できる。
 
 空Filter `{}` で全対象Repositoryを取得できる。
 
@@ -553,7 +570,7 @@ GitHub APIがrename / owner移管後のRepositoryへ解決する場合、現在�
 
 ### Repository Types
 
-Tokenから参照可能な以下をProjectとして扱える。
+Discovery集合に含まれる以下をProjectとして扱える。
 
 ```text
 public
@@ -572,7 +589,7 @@ AI Foundation独自CacheをSource of Truthにせず、次回Tool呼び出しでG
 
 ### Security / Privacy
 
-GitHub TokenのRepository accessをPhase 5のアクセス境界にできる。
+`/user/repos` のDiscovery集合をPhase 5のアクセス境界にできる（`project_get` もDiscovery集合外のRepositoryを `NotFoundError` にする）。Fine-grained PATのRepository selectionで自分のpublic Repositoryを除外できることは保証しない。
 
 Token / Authorization HeaderをTool Result / Error Message / Logへ出さない。
 
