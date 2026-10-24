@@ -1,6 +1,6 @@
 {
   "name": "ai-foundation",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "MCP server that lets AI clients read and write Task / Schedule / Collection / Knowledge / Project across their Sources of Truth.",
   "type": "module",
