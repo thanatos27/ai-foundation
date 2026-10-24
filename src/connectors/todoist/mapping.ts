@@ -73,6 +73,19 @@ export function dueArgs(due: string): { dueDate: string } | { dueDatetime: strin
 /** Update request field that removes the due (the SDK's alias for `"no date"`). */
 export const CLEAR_DUE = { dueString: null } as const;
 
+/** Language of every recurrence AI Foundation sends; rules are written in English. */
+export const RECURRENCE_LANG = 'en';
+
+/** Add / update request fields that set a recurring rule. */
+export function recurrenceArgs(rule: string): { dueString: string; dueLang: string } {
+  return { dueString: rule, dueLang: RECURRENCE_LANG };
+}
+
+/** Todoist due → recurrence: the rule text of a recurring due, else null. */
+export function recurrenceOf(due: TodoistTask['due']): string | null {
+  return due?.isRecurring && due.string ? due.string : null;
+}
+
 const EXPLICIT_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
@@ -88,6 +101,49 @@ export function dueOf(due: TodoistTask['due'], timeZone: string): string | null 
   return formatInTimeZone(instant, zone);
 }
 
+type DueUpdateArgs = typeof CLEAR_DUE | { dueString: string; dueLang: string } | ReturnType<typeof dueArgs>;
+
+/** `HH:mm` of a due with a time (in the due's own zone), or null for a date-only due. */
+function timeOfDay(due: NonNullable<TodoistTask['due']>, timeZone: string): string | null {
+  const value = dueOf(due, timeZone)!;
+  return isDateOnly(value) ? null : value.slice(11, 16);
+}
+
+/**
+ * Update requests, sent in order, that put back `previous` — the due read before a failed change:
+ * the same date / time for a one-off due, no due, or the same rule for a recurring due (Todoist
+ * may recalculate its next date). A recurring due's time is not always in its rule text (a rule
+ * changed to one without a time keeps the old time), and Todoist drops the time when a rule is set
+ * on a one-off due, but keeps it when one rule replaces another. So a timed rule is put back by
+ * first setting a rule that names the time, then the original rule.
+ */
+export function restoreDueSteps(previous: TodoistTask['due'], timeZone: string): DueUpdateArgs[] {
+  if (!previous) return [CLEAR_DUE];
+  if (!previous.isRecurring) return [dueArgs(dueOf(previous, timeZone)!)];
+  const rule = { dueString: previous.string, dueLang: previous.lang ?? RECURRENCE_LANG };
+  const time = timeOfDay(previous, timeZone);
+  return time ? [recurrenceArgs(`every day at ${time}`), rule] : [rule];
+}
+
+/**
+ * Whether `restored` is `previous` again. A recurring due must have the same rule, time of day
+ * and time zone, while its next date may differ (Todoist recalculates it); a one-off due must be
+ * the same date or instant.
+ */
+export function isSameDue(previous: TodoistTask['due'], restored: TodoistTask['due'], timeZone: string): boolean {
+  if (!previous || !restored) return !previous && !restored;
+  if (previous.isRecurring !== restored.isRecurring) return false;
+  if (!previous.isRecurring) {
+    const [before, after] = [dueOf(previous, timeZone)!, dueOf(restored, timeZone)!];
+    return isDateOnly(before) || isDateOnly(after) ? before === after : Date.parse(before) === Date.parse(after);
+  }
+  return (
+    previous.string === restored.string &&
+    timeOfDay(previous, timeZone) === timeOfDay(restored, timeZone) &&
+    (previous.timezone ?? null) === (restored.timezone ?? null)
+  );
+}
+
 /** Todoist task → domain task. `status` overrides the label-derived one (e.g. `done`). */
 export function toTask(task: TodoistTask, timeZone: string, status?: Task['status']): Task {
   return {
@@ -101,5 +157,6 @@ export function toTask(task: TodoistTask, timeZone: string, status?: Task['statu
     area: labelOf(task.labels, AREA_LABELS) ?? null,
     project_ref: null,
     tags: task.labels.filter((label) => !isReservedTag(label)),
+    recurrence: recurrenceOf(task.due),
   };
 }

@@ -1,6 +1,6 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.3（Plan承認済み。実装前Probe実施・Probeレビュー反映済み: §17 / §18。本実装は未着手）**
+- Status: **rev.3（Plan承認済み。実装済み: §19。Implementation Review完了・手動Verification記録済み）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -680,3 +680,76 @@ User判断が必要なもの（承認済みPlanからの変更になるため）
 
 - **提案A（P6）: `recurrence` を送った呼び出しの400を `InputValidationError` にする。** Todoistの400は `Bad Request` しか返さず、§16 Q6のままだとAI Clientには `Todoist API error: HTTP 400: …Bad Request` しか届かず、書式の誤りだと判断しにくい。rev.2で `task_update` の `recurrence` は単独操作になったため、その呼び出しの400は実質的に規則の解釈失敗に限られる。`task_create` でも、title / Labelは事前にDomainで検証済み。**案**: `recurrence` を送った `addTask` / `updateTask` の400に限り `InputValidationError: Todoist could not parse recurrence "<rule>" (HTTP 400). Use an English rule such as "every monday".` にする（`cause` に元のErrorを保持）。それ以外の400は従来どおり `ProviderApiError`。
 - **提案B（P8 / P8b）: 繰り返し規則の復元に `starting <date>` を使う。** §7.4の復元（受理されない文字列で `task_update` した場合）は、現Planでは元の `string` を送るだけなので次回日付がずれる（P8: 10/26 → 11/02）。**案**: `restoreDueArgs` で、元の `lang` が `en`（または未設定）なら `"<string> starting <date の日付部分>"` を送り、次回日付まで完全に戻す。日本語など英語以外の規則は `starting` が400になるため、従来どおり元の `string` / `lang` を送り、次回日付が再計算され得ることをMessageで示す（§16 Q5の制約は英語以外の規則だけに縮小する）。なお、元の次回日付が過去（期限切れ）の場合に `starting <過去日>` がどう解釈されるかは未確認で、実装時のIntegration Testで確認する。
+
+---
+
+## 19. 実装で確定した事項
+
+### 19.1 Verification結果（2026-10-25）
+
+| 項目 | 結果 |
+|---|---|
+| `npm run typecheck` / `npm run build` | 成功 |
+| `npm test` | 54 files、1399 passed / 5 skipped（skipは本Issue以前からのもの） |
+| Integration Test（`todoist-recurrence.integration.test.ts` ＋既存 `todoist.integration.test.ts`、実Todoist） | 2 files、9 passed。終了後、Inboxに `[af-it` / `[af-probe` で始まるTaskが残っていないことを確認（0件） |
+| 既存Task系Test | 無変更で成功。変更したのは §11.1の例外（`toTask` の `toEqual` に `recurrence: null` を追加）だけ |
+| `docs/specs/mvp-v0.1.md` | 差分なし |
+| 手動Verification（§12.2）・LLM Client Verification（§13） | 手動Verificationは §19.5に記録。LLM Client Verificationは実施しない |
+
+### 19.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- **復元後のMessage**: 繰り返しの期限を戻して次回期限が変わった場合の文末を `Its previous rule "<string>" was set again, and Todoist recalculated the next due (now <次回期限>).` とした（§7.4の案の「次回日付」を具体的な値で示す形）。次回期限が変わらなかった場合はこの文を付けない。
+- **ロールバックの確認**（§7.2）: `deleteTask` が `true` 以外を返すか例外を投げた場合、`getTask` の404だけを削除済みとみなす。残存の確認には `toFoundationError` を通さず `TodoistRequestError` の404を直接見る（Task IDの `NotFoundError` 変換を経由させないため）。
+- **400の変換**（§7.2 / §7.4）: `recurrenceRequestError` をConnector内の関数として追加し、`recurrence` を送った `addTask` / `updateTask` の `catch` でだけ使う。`toFoundationError` は変更していない。`recurrence: null`（`CLEAR_DUE`）の更新は規則を送らないため、従来どおり `toFoundationError` を使う。
+- **`update` のLabel送信条件**: `getTask` を `due` / `recurrence` 指定時にも呼ぶようになったため、`labels` を送る条件を「`current` がある」から「status / area / tags を変える かつ `current` がある」に変えた（`due` だけの更新でLabelを送らない。既存Testで確認）。
+- **Tool説明**（§8）: 共通文に `Todoist may return the rule reworded.` を加えた（§18 P2〜P4の正規化）。
+- **Fake**（§11.4）: `dueString` から作る期限の日付は `dueStringDate`（既定 `2026-10-26`）で固定し、`every` / `every!` で始まる文字列だけを繰り返しとして扱う。`deleteResult` で `deleteTask` の戻り値を `false` にできる。
+- **Integration Test**（§12.1）: I11（`recurrence` と他の項目の同時指定）はDomainで拒否されConnectorまで届かないため、Integration Testには含めず、Domain / Tool Test（§11.2 / §11.5）で確認した。Plan外で「`every blah` の作成が `Invalid input`（HTTP 400）になる」ケースを追加した。I3は `{ due }` と `{ due: null, title }` の2通りで確認した。
+
+### 19.3 Implementation Review（PR #26、Codex、対象 `f06678d`）
+
+P2の指摘2件とも採用した。
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] `mapping.ts`: 規則の文字列に含まれない時刻（`every day at 9am` → `every day` で引き継いだ09:00）が、復元で失われる | 実Todoistで追加確認した（§19.4）。単発の期限・期限なしの状態に規則を設定すると時刻が落ち、規則から規則への変更では時刻が引き継がれる。そこで `restoreDueArgs` を `restoreDueSteps` に置き換え、時刻付きの繰り返しは `every day at <HH:mm>`（元の時刻を元の期限のzoneで読んだもの）→ 元の規則、の2段階で戻す。日付だけの繰り返し・単発・期限なしは従来どおり1段階 |
+| [P2] `connector.ts`: 復元の応答を検証せずに「元に戻った」と報告している | `isSameDue` を追加し、復元後の期限を元と比べる。繰り返しは規則の文字列・時刻・timezoneの一致（次回日付の違いは許容）、単発は日付・日時の一致、期限なしは期限なし。一致しなければ、残った状態と元の期限を示す `ProviderApiError`（`did not take effect`）にする。2段階の途中で失敗した場合も、その時点の状態を示す |
+
+Testの変更:
+
+- Fake: 実測に合わせ、`at HH:mm` で終わる規則は時刻を指定したものとして扱う。規則から規則への変更と、単発の期限への変更では直前のfloatingな時刻を引き継ぎ、単発の期限から規則への変更では時刻を落とす。`毎` で始まる文字列も繰り返しとして扱う（指摘にあった「Fakeが `毎日` を非繰り返しとして返すのに、送信引数しか見ないためTestが通る」経路を解消）。時刻付きの繰り返しの `closeTask` にも対応
+- Mapping: `restoreDueSteps`（時刻付き、日本語、別zoneの固定時刻、日付のみ、単発、期限なし）と `isSameDue`（次回日付の違いは許容、規則・時刻・timezone・繰り返しかどうかの違いは不一致）
+- Connector: 日本語の規則の復元で、送信引数に加えて復元後の状態を確認する。時刻が規則にない場合の2段階復元、Todoistが元の規則を受け付けない場合の `ProviderApiError`、2段階の1段目の失敗を追加
+- Integration: `every day at 9am` → `every day` のTaskに `tomorrow` / `no date` を指定し、規則 `every day` と09:00が戻ることを確認
+
+Verification（修正後）: `npm run typecheck` / `npm run build` 成功、`npm test` 54 files・1413 passed / 5 skipped、実TodoistのIntegration Test 2 files・10 passed（Inboxに残ったテスト用Taskは0件）。
+
+### 19.4 Review対応のための追加確認（2026-10-25、実Todoist）
+
+§5と同じ方式で行った（一時Task 12件、全件削除）。いずれも `every day at 9am` を作成し、`every day` に変えて時刻を引き継いだ状態（`date: "…T09:00:00"`、`timezone: null`）から始めた。
+
+| 操作 | 結果 |
+|---|---|
+| `tomorrow`（単発）にしてから `every day` | 単発では09:00が引き継がれるが、`every day` に戻すと日付だけになる（**時刻が落ちる**。指摘を実Todoistで確認） |
+| 期限なしにしてから `every day` | 日付だけ |
+| 単発の日時（`2026-10-26 09:00`）にしてから `every day` | 日付だけ |
+| 期限なしにしてから `every day at 09:00` | 時刻は戻るが、文字列が `every day at 09:00` に変わる |
+| `tomorrow` → `every day at 09:00` → 元の規則（英語の毎日・毎週、日本語の `毎日`、`every! 3 days`） | 4ケースとも、文字列・時刻・`timezone` が元と一致（次回日付は再計算される） |
+| 固定zoneの単発の日時に `every day` | 日付だけで、`timezone` も `null` になる |
+
+固定zoneの繰り返し（`timezone` を持つもの）は、2段階で戻しても `timezone` が `null` になる可能性がある。その場合は `isSameDue` が不一致と判定し、`ProviderApiError` で状態を示す（Todoist UIで作る繰り返しはfloatingな時刻が通常のため、MVPではこれ以上扱わない）。
+
+### 19.5 手動Verification（2026-10-25、Claude Code、MCP Serverを本Branchの `dist`（`9769d93`）で再接続）
+
+§12.2をMCP Client（Claude Code）からToolを直接呼んで実施した。M2はTodoist UIで作成した繰り返しTaskを使い、M1は検証後に削除した。Todoist上の状態は `getTask` で確認した。
+
+| # | 操作 | 結果 |
+|---|---|---|
+| M1 | `task_create({ title, recurrence: 'every monday' })` | `recurrence: "every monday"`、`due: "2026-10-26"`（月曜）。Todoist上も `isRecurring: true` |
+| M2 | Todoist UI（日本語）で作成した繰り返しTaskを `task_list` | `recurrence: "毎"`、`due: "2026-10-25"`。Todoistが保持する文字列（`lang: "ja"`）がそのまま返る |
+| M3 | M2のTaskに `task_update({ title })` | 規則 `毎`・期限 `2026-10-25` が変わらない |
+| M4 | M2のTaskに `task_update({ due: '2026-11-01' })` | `Invalid input: task todoist:… recurs ("毎"); changing its due would remove the recurrence. … Nothing was changed.`。Todoist上の期限・規則も変化なし |
+| M5 | `task_update({ recurrence: 'every day', due: '2026-11-01' })`、`task_update({ recurrence: 'every day', title })` | どちらも `Input validation error: … recurrence must be updated on its own …` |
+| M6 | `task_create({ title, recurrence: 'tomorrow' })` | `Invalid input: Todoist did not read recurrence "tomorrow" as a recurring rule (it was read as the one-off due 2026-10-26), so no task was created. …`。Inboxに同じTitleのTaskはない |
+
+LLM Client Verification（§13）は実施しない。

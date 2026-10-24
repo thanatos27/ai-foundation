@@ -4,10 +4,13 @@ import { CredentialError, FoundationError, NotFoundError, ProviderApiError } fro
 
 export type { TodoistTask };
 
-/** The part of the Todoist SDK the connector uses. Tests inject a fake. */
+/**
+ * The part of the Todoist SDK the connector uses. Tests inject a fake. `deleteTask` only rolls
+ * back a task the same `create` call has just added; no tool deletes tasks.
+ */
 export type TodoistClient = Pick<
   TodoistApi,
-  'getUser' | 'getTasks' | 'getTask' | 'addTask' | 'updateTask' | 'closeTask'
+  'getUser' | 'getTasks' | 'getTask' | 'addTask' | 'updateTask' | 'closeTask' | 'deleteTask'
 >;
 
 export type TodoistClientFactory = (apiToken: string) => TodoistClient;

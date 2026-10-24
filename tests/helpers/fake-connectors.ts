@@ -46,6 +46,7 @@ export class FakeTaskConnector implements TaskConnector {
       area: input.area ?? null,
       project_ref: null,
       tags: input.tags ?? [],
+      recurrence: input.recurrence ?? null,
     };
     this.tasks.push(task);
     return task;
