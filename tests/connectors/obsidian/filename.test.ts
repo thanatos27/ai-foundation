@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toFileName } from '../../../src/connectors/obsidian/filename.js';
+import { sanitizeFileTitle, toFileName } from '../../../src/connectors/obsidian/filename.js';
 import { InputValidationError } from '../../../src/errors.js';
 
 describe('toFileName', () => {
@@ -38,5 +38,19 @@ describe('toFileName', () => {
     expect(() => toFileName(`${'あ'.repeat(66)}abc`)).toThrow(/too long/);
     expect(toFileName('a'.repeat(200))).toBe(`${'a'.repeat(200)}.md`);
     expect(() => toFileName('a'.repeat(201))).toThrow(/too long/);
+  });
+});
+
+describe('sanitizeFileTitle', () => {
+  it('is the title part of toFileName, without the extension or the Windows / length checks', () => {
+    expect(sanitizeFileTitle('RAG: 構成と役割')).toBe('RAG 構成と役割');
+    expect(sanitizeFileTitle('  [[リンク]] #tag. ')).toBe('リンク tag');
+    expect(sanitizeFileTitle('CON')).toBe('CON');
+    expect(sanitizeFileTitle('a'.repeat(300))).toBe('a'.repeat(300));
+  });
+
+  it('rejects a title with nothing usable, with the same message as toFileName', () => {
+    expect(() => sanitizeFileTitle(' : / ')).toThrow(InputValidationError);
+    expect(() => sanitizeFileTitle(' : / ')).toThrow('title " : / " cannot be turned into a file name');
   });
 });

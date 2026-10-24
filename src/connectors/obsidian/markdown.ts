@@ -2,6 +2,10 @@ import { Document, parseDocument } from 'yaml';
 import { type Area, AreaSchema } from '../../domain/index.js';
 import { ProviderApiError } from '../../errors.js';
 import { tagProblem } from './tags.js';
+import { normalizeBody } from './text.js';
+
+/** Shared with life logs; re-exported for existing importers. */
+export { appendText } from './text.js';
 
 /**
  * Knowledge Markdown: optional YAML frontmatter between `---` lines, then the body. Pure text
@@ -110,18 +114,4 @@ export function createFileText(meta: KnowledgeMeta, content: string): string {
     throw new ProviderApiError('Obsidian', 'the new note would not read back as written; it was not created');
   }
   return text;
-}
-
-/**
- * What to append to a file whose text is `existing` so that `content` starts a new paragraph:
- * line breaks are added only where needed, in the file's line ending (CRLF if it has any).
- */
-export function appendText(existing: string, content: string): string {
-  const eol = existing.includes('\r\n') ? '\r\n' : '\n';
-  let text = content.replace(/\r\n?/g, '\n').replaceAll('\n', eol);
-  if (!text.endsWith(eol)) text += eol;
-  if (existing === '') return text;
-
-  const trailingBreaks = (/(?:\r?\n)*$/.exec(existing)?.[0].match(/\n/g) ?? []).length;
-  return eol.repeat(Math.max(0, 2 - trailingBreaks)) + text;
 }
