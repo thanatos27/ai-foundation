@@ -135,6 +135,22 @@ describe.runIf(run)('Todoist recurring tasks (real API)', () => {
     expect(after.due).toMatchObject({ isRecurring: true, string: before.due?.string });
   });
 
+  it('puts back a time that is not in the rule text', async () => {
+    // "every day" keeps 09:00 from "every day at 9am"; a failed change must not drop that time.
+    const task = await create({ title: `${runLabel} time kept`, recurrence: 'every day at 9am' });
+    await connector.update({ id: task.id!, recurrence: 'every day' });
+    const before = (await stored(task)).due;
+    expect(before).toMatchObject({ isRecurring: true, string: 'every day' });
+    expect(before?.date).toMatch(/T09:00:00$/);
+
+    for (const rule of ['tomorrow', 'no date']) {
+      expect(await failure(connector.update({ id: task.id!, recurrence: rule }))).toBeInstanceOf(InputValidationError);
+      const after = (await stored(task)).due;
+      expect(after).toMatchObject({ isRecurring: true, string: 'every day', timezone: before?.timezone ?? null });
+      expect(after?.date).toMatch(/T09:00:00$/);
+    }
+  });
+
   it('reports a rule Todoist rejects as input to check', async () => {
     const error = await failure(connector.create({ title: `${runLabel} rejected`, recurrence: 'every blah' }));
     expect(error).toBeInstanceOf(InputValidationError);

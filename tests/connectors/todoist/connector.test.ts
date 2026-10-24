@@ -519,8 +519,52 @@ describe('recurrence', () => {
     it('puts a Japanese rule back in its own language', async () => {
       const due = { isRecurring: true, string: '毎日', date: '2026-10-26', timezone: null, lang: 'ja' };
       const { api, connector } = setup([weekly({ due })]);
-      await rejection(connector.update({ id: 'todoist:r1', recurrence: 'tomorrow' }));
+      const error = await rejection(connector.update({ id: 'todoist:r1', recurrence: 'tomorrow' }));
+
+      expect(error).toBeInstanceOf(InputValidationError);
       expect(api.callsOf('updateTask')[1]).toEqual(['r1', { dueString: '毎日', dueLang: 'ja' }]);
+      expect(api.tasks.get('r1')?.due).toMatchObject({ isRecurring: true, string: '毎日', lang: 'ja' });
+    });
+
+    it('puts back a time that is not in the rule text by setting a timed rule first', async () => {
+      // "every day" that kept 09:00 from an earlier "every day at 9am".
+      const due = { isRecurring: true, string: 'every day', date: '2026-10-19T09:00:00', timezone: null, lang: 'en' };
+      const { api, connector } = setup([weekly({ due })]);
+      const error = await rejection(connector.update({ id: 'todoist:r1', recurrence: 'no date' }));
+
+      expect(error).toBeInstanceOf(InputValidationError);
+      expect(error.message).toContain('task todoist:r1 was left as before ("every day", next 2026-10-19T09:00:00+09:00).');
+      expect(api.callsOf('updateTask').slice(1)).toEqual([
+        ['r1', { dueString: 'every day at 09:00', dueLang: 'en' }],
+        ['r1', { dueString: 'every day', dueLang: 'en' }],
+      ]);
+      expect(api.tasks.get('r1')?.due).toMatchObject({ isRecurring: true, string: 'every day', date: '2026-10-26T09:00:00' });
+    });
+
+    it('reports the state left when Todoist does not take the previous rule back', async () => {
+      // A rule the fake (like Todoist for some texts) does not read as recurring when sent again.
+      const due = { isRecurring: true, string: 'ev mon', date: '2026-10-19', timezone: null, lang: 'en' };
+      const { api, connector } = setup([weekly({ due })]);
+      const error = await rejection(connector.update({ id: 'todoist:r1', recurrence: 'tomorrow' }));
+
+      expect(error).toBeInstanceOf(ProviderApiError);
+      expect(error.message).toBe(
+        'Todoist API error: Todoist did not read recurrence "tomorrow" as a recurring rule, and restoring the previous ' +
+          'due of task todoist:r1 ("ev mon", next 2026-10-19) did not take effect: it now has the one-off due 2026-10-26. ' +
+          'Fix it with task_update or in Todoist.',
+      );
+      expect(api.tasks.get('r1')?.due?.isRecurring).toBe(false);
+    });
+
+    it('reports the state left when the first of two restore steps fails', async () => {
+      const due = { isRecurring: true, string: 'every day', date: '2026-10-19T09:00:00', timezone: null, lang: 'en' };
+      const { api, connector } = setup([weekly({ due })]);
+      failUpdate(api, 2, new TodoistRequestError('Service Unavailable', 503));
+      const error = await rejection(connector.update({ id: 'todoist:r1', recurrence: 'no date' }));
+
+      expect(error).toBeInstanceOf(ProviderApiError);
+      expect(error.message).toContain('task todoist:r1 now has no due; restoring its previous due');
+      expect(api.callsOf('updateTask')).toHaveLength(2);
     });
 
     it.each([

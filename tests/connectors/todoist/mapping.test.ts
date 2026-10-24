@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   dueArgs,
   dueOf,
+  isSameDue,
   labelsFor,
   parseTaskId,
   recurrenceArgs,
   recurrenceOf,
-  restoreDueArgs,
+  restoreDueSteps,
   toTask,
   updatedLabels,
 } from '../../../src/connectors/todoist/mapping.js';
@@ -197,29 +198,80 @@ describe('recurrence', () => {
   });
 });
 
-describe('restoreDueArgs', () => {
+describe('restoreDueSteps', () => {
   it('clears the due when there was none', () => {
-    expect(restoreDueArgs(null, TZ)).toEqual({ dueString: null });
+    expect(restoreDueSteps(null, TZ)).toEqual([{ dueString: null }]);
   });
 
-  it('sets a recurring rule again in its own language', () => {
-    expect(restoreDueArgs({ isRecurring: true, string: '毎日', date: '2026-10-25', lang: 'ja' }, TZ)).toEqual({
-      dueString: '毎日',
-      dueLang: 'ja',
-    });
-    expect(restoreDueArgs({ isRecurring: true, string: 'every day', date: '2026-10-25' }, TZ)).toEqual({
-      dueString: 'every day',
-      dueLang: 'en',
-    });
+  it('sets a date-only rule again in its own language', () => {
+    expect(restoreDueSteps({ isRecurring: true, string: '毎日', date: '2026-10-25', lang: 'ja' }, TZ)).toEqual([
+      { dueString: '毎日', dueLang: 'ja' },
+    ]);
+    expect(restoreDueSteps({ isRecurring: true, string: 'every day', date: '2026-10-25' }, TZ)).toEqual([
+      { dueString: 'every day', dueLang: 'en' },
+    ]);
+  });
+
+  it('sets a rule that names the time first when the rule has a time', () => {
+    // "every day" kept 09:00 from an earlier "every day at 9am": the time is not in the rule text.
+    const inherited = { isRecurring: true, string: 'every day', date: '2026-10-26T09:00:00', timezone: null, lang: 'en' };
+    expect(restoreDueSteps(inherited, TZ)).toEqual([
+      { dueString: 'every day at 09:00', dueLang: 'en' },
+      { dueString: 'every day', dueLang: 'en' },
+    ]);
+    const japanese = { isRecurring: true, string: '毎日', date: '2026-10-26T21:30:00', timezone: null, lang: 'ja' };
+    expect(restoreDueSteps(japanese, TZ)).toEqual([
+      { dueString: 'every day at 21:30', dueLang: 'en' },
+      { dueString: '毎日', dueLang: 'ja' },
+    ]);
+  });
+
+  it('reads the time of a fixed-zone rule in its own zone', () => {
+    const fixed = { isRecurring: true, string: 'every day', date: '2026-10-26T07:00:00Z', timezone: 'Europe/Berlin' };
+    expect(restoreDueSteps(fixed, TZ)[0]).toEqual({ dueString: 'every day at 08:00', dueLang: 'en' });
   });
 
   it('puts back a one-off date or time', () => {
-    expect(restoreDueArgs({ isRecurring: false, string: '1 Dec', date: '2026-12-01' }, TZ)).toEqual({
-      dueDate: '2026-12-01',
-    });
+    expect(restoreDueSteps({ isRecurring: false, string: '1 Dec', date: '2026-12-01' }, TZ)).toEqual([
+      { dueDate: '2026-12-01' },
+    ]);
     const fixed = { isRecurring: false, string: '2026-11-20 09:00', date: '2026-11-20T00:00:00Z', timezone: 'Asia/Tokyo' };
-    expect(restoreDueArgs(fixed, TZ)).toEqual({ dueDatetime: '2026-11-20T00:00:00Z' });
+    expect(restoreDueSteps(fixed, TZ)).toEqual([{ dueDatetime: '2026-11-20T00:00:00Z' }]);
     const floating = { isRecurring: false, string: '20 Nov 18:00', date: '2026-11-20T18:00:00', timezone: null };
-    expect(restoreDueArgs(floating, TZ)).toEqual({ dueDatetime: '2026-11-20T09:00:00Z' });
+    expect(restoreDueSteps(floating, TZ)).toEqual([{ dueDatetime: '2026-11-20T09:00:00Z' }]);
+  });
+});
+
+describe('isSameDue', () => {
+  const rule = { isRecurring: true, string: 'every day', date: '2026-10-26T09:00:00', timezone: null, lang: 'en' };
+
+  it('accepts a recurring due whose next date Todoist recalculated', () => {
+    expect(isSameDue(rule, { ...rule, date: '2026-10-28T09:00:00' }, TZ)).toBe(true);
+  });
+
+  it.each([
+    ['no longer recurring', { ...rule, isRecurring: false }],
+    ['another rule', { ...rule, string: 'every day at 09:00' }],
+    ['the time dropped', { ...rule, date: '2026-10-27' }],
+    ['another time', { ...rule, date: '2026-10-27T10:00:00' }],
+    ['another time zone', { ...rule, date: '2026-10-27T00:00:00Z', timezone: 'Asia/Tokyo' }],
+    ['no due', null],
+  ])('rejects a recurring due that is %s', (_label, restored) => {
+    expect(isSameDue(rule, restored, TZ)).toBe(false);
+  });
+
+  it('compares one-off dues by date or instant', () => {
+    const date = { isRecurring: false, string: '1 Dec', date: '2026-12-01' };
+    expect(isSameDue(date, { ...date, string: '2026-12-01' }, TZ)).toBe(true);
+    expect(isSameDue(date, { ...date, date: '2026-12-02' }, TZ)).toBe(false);
+    const floating = { isRecurring: false, string: '20 Nov 18:00', date: '2026-11-20T18:00:00', timezone: null };
+    const fixed = { isRecurring: false, string: '2026-11-20 18:00', date: '2026-11-20T09:00:00Z', timezone: 'Asia/Tokyo' };
+    expect(isSameDue(floating, fixed, TZ)).toBe(true);
+    expect(isSameDue(floating, { ...fixed, date: '2026-11-20T10:00:00Z' }, TZ)).toBe(false);
+  });
+
+  it('matches no due only with no due', () => {
+    expect(isSameDue(null, null, TZ)).toBe(true);
+    expect(isSameDue(null, rule, TZ)).toBe(false);
   });
 });

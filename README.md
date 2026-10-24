@@ -252,7 +252,7 @@ Areaのページには関連情報へのリンクを書く。AI Foundationで辿
 - title / status / area / tags の変更では繰り返しは変わらない。`task_complete` で次回分へ進み、規則は維持される
 - `recurrence` で規則を変えるとTodoistが次回の期限を計算し直す。時刻は、規則に含めない限り現在の時刻が引き継がれる（変えるときは `every day at 7am` のように書く）。`recurrence` の変更・解除は、他の項目と同じ `task_update` では指定できない
 - `recurrence: null` は規則と期限の両方を消す。繰り返しTaskの `due` を変更・解除しようとすると、繰り返しが消えるため何も変えずにErrorになる。次回1回分だけの延期はTodoistで直接行う
-- Todoistが繰り返しとして解釈しない文字列（`tomorrow` など）を指定すると、作成時はTaskを作らず、更新時は元に戻してErrorを返す。繰り返しの期限を元に戻した場合、次回の期限はTodoistが計算し直すことがある。削除・復元自体に失敗したときだけ、残った状態とTask IDをErrorで示す（外部APIのため完全な原子性はない）
+- Todoistが繰り返しとして解釈しない文字列（`tomorrow` など）を指定すると、作成時はTaskを作らず、更新時は元に戻してErrorを返す。繰り返しの期限は規則と時刻まで元に戻すが、次回の期限はTodoistが計算し直すことがある。削除・復元に失敗したとき、または戻した結果が元と一致しないときだけ、残った状態とTask IDをErrorで示す（外部APIのため完全な原子性はない）
 - 曜日・時刻・完了日はTodoistアカウントのtimezoneで解釈される（`defaults.timezone` と同じにしておく）
 
 詳細と既知の制約は [繰り返しタスク Design](docs/specs/task-recurrence.md) を参照。

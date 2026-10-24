@@ -53,7 +53,9 @@ Todoistは `tomorrow` や `2026-12-01` のような繰り返しでない文字�
 | 作成時に繰り返しとして解釈されなかった | 作成したTaskを削除し、`Invalid input`（`no task was created`）を返す |
 | 上記で、削除できたことを確認できない | 削除の戻り値が `true` 以外、または例外・タイムアウトなら、Taskを読み直す。404なら削除済みとみなす。残っていれば `Todoist API error`（`The task still exists`・Task ID・直し方・`task_create` を再試行しない旨）、読み直しも失敗したら同じErrorで `may still exist` とする |
 | 更新時に繰り返しとして解釈されなかった | 期限を更新前の状態に戻し、`Invalid input`（`was left as before`）を返す。繰り返しの期限を戻した場合は、Todoistが次回期限を計算し直すことがあり、そのときは戻した後の次回期限をMessageに含める |
-| 上記で、元に戻せなかった | `Todoist API error` で、現在の期限と元の期限を示す |
+| 時刻付きの繰り返しを戻す | 規則の文字列に時刻がない場合（`every day at 9am` から `every day` に変えて09:00を引き継いだ場合など）も時刻を戻すため、まず時刻を指定した規則（`every day at 09:00`）を設定し、続けて元の規則を送る。Todoistは、規則を単発の期限や期限なしの状態に設定すると時刻を落とすが、規則から規則への変更では時刻を引き継ぐ |
+| 戻した結果を確認する | 戻した後の期限を元と比べ、繰り返しの場合は規則の文字列・時刻・timezone、単発の場合は日付・日時が一致したときだけ「元に戻った」とする（繰り返しの次回期限の違いは許容） |
+| 上記で、元に戻せなかった・一致しなかった | `Todoist API error` で、現在の期限と元の期限を示す |
 | Todoistが規則を含むリクエストをHTTP 400で拒否した | 書き込みは起きていない。`Invalid input: Todoist rejected the request with recurrence "<rule>" (HTTP 400). Check the rule syntax…` を返す（400は原因を返さないため、構文エラーとは断定しない）。規則を含まないリクエストの400は従来どおり `Todoist API error` |
 
 Connectorが削除するのは、同じ `task_create` 呼び出しで作成したTaskだけ。既存のTaskを削除する操作やToolはない。

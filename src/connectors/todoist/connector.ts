@@ -8,10 +8,11 @@ import {
   CLEAR_DUE,
   dueArgs,
   dueOf,
+  isSameDue,
   labelsFor,
   parseTaskId,
   recurrenceArgs,
-  restoreDueArgs,
+  restoreDueSteps,
   toTask,
   toTaskId,
   updatedLabels,
@@ -176,7 +177,11 @@ export class TodoistTaskConnector implements TaskConnector {
     );
   }
 
-  /** Puts back `current`'s due after `rule` was read as a one-off due (`updated`), and throws. */
+  /**
+   * Puts back `current`'s due after `rule` was read as a one-off due (`updated`), and throws.
+   * What Todoist returns is checked against the previous due; anything but the accepted change of
+   * a recurring task's next date is reported with the state actually left.
+   */
   private async restoreDue(
     api: TodoistClient,
     id: string,
@@ -184,19 +189,28 @@ export class TodoistTaskConnector implements TaskConnector {
     updated: TodoistTask,
     rule: string,
   ): Promise<never> {
+    const { timeZone } = this.options;
     const notRecurring = `Todoist did not read recurrence "${rule}" as a recurring rule`;
     const previous = this.describeDue(current.due);
-    const restored = await api
-      .updateTask(current.id, restoreDueArgs(current.due, this.options.timeZone))
-      .catch((error: unknown) => {
+    let restored = updated;
+    for (const step of restoreDueSteps(current.due, timeZone)) {
+      restored = await api.updateTask(current.id, step).catch((error: unknown) => {
         const cause = toFoundationError(error);
         throw new ProviderApiError(
           'Todoist',
-          `${notRecurring} and task ${id} now has ${this.describeDue(updated.due)}; ` +
+          `${notRecurring} and task ${id} now has ${this.describeDue(restored.due)}; ` +
             `restoring its previous due (${previous}) failed: ${cause.message}`,
           { cause },
         );
       });
+    }
+    if (!isSameDue(current.due, restored.due, timeZone)) {
+      throw new ProviderApiError(
+        'Todoist',
+        `${notRecurring}, and restoring the previous due of task ${id} (${previous}) did not take effect: ` +
+          `it now has ${this.describeDue(restored.due)}. Fix it with task_update or in Todoist.`,
+      );
+    }
     // Setting a rule again makes Todoist compute its next date afresh.
     const recalculated =
       current.due?.isRecurring && restored.due?.date !== current.due.date
