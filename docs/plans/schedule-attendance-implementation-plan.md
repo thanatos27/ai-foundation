@@ -370,7 +370,7 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 | Test | 内容 |
 |---|---|
 | 不変条件（常に実行） | 期間 `daysFromToday(-30)`〜`daysFromToday(30)` で `list({start,end})` と `list({start,end,attended_only:true})` を取得し、(1) `attended_only:true` の結果が全件結果の部分列である（同じidの要素は `toEqual`、相対順序も同じ）、(2) `attended_only:false` の結果が省略時と `toEqual`、を確認する。件数をstderrへ出す（タイトル・説明欄は出さない） |
-| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_DATE=YYYY-MM-DD` 設定時のみ） | §12.2のFixtureを置いた日付 `D`〜`D+2` で `attended_only:true` を取得し、タイトルが `AF-ATT ` で始まる予定の**集合と順序**が期待一覧と一致すること、省略時には全Fixture（繰り返しは3回分）が返ることを確認する。Fixtureが1件も見つからない場合は失敗させる（skipで成功扱いにしない） |
+| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_START` / `AI_FOUNDATION_IT_ATTENDANCE_END` 設定時のみ。rev.3） | §12.2のFixtureがある期間で、省略時と `attended_only:true` を取得する。期待値は日付ではなく**Fixtureごとの規則**（全回返る / 返らない / 1回だけ返る）でTest内に定数で持ち、(1) 全Fixtureが期間内にある（欠けていれば失敗、`3 other calendar` は `1 plain` と別Calendar、`7 daily` は2回以上）、(2) 「全回返る」Fixtureは省略時と同じ要素・同じ順序で返る、(3) 「返らない」Fixtureは返らない、(4) `7 daily` はちょうど1回だけ返る、(5) 終日Fixtureは `YYYY-MM-DD` のまま、を確認する |
 
 - Fixtureの期待値はTest内に定数で持ち、`hasAttendedFlag` を使って期待値を計算しない（判定関数とは独立に確認する）。
 - 既存 `google-calendar.integration.test.ts` は変更しない。
@@ -379,20 +379,21 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 
 > **rev.2（Plan Reviewの任意提案を反映）**: 手動Fixtureは代表7件に絞った。文章末尾・大文字小文字違い・リンク先URL・系列の説明欄・キャンセル・RSVPのケースはAutomated Test（§11.3 / §11.4）で確認する。
 
-検証用の日付 `D`（未来・過去どちらでもよい）に、Google Calendar UIで次の予定を作成する。WRITABLE＝AI Foundation専用Calendar、OTHER＝それ以外の自分のCalendar（例: メインCalendar）。時刻は `defaults.timezone` のもの。
+検証用の期間（未来・過去どちらでもよい）に、Google Calendar UIで次の予定を作成する。WRITABLE＝AI Foundation専用Calendar、OTHER＝それ以外の自分のCalendar（例: メインCalendar）。時刻は `defaults.timezone` のもの。
 
 | Title | Calendar | 種別 | 説明欄（UIでの入力） | `attended_only:true` |
 |---|---|---|---|---|
-| `AF-ATT 1 plain` | WRITABLE | 時刻 `D` 10:00 | `#attended` | 返る |
-| `AF-ATT 2 bold` | WRITABLE | 時刻 `D` 11:00 | `#attended` をUIで**太字**にする（HTMLとして保存される） | 返る |
-| `AF-ATT 3 other calendar` | OTHER | 時刻 `D` 12:00 | `#attended` | 返る |
-| `AF-ATT 4 all-day` | OTHER | 終日 `D`〜`D+1` | 2行目に `#attended` | 返る（`start: D`, `end: D+1`） |
-| `AF-ATT 5 suffix` | WRITABLE | 時刻 `D` 13:00 | `#attended2` | 返らない |
-| `AF-ATT 6 empty` | WRITABLE | 時刻 `D` 14:00 | （なし） | 返らない |
-| `AF-ATT 7 daily` | WRITABLE | 繰り返し（毎日 09:00、`D`〜`D+2`の3回） | 系列はタグなし。`D+1` の回だけ「この予定のみ」で説明欄に `#attended` | `D+1` の回だけ返る |
+| `AF-ATT 1 plain` | WRITABLE | 時刻 | `#attended` | 全回返る |
+| `AF-ATT 2 bold` | WRITABLE | 時刻 | `#attended` をUIで**太字**にする（HTMLとして保存される） | 全回返る |
+| `AF-ATT 3 other calendar` | OTHER | 時刻 | `#attended` | 全回返る |
+| `AF-ATT 4 all-day` | OTHER | 終日（単発でも、系列の説明欄にタグを付けた繰り返しでもよい） | `#attended` | 全回返る（`YYYY-MM-DD`） |
+| `AF-ATT 5 suffix` | WRITABLE | 時刻 | `#attended2` などフラグでない値、または空 | 返らない |
+| `AF-ATT 6 empty` | WRITABLE | 時刻 | （なし） | 返らない |
+| `AF-ATT 7 daily` | WRITABLE | 毎日の繰り返し（期間内に2回以上） | 系列はタグなし。1回だけ「この予定のみ」で説明欄に `#attended` | その1回だけ返る |
 
-- 期待順序（`attended_only:true`）: `4 all-day` → `1 plain` → `2 bold` → `3 other calendar` → `7 daily`（`D+1`）。
-- 実行（このファイルだけ）: `AI_FOUNDATION_INTEGRATION=1 AI_FOUNDATION_IT_ATTENDANCE_DATE=<D> npx vitest run --config vitest.integration.config.ts tests/integration/google-calendar-attendance.integration.test.ts`。
+> **rev.3（実データに合わせて変更）**: 当初は1日 `D` に集約し、終日は2日間・繰り返しは3回で終了する前提で、期待一覧を日付付きで固定していた。実際に作成されたFixtureは10/16〜10/22に分散し、`4 all-day` は系列の説明欄にタグを付けた毎日の繰り返し、`5 suffix` は説明欄が空だったため、User判断によりFixtureを作り直さず、Testを期間指定・Fixtureごとの規則に変更した。`#attended2` の実データでの確認はAutomated Test（§11.3 / §11.4）で担保する。
+
+- 実行（このファイルだけ）: `AI_FOUNDATION_INTEGRATION=1 AI_FOUNDATION_IT_ATTENDANCE_START=<開始日> AI_FOUNDATION_IT_ATTENDANCE_END=<終了日> npx vitest run --config vitest.integration.config.ts tests/integration/google-calendar-attendance.integration.test.ts`。
 
 ### 12.3 手動Verification（記録のみ）
 
@@ -490,7 +491,7 @@ v0.1の許容境界は「空白、改行、句読点、HTMLタグ境界」で、
 
 ### Q5. Integration TestはRead-only、Fixtureは手動作成
 
-v0.1の「書き込みはGoogle Calendar UI操作のみ」に従い、Integration TestではTest用EventをAPIで作成しない（既存のGoogle Calendar Integration Testは作成・削除を行うが、本Issueでは踏襲しない）。そのため実データでの判定はユーザーがUIで作成したFixture（§12.2）に依存し、`AI_FOUNDATION_IT_ATTENDANCE_DATE` が設定されたときだけ検証する。HTML（太字・リンク）・繰り返し予定の「この予定のみ」編集・削除は、APIではなくUIで作った実データで確認できる利点もある。
+v0.1の「書き込みはGoogle Calendar UI操作のみ」に従い、Integration TestではTest用EventをAPIで作成しない（既存のGoogle Calendar Integration Testは作成・削除を行うが、本Issueでは踏襲しない）。そのため実データでの判定はユーザーがUIで作成したFixture（§12.2）に依存し、`AI_FOUNDATION_IT_ATTENDANCE_START` / `_END` が設定されたときだけ検証する。HTML（太字・リンク）・繰り返し予定の「この予定のみ」編集・削除は、APIではなくUIで作った実データで確認できる利点もある。
 
 ### Q6. 共有予定・招待予定の扱い
 
@@ -531,8 +532,8 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 | `npm run typecheck` / `npm run build` | 成功 |
 | `npm test` | 54 files / 1323 passed / 5 skipped（skipは既存のもの）。既存のSchedule系Test（Domain / Connector / Mapping / Client / Tool）・`server.test.ts`・`e2e/stdio.test.ts` は**無変更で**成功 |
 | Integration Test（§12.1 不変条件、実Google Calendar、Read-only） | 成功（`daysFromToday(-30)`〜`daysFromToday(30)` で、`attended_only:true` が全件結果の部分列、`false` が省略時と同一） |
-| Integration Test（§12.1 Fixture） | **未実施**。§12.2のFixtureをユーザーがGoogle Calendar UIで作成した後、`AI_FOUNDATION_IT_ATTENDANCE_DATE` を指定して実行する |
-| 手動Verification（§12.3）/ LLM Client Verification（§13） | **未実施**。Implementation Review後に実施して記録する |
+| Integration Test（§12.1 Fixture） | 成功（§18.4） |
+| 手動Verification（§12.3） | M1〜M4は成功（§18.4）。M5・M6・LLM Client Verification（§13）は§18.4を参照 |
 
 ### 18.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
 
@@ -555,3 +556,32 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 #### Re-review（対象 `c1ad7bf`）
 
 前回の [P2] は解消済み、新たな修正必須事項なし。Codexが対象Commitの判定関数とTest定義で62ケース、追加の6ケース（本文側のフラグ、コメント内、属性値と本文の双方にフラグ等）を独立に確認。残る確認事項は実Google CalendarのFixture検証・手動Verification・LLM Client Verification（§12・§13）。
+
+### 18.4 Fixture Integration Test / 手動Verification（2026-10-24、実Google Calendar、Read-only）
+
+ユーザーがGoogle Calendar UIでFixtureを作成。作成内容が当初の §12.2（1日 `D` に集約）と異なったため、User判断でIntegration TestをFixtureごとの規則による検証に変更した（§12.1 / §12.2 rev.3）。
+
+実際のFixture（期間 2026-10-16〜2026-10-25）:
+
+| Fixture | Calendar | 内容 |
+|---|---|---|
+| `AF-ATT 1 plain` | AI Foundation | 10/19 10:00、`#attended` |
+| `AF-ATT 2 bold` | AI Foundation | 10/20 11:00、`<b>#attended</b>`（UIの太字） |
+| `AF-ATT 3 other calendar` | メイン | 10/16 12:00、`#attended` |
+| `AF-ATT 4 all-day` | メイン | 10/17から毎日の終日繰り返し、系列の説明欄に `#attended` |
+| `AF-ATT 5 suffix` | AI Foundation | 10/21 13:00、説明欄なし |
+| `AF-ATT 6 empty` | AI Foundation | 10/22 14:00、説明欄なし |
+| `AF-ATT 7 daily` | AI Foundation | 10/23から毎日 09:00の繰り返し、10/24の回だけ `#attended` |
+
+| 項目 | 結果 |
+|---|---|
+| Integration Test（`AI_FOUNDATION_IT_ATTENDANCE_START=2026-10-16` / `_END=2026-10-25`） | 6 passed（不変条件1件＋Fixture 5件） |
+| M1 `{start:'2026-10-16', end:'2026-10-25'}` | 18件（うちFixture 17件: 1 / 2 / 3 / 5 / 6 が各1、4が9回、7が3回）。出力Fieldは `id, source, external_ref, type, title, start, end` のみ |
+| M2 同期間 `attended_only:false` | M1と完全一致 |
+| M3 同期間 `attended_only:true` | 13件、すべてFixture: `3 other calendar`、`4 all-day` 9回（`YYYY-MM-DD`、end inclusive）、`1 plain`、`2 bold`、`7 daily` の10/24の回のみ。`5` / `6` と `7` の他の回は返らない。並びは開始順 |
+| M4 `attended_only:"true"` | Domain Schemaで拒否 |
+| M5（UIで説明欄を直して即時反映） | 未実施（判定は毎回の取得結果に対して行い、キャッシュを持たないため省略） |
+| M6（OAuth / `.env` / `config.local.yaml`） | 変更なし。既存のRefresh Tokenのまま再認可なしで上記を取得できた |
+
+- M1〜M4は、MCP Serverを経由せず、本BranchのConnector（`GoogleCalendarScheduleConnector`）とDomain Schemaを読み取りのみのScriptで直接呼んで確認した。
+- `4 all-day`（系列の説明欄にタグ）で、系列に付けたタグが全回に効くことを実データで確認できた（README・仕様書の運用説明どおり）。
