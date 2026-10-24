@@ -147,8 +147,8 @@ describe.runIf(run)('Google Calendar (real API)', () => {
     if (aliases.length < 2) return; // needs a second writable calendar
     const [first, second] = aliases as [string, string];
     const a = await connector.create({ title: `${runLabel} only-${first}`, start: day, calendar: first });
-    const b = await connector.create({ title: `${runLabel} only-${second}`, start: day, calendar: second });
     remember(a.id);
+    const b = await connector.create({ title: `${runLabel} only-${second}`, start: day, calendar: second });
     remember(b.id);
     const ids = async (calendar: string) =>
       (await connector.list({ start: day, end: day, calendar })).map((s) => s.id);
