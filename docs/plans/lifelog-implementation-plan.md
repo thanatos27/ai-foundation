@@ -854,3 +854,4 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 
 修正後: `npm test` 53 files / 1246 passed / 5 skipped、`npm run build` 成功、実VaultのIntegration Test（Life Log 5件・Knowledge 5件）成功。
 
+再レビュー（対象 `3af403c`）: 2件とも解消を確認、新たな修正必須の指摘なし。Codexは実際の8.3短縮名 `KNOWLE~1` による拒否6ケース（Life Logの作成・取得・追記、Knowledgeの検索、双方の包含関係）と、ADSの拒否8ケース（Life Log Connectorのget / append、両Storageのread / append / createExclusive）を一時Vaultで確認し、既存Knowledge本文・NTFSストリームが変わらないことを確認した。
