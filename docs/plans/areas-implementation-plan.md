@@ -449,7 +449,7 @@ return {
 
 ## 14. 実装順序
 
-0. **実装前のQ7確認（Read-only）**: 実Notion APIで、`Areas` 直下の子ページを「アーカイブ」した状態（Notion UIで可能な場合）と「ゴミ箱へ移動」した状態で、`blocks.children.list` の `child_page`（返るか・`in_trash`）と `pages.retrieve` の `in_trash` / `is_archived` を確認する。`list` と `get` の判定がずれる（例: アーカイブ済みが一覧に出ない一方で `pages.retrieve` は `in_trash: false`）場合は、**実装に入る前に報告する**。テスト用ページの準備はUserにお願いする
+0. **実装前のQ7確認（Read-only、2026-10-24 実施済み・齟齬なし。結果はQ7）**: 実Notion APIで、`Areas` 直下の子ページを「アーカイブ」した状態（Notion UIで可能な場合）と「ゴミ箱へ移動」した状態で、`blocks.children.list` の `child_page`（返るか・`in_trash`）と `pages.retrieve` の `in_trash` / `is_archived` を確認する。`list` と `get` の判定がずれる（例: アーカイブ済みが一覧に出ない一方で `pages.retrieve` は `in_trash: false`）場合は、**実装に入る前に報告する**。テスト用ページの準備はUserにお願いする
 1. `domain/area-resource.ts` + Test
 2. `config/schema.ts` + `config.yaml` + Test
 3. `notion/id.ts` 抽出（`mapping.ts` を委譲に変更）→ 既存Collection Testが無変更で通ることを確認
@@ -638,6 +638,17 @@ PR #17 のPlan ReviewでQ1〜Q10はすべて **提案どおり採用**（rev.2�
 - 提案: 両Toolとも `in_trash` だけで除外し、境界を一致させる。`is_archived` のPageが一覧に出るかはIntegrationで確認し、出る場合は結果をPlanに記録して別途判断する。
 - 代替: `get` で `is_archived` も `NotFoundError` にする（一覧に出るのに取得できない不整合が起こり得る）。
 - 決定（rev.2）: 提案どおり両Toolとも `in_trash` のみで除外し、`get` だけ `is_archived` を除外することはしない。**実装前に** 実Notion APIで挙動を確認し（§14 手順0）、`list` と `get` の判定がずれる場合は実装に入る前に報告する。
+- User判断（rev.2）: 現在はNotion Freeプランだが、将来Businessプラン等で「アーカイブ」を使う可能性も考慮し、`is_archived` は判定せず `in_trash` のみで除外する。
+- 実装前確認の結果（2026-10-24、API `2026-03-11`、Read-only）:
+
+  | 確認 | 結果 |
+  |---|---|
+  | `Areas` 直下の子ページをゴミ箱へ移動 → 親の `blocks.children.list` | 返らない（APIの時点で一覧から除外される） |
+  | 同じページを `pages.retrieve` | **取得は成功**し、`in_trash: true`、`is_archived: false`、`parent: { type: 'page_id', page_id: <Areas> }`（ゴミ箱でも親は `Areas` のまま） |
+  | title Property | 名前は `title` |
+  | 非推奨 `archived` | レスポンスに含まれない |
+
+  → 親の一致だけではゴミ箱のPageを `get` できてしまうため、§9.2 の `!page.in_trash` 判定は必須。一覧（APIで除外 + `in_trash` 判定）と取得（`in_trash` → `NotFoundError`）の境界は一致し、齟齬はない。アーカイブはFreeプランでは確認していない（Businessプラン利用時に §18.2 で再確認する）。
 
 ### Q8. `restricted_resource`（403）のMessage（採用）
 
