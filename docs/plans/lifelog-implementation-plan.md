@@ -817,7 +817,7 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 | `npm test` | 成功（53 files / 1233 passed / 5 skipped。skipはWindowsで開発者モードがないため作れないFile symlinkのTestで、Life Log分の1件を含む。Directory Junctionの境界Testは実行している） |
 | `npm run build` | 成功 |
 | Integration Test（`tests/integration/obsidian-lifelog.integration.test.ts`） | 5件成功（実Vault、Userが作成した空の `AI Foundation/LifeLog`）。作成→取得→追記、UTF-8・LF・Frontmatterなし、同日別記事、同名拒否で既存不変、Knowledge IDの拒否・存在しない記事のNotFound、Knowledge Directoryのファイル一覧とmtimeが不変。終了後のLife Log Directoryは空（作成した記事だけを削除）。Knowledgeの既存Integration Test（`obsidian.integration.test.ts`、5件）も同時に実行して成功。既定（`AI_FOUNDATION_INTEGRATION` なし）でskipされることも確認済み |
-| 手動Verification（§17.2）/ LLM Client Verification（§19） | 未実施（MCP Serverを本Branchの `dist` で再接続して実施する） |
+| 手動Verification（§17.2）/ LLM Client Verification（§19） | 実施済み（§23.4） |
 
 ### 23.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
 
@@ -855,3 +855,29 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 修正後: `npm test` 53 files / 1246 passed / 5 skipped、`npm run build` 成功、実VaultのIntegration Test（Life Log 5件・Knowledge 5件）成功。
 
 再レビュー（対象 `3af403c`）: 2件とも解消を確認、新たな修正必須の指摘なし。Codexは実際の8.3短縮名 `KNOWLE~1` による拒否6ケース（Life Logの作成・取得・追記、Knowledgeの検索、双方の包含関係）と、ADSの拒否8ケース（Life Log Connectorのget / append、両Storageのread / append / createExclusive）を一時Vaultで確認し、既存Knowledge本文・NTFSストリームが変わらないことを確認した。
+
+### 23.4 手動Verification / LLM Client Verification（Implementation Review後に実施、2026-10-24）
+
+Claude CodeのMCP接続を本Branchの `dist` で再接続し、実Vault（`AI Foundation/LifeLog`）で確認した。
+
+#### LLM Client Verification（§19）
+
+| 依頼 | Tool | 結果 |
+|---|---|---|
+| 今日の東京散策の記録を残して | `lifelog_create`（`knowledge_create` ではない） | `lifelog:2026-10-24-東京散策（動作確認）.md` を作成 |
+| 夕食のことを追記して | 返ったidで `lifelog_append` | 元の本文の後ろに段落として追記 |
+| `2026-10-24-東京散策（動作確認）.md` を見せて | ファイル名から作ったidで `lifelog_get` | 全文を取得。存在しないファイル名（`lifelog:2026-10-03-東京散策.md`）は `NotFoundError` |
+| 同じ日付・タイトルで再作成（追加確認） | `lifelog_create` | `InputValidationError`（already exists、`lifelog_append` を案内）。既存記事は不変 |
+| 学んだことを保存して | — | 実Knowledgeへの不要な書き込みを避けるため呼び出しは省略。Tool descriptionの区別（Life Log = ある日の出来事 / Knowledge = 再利用する学び）による選択の確認のみ |
+
+確認したAgentは実装内容を知っているため、Tool選択の確認としては甘い。description単体での選択は、必要なら新しいセッションで再確認する。
+
+#### 手動Verification（§17.2）
+
+| 確認 | 結果 |
+|---|---|
+| 作成・追記した記事がObsidianで表示される | OK（User確認） |
+| Obsidianで編集・保存した内容が `lifelog_get` に反映される | OK（Userが追記した `## 追記` の段落が取得結果に含まれた） |
+
+確認用の記事 `AI Foundation/LifeLog/2026-10-24-東京散策（動作確認）.md` は実Vaultに残っている（削除するかはUserが判断する）。
+
