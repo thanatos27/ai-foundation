@@ -206,6 +206,132 @@ describe('list', () => {
   });
 });
 
+describe('list with attended_only', () => {
+  const PRIMARY = 'primary@example.com';
+  const PERIOD = { start: '2026-10-12', end: '2026-10-18' };
+  const timed = (day: string, time: string) => ({
+    start: { dateTime: `2026-10-${day}T${time}:00+09:00` },
+    end: { dateTime: `2026-10-${day}T${time.slice(0, 2)}:30:00+09:00` },
+  });
+
+  function withEvents() {
+    const context = setup();
+    context.api.events = {
+      [WRITABLE]: [
+        { id: 'A', summary: 'A plain', description: '#attended', ...timed('13', '10:00') },
+        { id: 'D', summary: 'D no description', ...timed('13', '12:00') },
+        {
+          id: 'F',
+          summary: 'F declined',
+          description: '#attended',
+          attendees: [{ self: true, responseStatus: 'declined' }],
+          ...timed('14', '11:00'),
+        },
+        { id: 'G', summary: 'G cancelled', status: 'cancelled', description: '#attended', ...timed('14', '12:00') },
+        { id: 'R1', summary: 'R daily', recurringEventId: 'R', ...timed('15', '09:00') },
+        { id: 'R2', summary: 'R daily', recurringEventId: 'R', description: '#attended', ...timed('16', '09:00') },
+        { id: 'R3', summary: 'R daily', recurringEventId: 'R', ...timed('17', '09:00') },
+      ],
+      [PRIMARY]: [
+        {
+          id: 'B',
+          summary: 'B all-day',
+          description: '<b>#attended</b>',
+          start: { date: '2026-10-13' },
+          end: { date: '2026-10-15' },
+        },
+        { id: 'C', summary: 'C suffix', description: '#attended2', ...timed('13', '11:00') },
+        {
+          id: 'E',
+          summary: 'E accepted',
+          attendees: [{ self: true, responseStatus: 'accepted' }],
+          ...timed('14', '10:00'),
+        },
+        { id: 'H', summary: 'H no start', description: '#attended' },
+        { id: 'S1', summary: 'S series', recurringEventId: 'S', description: '系列メモ #attended', ...timed('15', '08:00') },
+        { id: 'S2', summary: 'S series', recurringEventId: 'S', description: '系列メモ #attended', ...timed('16', '08:00') },
+        {
+          id: 'T',
+          summary: 'T link',
+          description: '<a href="https://example.com/#attended">資料</a>',
+          ...timed('17', '10:00'),
+        },
+      ],
+    };
+    return context;
+  }
+
+  const eventIds = (schedules: { id?: string | undefined }[]) => schedules.map((s) => s.id?.split(':').at(-1));
+
+  it('returns only tagged events from every calendar, sorted as usual', async () => {
+    const { api, connector } = withEvents();
+    const schedules = await connector.list({ ...PERIOD, attended_only: true });
+
+    // RSVP is ignored (E out, F in); cancelled, start-less and link-target events never count.
+    expect(eventIds(schedules)).toEqual(['B', 'A', 'F', 'S1', 'S2', 'R2']);
+    const range = { timeMin: '2026-10-11T15:00:00.000Z', timeMax: '2026-10-18T15:00:00.000Z' };
+    expect(api.listed).toEqual([
+      { calendarId: WRITABLE, range },
+      { calendarId: PRIMARY, range },
+    ]);
+  });
+
+  it('returns the same schedules as a plain list, with no extra fields', async () => {
+    const { connector } = withEvents();
+    const all = await connector.list(PERIOD);
+    const attended = await connector.list({ ...PERIOD, attended_only: true });
+
+    expect(attended).toEqual(all.filter((schedule) => attended.some((a) => a.id === schedule.id)));
+    expect(attended[0]).toEqual({
+      id: `google_calendar:${PRIMARY}:B`,
+      source: 'google_calendar',
+      external_ref: null,
+      type: 'schedule',
+      title: 'B all-day',
+      start: '2026-10-13',
+      end: '2026-10-14',
+    });
+  });
+
+  it('judges each recurring instance by its own description', async () => {
+    const { connector } = withEvents();
+    const ids = eventIds(await connector.list({ ...PERIOD, attended_only: true }));
+    expect(ids.filter((id) => id?.startsWith('R'))).toEqual(['R2']);
+    expect(ids.filter((id) => id?.startsWith('S'))).toEqual(['S1', 'S2']);
+  });
+
+  it('lists every event when attended_only is omitted or false', async () => {
+    const omitted = withEvents();
+    const unfiltered = withEvents();
+    const all = await omitted.connector.list(PERIOD);
+    const notOnly = await unfiltered.connector.list({ ...PERIOD, attended_only: false });
+
+    expect(eventIds(all)).toEqual(['B', 'A', 'C', 'D', 'E', 'F', 'S1', 'R1', 'S2', 'R2', 'R3', 'T']);
+    expect(notOnly).toEqual(all);
+    expect(unfiltered.api.listed).toEqual(omitted.api.listed);
+  });
+
+  it('never writes', async () => {
+    const { api, connector } = withEvents();
+    await connector.list({ ...PERIOD, attended_only: true });
+    expect(api.inserts).toEqual([]);
+  });
+
+  it('returns an empty list when nothing is tagged', async () => {
+    const { api, connector } = setup();
+    api.events = { [WRITABLE]: [{ id: 'x', summary: 'x', description: 'メモ', ...timed('13', '10:00') }] };
+    expect(await connector.list({ ...PERIOD, attended_only: true })).toEqual([]);
+  });
+
+  it('still fails the whole call when one calendar fails', async () => {
+    const { api, connector } = withEvents();
+    api.failEvents[PRIMARY] = googleError(500, 'Backend Error');
+    const error = await rejection(connector.list({ ...PERIOD, attended_only: true }));
+    expect(error).toBeInstanceOf(ProviderApiError);
+    expect(error.message).toBe('Google Calendar API error: calendar "Primary": HTTP 500: Backend Error');
+  });
+});
+
 describe('errors', () => {
   it.each([
     ['invalid_grant', Object.assign(new Error('invalid_grant'), { response: { status: 400, data: { error: 'invalid_grant' } } }), CredentialError],

@@ -1,7 +1,7 @@
 # Google Calendar参加済みフラグ — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち・未承認。本実装は未着手）**
-- 作成: Coding Agent (Claude Code) / 2026-10-24
+- Status: **rev.2（Plan Review完了・承認済み。実装済み: §18）**
+- 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #23 レビュー反映・実装）
 - 対象: [Issue #15 Google Calendar参加済みフラグ](https://github.com/thanatos27/ai-foundation/issues/15)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
@@ -370,33 +370,30 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 | Test | 内容 |
 |---|---|
 | 不変条件（常に実行） | 期間 `daysFromToday(-30)`〜`daysFromToday(30)` で `list({start,end})` と `list({start,end,attended_only:true})` を取得し、(1) `attended_only:true` の結果が全件結果の部分列である（同じidの要素は `toEqual`、相対順序も同じ）、(2) `attended_only:false` の結果が省略時と `toEqual`、を確認する。件数をstderrへ出す（タイトル・説明欄は出さない） |
-| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_DATE=YYYY-MM-DD` 設定時のみ） | §12.2のFixtureを置いた日付 `D`〜`D+2` で `attended_only:true` を取得し、タイトルが `AF-ATT ` で始まる予定の**集合と順序**が期待一覧と一致すること、省略時には期待どおりの全Fixture（キャンセル分を除く）が返ることを確認する。Fixtureが1件も見つからない場合は失敗させる（skipで成功扱いにしない） |
+| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_START` / `AI_FOUNDATION_IT_ATTENDANCE_END` 設定時のみ。rev.3） | §12.2のFixtureがある期間で、省略時と `attended_only:true` を取得する。期待値は日付ではなく**Fixtureごとの規則**（全回返る / 返らない / 1回だけ返る）でTest内に定数で持ち、(1) 全Fixtureが期間内にある（欠けていれば失敗、`3 other calendar` は `1 plain` と別Calendar、`7 daily` は2回以上）、(2) 「全回返る」Fixtureは省略時と同じ要素・同じ順序で返る、(3) 「返らない」Fixtureは返らない、(4) `7 daily` はちょうど1回だけ返る、(5) 終日Fixtureは `YYYY-MM-DD` のまま、を確認する |
 
 - Fixtureの期待値はTest内に定数で持ち、`hasAttendedFlag` を使って期待値を計算しない（判定関数とは独立に確認する）。
 - 既存 `google-calendar.integration.test.ts` は変更しない。
 
 ### 12.2 手動Fixture（Google Calendar UIで作成、検証後にユーザーが削除）
 
-検証用の日付 `D`（未来・過去どちらでもよい）に、Google Calendar UIで次の予定を作成する。WRITABLE＝AI Foundation専用Calendar、OTHER＝それ以外の自分のCalendar（例: メインCalendar）。
+> **rev.2（Plan Reviewの任意提案を反映）**: 手動Fixtureは代表7件に絞った。文章末尾・大文字小文字違い・リンク先URL・系列の説明欄・キャンセル・RSVPのケースはAutomated Test（§11.3 / §11.4）で確認する。
+
+検証用の期間（未来・過去どちらでもよい）に、Google Calendar UIで次の予定を作成する。WRITABLE＝AI Foundation専用Calendar、OTHER＝それ以外の自分のCalendar（例: メインCalendar）。時刻は `defaults.timezone` のもの。
 
 | Title | Calendar | 種別 | 説明欄（UIでの入力） | `attended_only:true` |
 |---|---|---|---|---|
-| `AF-ATT 01 plain` | WRITABLE | 時刻 | `#attended` | 返る |
-| `AF-ATT 02 sentence` | WRITABLE | 時刻 | `参加しました #attended` | 返る |
-| `AF-ATT 03 bold` | WRITABLE | 時刻 | `#attended` をUIで**太字**にする（HTMLとして保存される） | 返る |
-| `AF-ATT 04 other calendar` | OTHER | 時刻 | `#attended` | 返る |
-| `AF-ATT 05 all-day` | OTHER | 終日（`D`〜`D+1`） | 2行目に `#attended` | 返る（`start: D`, `end: D+1`） |
-| `AF-ATT 06 suffix` | WRITABLE | 時刻 | `#attended2` | 返らない |
-| `AF-ATT 07 case` | WRITABLE | 時刻 | `#Attended` | 返らない |
-| `AF-ATT 08 empty` | WRITABLE | 時刻 | （なし） | 返らない |
-| `AF-ATT 09 link` | WRITABLE | 時刻 | UIのリンク挿入で、表示文字 `資料`・URL `https://example.com/#attended` | 返らない |
-| `AF-ATT 10 daily` | WRITABLE | 繰り返し（毎日、`D`〜`D+2`の3回） | 系列はタグなし。`D+1` の回だけ「この予定のみ」で説明欄に `#attended` | `D+1` の回だけ返る |
-| `AF-ATT 11 series` | OTHER | 繰り返し（毎日、`D`〜`D+2`の3回） | 系列の説明欄に `#attended`。その後 `D+2` の回だけ「この予定のみ」削除 | `D` と `D+1` の回が返る（削除した回は返らない） |
-| `AF-ATT 12 rsvp declined`（任意） | WRITABLE | 時刻、ゲストあり | `#attended`。自分の出欠を「いいえ」 | 返る |
-| `AF-ATT 13 rsvp accepted`（任意） | WRITABLE | 時刻、ゲストあり | （なし）。自分の出欠を「はい」 | 返らない |
+| `AF-ATT 1 plain` | WRITABLE | 時刻 | `#attended` | 全回返る |
+| `AF-ATT 2 bold` | WRITABLE | 時刻 | `#attended` をUIで**太字**にする（HTMLとして保存される） | 全回返る |
+| `AF-ATT 3 other calendar` | OTHER | 時刻 | `#attended` | 全回返る |
+| `AF-ATT 4 all-day` | OTHER | 終日（単発でも、系列の説明欄にタグを付けた繰り返しでもよい） | `#attended` | 全回返る（`YYYY-MM-DD`） |
+| `AF-ATT 5 suffix` | WRITABLE | 時刻 | `#attended2` などフラグでない値、または空 | 返らない |
+| `AF-ATT 6 empty` | WRITABLE | 時刻 | （なし） | 返らない |
+| `AF-ATT 7 daily` | WRITABLE | 毎日の繰り返し（期間内に2回以上） | 系列はタグなし。1回だけ「この予定のみ」で説明欄に `#attended` | その1回だけ返る |
 
-- 12 / 13はゲストの追加が必要なため任意とする（RSVPとの独立性はAutomated Test §11.4で確認済み）。実施した場合はIntegration Testの期待一覧に含め、未実施の場合は除外したことを記録する。
-- 各予定は時刻をずらして作成し、期待順序を一意にする。
+> **rev.3（実データに合わせて変更）**: 当初は1日 `D` に集約し、終日は2日間・繰り返しは3回で終了する前提で、期待一覧を日付付きで固定していた。実際に作成されたFixtureは10/16〜10/22に分散し、`4 all-day` は系列の説明欄にタグを付けた毎日の繰り返し、`5 suffix` は説明欄が空だったため、User判断によりFixtureを作り直さず、Testを期間指定・Fixtureごとの規則に変更した。`#attended2` の実データでの確認はAutomated Test（§11.3 / §11.4）で担保する。
+
+- 実行（このファイルだけ）: `AI_FOUNDATION_INTEGRATION=1 AI_FOUNDATION_IT_ATTENDANCE_START=<開始日> AI_FOUNDATION_IT_ATTENDANCE_END=<終了日> npx vitest run --config vitest.integration.config.ts tests/integration/google-calendar-attendance.integration.test.ts`。
 
 ### 12.3 手動Verification（記録のみ）
 
@@ -404,11 +401,11 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 
 | # | 操作 | 期待 |
 |---|---|---|
-| M1 | `{start: D, end: D+2}` | 従来と同じ結果（全Fixture＋同期間の他の予定、`AF-ATT 11` の削除回なし）。出力に `attended` / `description` Fieldがない |
+| M1 | `{start: D, end: D+2}` | 従来と同じ結果（全Fixture＋同期間の他の予定）。出力に `attended` / `description` Fieldがない |
 | M2 | `{start: D, end: D+2, attended_only: false}` | M1と同一 |
 | M3 | `{start: D, end: D+2, attended_only: true}` | §12.2の「返る」予定だけ。終日予定は `YYYY-MM-DD` のinclusive end |
 | M4 | `{start: D, end: D+2, attended_only: "true"}` | `Input validation error` |
-| M5 | `AF-ATT 06` の説明欄をUIで `#attended` に直してからM3 | `AF-ATT 06` が追加で返る（キャッシュなし・即時反映） |
+| M5 | `AF-ATT 5 suffix` の説明欄をUIで `#attended` に直してからM3 | `AF-ATT 5 suffix` が追加で返る（キャッシュなし・即時反映） |
 | M6 | Google Cloud ConsoleのOAuth同意画面・`.env`・`config.local.yaml` | 変更なし、再認可不要 |
 
 ---
@@ -421,8 +418,8 @@ Claude CodeからMCP Server（本Branchの `dist`）へ再接続し、自然文�
 |---|---|---|
 | L1 | 「`D` から3日間で参加済みにした予定を教えて」 | `schedule_list` に `attended_only: true` と期間を付けて呼び、§12.2の「返る」予定だけを答える |
 | L2 | 「`D` から3日間の予定を教えて」 | `attended_only` を付けない（または `false`）で呼ぶ |
-| L3 | 「`AF-ATT 08 empty` には参加しなかった？」 | フラグなしを「未確認」として扱い、「不参加」と断定しない |
-| L4 | 「`AF-ATT 08 empty` を参加済みにして」 | 書き込みToolを探さず、Google Calendar UIで説明欄に `#attended` を書くよう案内する（`schedule_create` で新規作成しない） |
+| L3 | 「`AF-ATT 6 empty` には参加しなかった？」 | フラグなしを「未確認」として扱い、「不参加」と断定しない |
+| L4 | 「`AF-ATT 6 empty` を参加済みにして」 | 書き込みToolを探さず、Google Calendar UIで説明欄に `#attended` を書くよう案内する（`schedule_create` で新規作成しない） |
 
 ---
 
@@ -466,8 +463,8 @@ Issue #15 v0.1のAcceptance Criteriaを、検証可能な形に具体化する�
 | AC1 | Google Calendar UIで予定の説明欄に `#attended` を手動で記入でき、AI Foundation側に記入用の操作・Toolは存在しない | §12.2（Fixture作成）、§11.6（Tool 20件不変）、§13 L4 |
 | AC2 | `schedule_list({start, end, attended_only: true})` が、読み取り可能な**全Calendar**の期間内の予定から、説明欄に独立した `#attended` を持つものだけを返す。時間範囲の解釈・終日予定の `YYYY-MM-DD` inclusive end・ソート順は省略時と同じ | §11.4（複数Calendar・終日・順序・出力の同一性）、§12.1、§12.3 M3 |
 | AC3 | `attended_only` 省略 / `false` の結果・呼び出すAPI・Error・出力形が変更前と同一。Toolの必須Inputは `start` / `end` のまま | §11.4（省略と `false` の比較）、§11.5、既存Testの無変更成功（§11.6）、§12.1不変条件、§12.3 M1 / M2 |
-| AC4 | 説明欄なし・空・タグなし・部分一致（`#attended2` / `#attended-other`）・大文字小文字違い（`#Attended`）・URL fragment・HTML属性値内の `#attended` は返らない。RSVP `accepted` でもタグがなければ返らず、`declined` でもタグがあれば返る | §11.3（判定表）、§11.4（C / D / E / F / T）、§12.2 06〜09・12・13 |
-| AC5 | `status: cancelled` の予定はタグがあっても返らない。繰り返し予定は各インスタンスの説明欄で判定し、「この予定のみ」編集した回だけ、または系列に付けた場合は全回が返る | §11.4（G / R / S）、§12.2 10・11 |
+| AC4 | 説明欄なし・空・タグなし・部分一致（`#attended2` / `#attended-other`）・大文字小文字違い（`#Attended`）・URL fragment・HTML属性値内の `#attended` は返らない。RSVP `accepted` でもタグがなければ返らず、`declined` でもタグがあれば返る | §11.3（判定表）、§11.4（C / D / E / F / T）、§12.2 5・6 |
+| AC5 | `status: cancelled` の予定はタグがあっても返らない。繰り返し予定は各インスタンスの説明欄で判定し、「この予定のみ」編集した回だけ、または系列に付けた場合は全回が返る | §11.4（G / R / S）、§12.2 7 |
 | AC6 | 一部Calendarの取得失敗時は `attended_only` に関係なく全体がError（Calendar名を含む `ProviderApiError`）になり、部分結果を返さない。OAuth Scope・Config・Credentialは変更しない | §11.4（一部Calendar失敗）、§3「変更しないもの」、§12.3 M6 |
 | AC7 | Domain / 判定関数 / Connector / Tool（FakeScheduleConnector）のAutomated Testと既存回帰Testが成功し、実Google CalendarでのRead-only Integration Test・手動Verification・LLM Client Verificationの結果をPlanに記録する | §11、§12、§13 |
 | AC8 | READMEと `docs/specs/schedule-attendance.md` を更新し、`docs/specs/mvp-v0.1.md` に差分がない | §14、PRの差分（`git diff main -- docs/specs/mvp-v0.1.md` が空） |
@@ -494,7 +491,7 @@ v0.1の許容境界は「空白、改行、句読点、HTMLタグ境界」で、
 
 ### Q5. Integration TestはRead-only、Fixtureは手動作成
 
-v0.1の「書き込みはGoogle Calendar UI操作のみ」に従い、Integration TestではTest用EventをAPIで作成しない（既存のGoogle Calendar Integration Testは作成・削除を行うが、本Issueでは踏襲しない）。そのため実データでの判定はユーザーがUIで作成したFixture（§12.2）に依存し、`AI_FOUNDATION_IT_ATTENDANCE_DATE` が設定されたときだけ検証する。HTML（太字・リンク）・繰り返し予定の「この予定のみ」編集・削除は、APIではなくUIで作った実データで確認できる利点もある。
+v0.1の「書き込みはGoogle Calendar UI操作のみ」に従い、Integration TestではTest用EventをAPIで作成しない（既存のGoogle Calendar Integration Testは作成・削除を行うが、本Issueでは踏襲しない）。そのため実データでの判定はユーザーがUIで作成したFixture（§12.2）に依存し、`AI_FOUNDATION_IT_ATTENDANCE_START` / `_END` が設定されたときだけ検証する。HTML（太字・リンク）・繰り返し予定の「この予定のみ」編集・削除は、APIではなくUIで作った実データで確認できる利点もある。
 
 ### Q6. 共有予定・招待予定の扱い
 
@@ -508,3 +505,97 @@ Tool層で `false` を削除・省略へ正規化しない。Connectorは `=== t
 
 - フラグの書式（`#attended` 以外の別名、日本語タグ `#参加済み` 等）は追加しない。
 - 返却値への `attended: boolean` 追加、`attended_only: false` を「フラグなしだけ」と解釈する案は採らない（v0.1 §設計判断。`false` は省略と同じ）。
+
+---
+
+## 17. Review対応履歴
+
+### rev.2（PR #23 Plan Review反映）
+
+ChatGPTのPlan Review rev.1は「修正必須事項なし・承認相当」。Q1〜Q7はすべて採用。
+
+| 指摘（任意） | 対応 |
+|---|---|
+| §12.2の手動Fixtureが変更規模に対して多い。代表例に減らし、残りはAutomated Testで担保してよい | 13件（任意2件を含む）を代表7件（単純・太字・別Calendar・終日・非フラグ・説明欄なし・繰り返しの1回だけ編集）に削減。文章末尾・大文字小文字違い・リンク先URL・系列の説明欄・キャンセル・RSVPはAutomated Test（§11.3 / §11.4）で確認する |
+| HTMLマークアップ判定は軽量な近似処理で完全なHTML Parserではない旨を、仕様書の制約として維持する | `docs/specs/schedule-attendance.md` のフラグ判定（R7の直後）と「既知の制約」に明記。`hasAttendedFlag` のコメントにも記載 |
+
+---
+
+## 18. 実装で確定した事項
+
+Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）。
+
+### 18.1 Verification結果（2026-10-24）
+
+| 項目 | 結果 |
+|---|---|
+| `npm run typecheck` / `npm run build` | 成功 |
+| `npm test` | 54 files / 1323 passed / 5 skipped（skipは既存のもの）。既存のSchedule系Test（Domain / Connector / Mapping / Client / Tool）・`server.test.ts`・`e2e/stdio.test.ts` は**無変更で**成功 |
+| Integration Test（§12.1 不変条件、実Google Calendar、Read-only） | 成功（`daysFromToday(-30)`〜`daysFromToday(30)` で、`attended_only:true` が全件結果の部分列、`false` が省略時と同一） |
+| Integration Test（§12.1 Fixture） | 成功（§18.4） |
+| 手動Verification（§12.3）/ LLM Client Verification（§13） | §18.4 / §18.5 |
+
+### 18.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- Plan外のSource変更なし。変更は §9.1 の4ファイルのみ（`mapping.ts` / `client.ts` / `instructions.ts` / Config / Credentialは無変更）。
+- `tests/tools/schedule.test.ts` の既存Test「lists the two schedule tools…」は**変更せず**、`inputSchema.properties` の確認は新規Test「offers attended_only…」に分けた（§11.5では既存箇所の更新を想定していたが、既存Testは `schedule_list` のproperties一覧を確認していなかったため）。
+- READMEでは、Integration Test節にFixture検証の実行条件を追記した（§14.1に加えて）。
+
+### 18.3 Implementation Review（PR #24、Codex）
+
+対象 `9a466e1`。指摘は修正推奨1件で、それ以外（省略 / `false` の互換性、キャンセル除外、既存ソート、API失敗時の処理、§18.2、README追記）は問題なし。
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] HTML除去の `[^>]*>` が引用符内の `>` でタグを終了させ、`<span title="a > #attended">資料</span>`（単一引用符も同様）を参加済みと誤判定する（R7違反） | タグの正規表現を `<\/?[A-Za-z](?:[^<>"']\|"[^"]*"\|'[^']*')*>` に変更し、引用符で囲まれた属性値の中の `>` ではタグを終えないようにした。引用符の外の `<` で照合を打ち切るため、閉じないタグが大量に並ぶ入力でも線形になる（修正前の正規表現は `<a ` × 20,000 で約340ms、修正後は1ms未満）。回帰Testとして二重引用符・単一引用符・もう一方の引用符を含む値・`<` を含む値の4件、挙動の固定2件（閉じない引用符、閉じない `<` の後のタグ）、性能1件を追加。仕様書の代表例・既知の制約に追記 |
+
+修正後: `npm run typecheck` 成功、`npm test` 54 files / 1330 passed / 5 skipped。
+
+- 残る既知の性能特性: 閉じないHTMLコメント（`<!--`）が大量に並ぶ入力は、修正前と同じく長さの二乗に比例する（`<!-- ` × 20,000 で約330ms）。Google Calendar UIでは生成されない入力のため、MVPでは対応しない。
+
+#### Re-review（対象 `c1ad7bf`）
+
+前回の [P2] は解消済み、新たな修正必須事項なし。Codexが対象Commitの判定関数とTest定義で62ケース、追加の6ケース（本文側のフラグ、コメント内、属性値と本文の双方にフラグ等）を独立に確認。残る確認事項は実Google CalendarのFixture検証・手動Verification・LLM Client Verification（§12・§13）。
+
+### 18.4 Fixture Integration Test / 手動Verification（2026-10-24、実Google Calendar、Read-only）
+
+ユーザーがGoogle Calendar UIでFixtureを作成。作成内容が当初の §12.2（1日 `D` に集約）と異なったため、User判断でIntegration TestをFixtureごとの規則による検証に変更した（§12.1 / §12.2 rev.3）。
+
+実際のFixture（期間 2026-10-16〜2026-10-25）:
+
+| Fixture | Calendar | 内容 |
+|---|---|---|
+| `AF-ATT 1 plain` | AI Foundation | 10/19 10:00、`#attended` |
+| `AF-ATT 2 bold` | AI Foundation | 10/20 11:00、`<b>#attended</b>`（UIの太字） |
+| `AF-ATT 3 other calendar` | メイン | 10/16 12:00、`#attended` |
+| `AF-ATT 4 all-day` | メイン | 10/17から毎日の終日繰り返し、系列の説明欄に `#attended` |
+| `AF-ATT 5 suffix` | AI Foundation | 10/21 13:00、説明欄なし |
+| `AF-ATT 6 empty` | AI Foundation | 10/22 14:00、説明欄なし |
+| `AF-ATT 7 daily` | AI Foundation | 10/23から毎日 09:00の繰り返し、10/24の回だけ `#attended` |
+
+| 項目 | 結果 |
+|---|---|
+| Integration Test（`AI_FOUNDATION_IT_ATTENDANCE_START=2026-10-16` / `_END=2026-10-25`） | 6 passed（不変条件1件＋Fixture 5件） |
+| M1 `{start:'2026-10-16', end:'2026-10-25'}` | 18件（うちFixture 17件: 1 / 2 / 3 / 5 / 6 が各1、4が9回、7が3回）。出力Fieldは `id, source, external_ref, type, title, start, end` のみ |
+| M2 同期間 `attended_only:false` | M1と完全一致 |
+| M3 同期間 `attended_only:true` | 13件、すべてFixture: `3 other calendar`、`4 all-day` 9回（`YYYY-MM-DD`、end inclusive）、`1 plain`、`2 bold`、`7 daily` の10/24の回のみ。`5` / `6` と `7` の他の回は返らない。並びは開始順 |
+| M4 `attended_only:"true"` | Domain Schemaで拒否 |
+| M5（UIで説明欄を直して即時反映） | 未実施（判定は毎回の取得結果に対して行い、キャッシュを持たないため省略） |
+| M6（OAuth / `.env` / `config.local.yaml`） | 変更なし。既存のRefresh Tokenのまま再認可なしで上記を取得できた |
+
+- M1〜M4は、MCP Serverを経由せず、本BranchのConnector（`GoogleCalendarScheduleConnector`）とDomain Schemaを読み取りのみのScriptで直接呼んで確認した。
+- `4 all-day`（系列の説明欄にタグ）で、系列に付けたタグが全回に効くことを実データで確認できた（README・仕様書の運用説明どおり）。
+
+### 18.5 LLM Client Verification（2026-10-24、Claude Code、MCP Serverを本Branchの `dist`（`c1ad7bf` 以降のBuild）で再接続）
+
+再接続後の `schedule_list` のTool定義に、更新したdescriptionと `attended_only: { type: 'boolean' }`（`required` は `start` / `end` のまま）が公開されていることを確認した。
+
+| # | 依頼 | 結果 |
+|---|---|---|
+| L1 | 「10/16〜10/22で参加済みにした予定を教えて」 | `schedule_list({start:'2026-10-16', end:'2026-10-22', attended_only:true})` を呼び、9件（`3 other calendar`、`4 all-day` 7回、`1 plain`、`2 bold`）だけが返った。`5` / `6` とテスト用ではない予定は含まれない |
+| L2 | 「10/16〜10/22の予定を教えて」 | `attended_only` なしで呼び、12件（Fixture 11件＋テスト用ではない予定1件）が返った |
+| L3 | 「`AF-ATT 6 empty` には参加しなかった？」 | Tool説明（"an event without the tag is unconfirmed, not \"not attended\""）に従い、「フラグがないため未確認で、不参加とは判断できない」と回答 |
+| L4 | 「`AF-ATT 6 empty` を参加済みにして」 | フラグを書き込むToolがないため `schedule_create` 等は呼ばず、Google Calendarで説明欄に `#attended` を書くよう案内 |
+
+- 制約: L1〜L4は、本実装を行ったのと同じClaude Codeセッションで実施した。Tool定義が実際に公開され、MCP経由で期待どおりに動くことは確認できたが、実装を知らないLLMが自然文から `attended_only` を選ぶかどうかの評価としては限定的。必要に応じて新しいセッションで再確認する。
+- テスト用ではない予定のタイトルは、Public Repositoryのため記録しない。

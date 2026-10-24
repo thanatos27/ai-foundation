@@ -31,6 +31,26 @@ describe('schedule tools', () => {
     expect(byName.schedule_list?.annotations).toMatchObject({ readOnlyHint: true });
   });
 
+  it('offers attended_only on schedule_list as an optional boolean', async () => {
+    const { tools } = await client.listTools();
+    const list = tools.find((tool) => tool.name === 'schedule_list');
+
+    expect(list?.inputSchema).toMatchObject({ required: ['start', 'end'], additionalProperties: false });
+    expect(Object.keys(list?.inputSchema.properties ?? {})).toEqual(['start', 'end', 'attended_only']);
+    expect(list?.inputSchema.properties?.attended_only).toMatchObject({ type: 'boolean' });
+    expect(list?.description).toContain('attended_only');
+    expect(list?.description).toContain('#attended');
+  });
+
+  it.each([true, false])('passes attended_only: %s through unchanged', async (attended_only) => {
+    const args = { start: '2026-09-01', end: '2026-09-30', attended_only };
+    const result = await client.callTool({ name: 'schedule_list', arguments: args });
+
+    expect(result.isError).toBeFalsy();
+    expect(connector.calls).toEqual([{ method: 'list', arg: args }]);
+    expect(result.structuredContent).toEqual({ schedules: [] });
+  });
+
   it('creates a schedule and passes the domain input through unchanged', async () => {
     const input = { title: 'AI Foundationを進める', start: '2026-10-17T14:00:00+09:00' };
     const result = await client.callTool({ name: 'schedule_create', arguments: input });
@@ -61,6 +81,9 @@ describe('schedule tools', () => {
     ['schedule_create', { title: 'a', start: '2026-10-19', related_task: 'todoist:1' }],
     ['schedule_list', { start: '2026-10-19' }],
     ['schedule_list', { start: '2026-10-25', end: '2026-10-19' }],
+    ['schedule_list', { start: '2026-10-19', end: '2026-10-25', attended_only: 'true' }],
+    ['schedule_list', { start: '2026-10-19', end: '2026-10-25', attended_only: null }],
+    ['schedule_list', { start: '2026-10-19', end: '2026-10-25', attended: true }],
   ])('rejects invalid %s input without calling the connector: %j', async (name, args) => {
     const result = await client.callTool({ name, arguments: args });
     expect(result.isError).toBe(true);

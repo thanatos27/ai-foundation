@@ -2,6 +2,7 @@ import type { Schedule, ScheduleCreateInput, ScheduleListFilter } from '../../do
 import { normalizeScheduleCreateInput } from '../../domain/index.js';
 import { ConfigurationError, ProviderApiError } from '../../errors.js';
 import type { ScheduleConnector } from '../types.js';
+import { hasAttendedFlag } from './attendance.js';
 import { type CalendarApi, toFoundationError } from './client.js';
 import { startInstant, toGoogleEvent, toSchedule, toTimeRange } from './mapping.js';
 
@@ -49,6 +50,7 @@ export class GoogleCalendarScheduleConnector implements ScheduleConnector {
     const calendars = await api.listCalendars().catch((error: unknown) => {
       throw toFoundationError(error);
     });
+    const attendedOnly = filter.attended_only === true;
 
     // A failing calendar fails the whole call: a partial list would read as "no events".
     const perCalendar = await Promise.all(
@@ -60,6 +62,8 @@ export class GoogleCalendarScheduleConnector implements ScheduleConnector {
           });
           return events
             .filter((event) => event.status !== 'cancelled')
+            // attended_only: only events the user tagged #attended by hand; untagged ones are unconfirmed.
+            .filter((event) => !attendedOnly || hasAttendedFlag(event.description))
             .map((event) => toSchedule(event, entry.id))
             .filter((schedule): schedule is Schedule => schedule !== undefined);
         }),
