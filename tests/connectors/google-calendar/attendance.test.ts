@@ -58,6 +58,10 @@ describe('hasAttendedFlag', () => {
     ['a URL fragment after a letter', 'https://example.com/page#attended'],
     ['a link target', '<a href="https://example.com/#attended">資料</a>'],
     ['an attribute value', '<span title="#attended">x</span>'],
+    ['a double-quoted attribute value containing ">"', '<span title="a > #attended">資料</span>'],
+    ['a single-quoted attribute value containing ">"', "<span title='a > #attended'>資料</span>"],
+    ['an attribute value containing the other quote and ">"', `<span title="it's > #attended">x</span>`],
+    ['an attribute value containing "<" and ">"', '<span title="a < b > #attended">x</span>'],
     ['an HTML comment', '<!-- #attended -->'],
   ])('ignores %s', (_label, description) => {
     expect(hasAttendedFlag(description)).toBe(false);
@@ -68,8 +72,17 @@ describe('hasAttendedFlag', () => {
     ['an unterminated comment is text', '<!-- #attended', true],
     ['"<" followed by a letter starts a tag', 'x<y #attended>z', false],
     ['"<" followed by a space is text', 'a < b #attended', true],
+    ['an unclosed quoted attribute is text', '<span title="a > #attended>x', true],
+    ['a "<" that never closes does not swallow the next tag', 'x<y<b>#attended</b>', true],
   ])('%s', (_label, description, expected) => {
     expect(hasAttendedFlag(description)).toBe(expected);
+  });
+
+  it('stays fast on many unclosed tags', () => {
+    const started = performance.now();
+    expect(hasAttendedFlag(`${'<a "'.repeat(20_000)}`)).toBe(false);
+    expect(hasAttendedFlag(`${'<a '.repeat(20_000)}#attended`)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it('gives the same answer on repeated calls', () => {

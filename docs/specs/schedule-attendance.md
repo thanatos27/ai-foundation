@@ -61,6 +61,7 @@ R7は軽量な近似処理であり、HTML Parserでも可視文字の抽出で�
 | `参加#attended` / `x#attended` / `##attended` | 未確認（前に空白か改行を入れる） |
 | `https://example.com/#attended` / `<a href="https://example.com/#attended">資料</a>` | 未確認 |
 | `<!-- #attended -->` / `<span title="#attended">x</span>` | 未確認 |
+| `<span title="a > #attended">x</span>` / `<span title='a > #attended'>x</span>`（引用符内の `>`） | 未確認 |
 
 判定の全ケースは `tests/connectors/google-calendar/attendance.test.ts` で固定している。
 
@@ -77,6 +78,7 @@ R7は軽量な近似処理であり、HTML Parserでも可視文字の抽出で�
 - HTML Entityはdecodeしない。`&#35;attended` は検出しない。一方、`&nbsp;#attended` は `;` が区切りになるため検出する。
 - 本文に `<` と英字を続けて書くとタグと見なす（`x<y #attended>z` は検出しない）。`<` の後に空白がある場合（`a < b #attended`）は本文として扱う。
 - 閉じていないコメント（`<!-- #attended`）はコメントと見なさず、検出する（Google Calendar UIでは生成されない）。
+- タグは引用符で囲まれた属性値の中の `>` では終わらない。引用符が閉じていないタグ（`<span title="a > #attended>x`）や、引用符の外に `<` を含むものはタグと見なさず、本文として判定する。
 - 日本語の文字の直後に空白なしで書いた `#attended` は検出しない（R4）。
 
 ## MVP対象外

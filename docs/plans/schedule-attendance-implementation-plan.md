@@ -539,3 +539,15 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 - Plan外のSource変更なし。変更は §9.1 の4ファイルのみ（`mapping.ts` / `client.ts` / `instructions.ts` / Config / Credentialは無変更）。
 - `tests/tools/schedule.test.ts` の既存Test「lists the two schedule tools…」は**変更せず**、`inputSchema.properties` の確認は新規Test「offers attended_only…」に分けた（§11.5では既存箇所の更新を想定していたが、既存Testは `schedule_list` のproperties一覧を確認していなかったため）。
 - READMEでは、Integration Test節にFixture検証の実行条件を追記した（§14.1に加えて）。
+
+### 18.3 Implementation Review（PR #24、Codex）
+
+対象 `9a466e1`。指摘は修正推奨1件で、それ以外（省略 / `false` の互換性、キャンセル除外、既存ソート、API失敗時の処理、§18.2、README追記）は問題なし。
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] HTML除去の `[^>]*>` が引用符内の `>` でタグを終了させ、`<span title="a > #attended">資料</span>`（単一引用符も同様）を参加済みと誤判定する（R7違反） | タグの正規表現を `<\/?[A-Za-z](?:[^<>"']\|"[^"]*"\|'[^']*')*>` に変更し、引用符で囲まれた属性値の中の `>` ではタグを終えないようにした。引用符の外の `<` で照合を打ち切るため、閉じないタグが大量に並ぶ入力でも線形になる（修正前の正規表現は `<a ` × 20,000 で約340ms、修正後は1ms未満）。回帰Testとして二重引用符・単一引用符・もう一方の引用符を含む値・`<` を含む値の4件、挙動の固定2件（閉じない引用符、閉じない `<` の後のタグ）、性能1件を追加。仕様書の代表例・既知の制約に追記 |
+
+修正後: `npm run typecheck` 成功、`npm test` 54 files / 1330 passed / 5 skipped。
+
+- 残る既知の性能特性: 閉じないHTMLコメント（`<!--`）が大量に並ぶ入力は、修正前と同じく長さの二乗に比例する（`<!-- ` × 20,000 で約330ms）。Google Calendar UIでは生成されない入力のため、MVPでは対応しない。
