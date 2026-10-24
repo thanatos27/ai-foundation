@@ -1,7 +1,7 @@
 # 複数Calendar・期間イベント・説明欄 — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-25
+- Status: **rev.2（Plan Review rev.1 反映、再Review待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #27 Review反映。§19）
 - 対象: [Issue #12](https://github.com/thanatos27/ai-foundation/issues/12)（コメント「MVP方針更新：カレンダーによる分類＋説明欄の汎用利用」と「MVP詳細設計 v0.1（ユーザー承認済み / 2026-10-25）」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Google Calendar参加済みフラグ Design](../specs/schedule-attendance.md)（本Issueで廃止）, [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
@@ -82,6 +82,7 @@
 | Fieldのクリア | `description` / `location` をpatchで消すには `null` を送る（不可なら空文字） | P1 |
 | 時刻予定 ↔ 終日予定の切替 | `start: { date, dateTime: null }` のように反対側を `null` にすると切り替わる。既存の `timeZone` が残っても終日予定として受理される | P3 |
 | 時刻予定の `timeZone` | patchで `start.dateTime` だけ送ると、UIで作った予定が持つ `start.timeZone`（例: `Asia/Tokyo`）は保持される | P4 |
+| 片側だけのpatch | 種類を変えない更新では `start` だけ（または `end` だけ）を送れば、送らなかった側は変わらない。結果が `end < start` になるpatchは400で拒否される | P9 |
 | 本文 | `description` はUIで書式を付けるとHTML、APIで送った改行（`\n`）はそのまま保存・返却される | P5 |
 | 書き込み権限のないCalendar | `events.insert` / `events.patch` は403。`error.errors[].reason` が `forbidden` / `requiredAccessLevel` 等 | P6 |
 | Event ID | `[a-v0-9]` の base32hex、展開された回は `_<YYYYMMDD>` / `_<YYYYMMDDTHHMMSSZ>` が付く | P7 |
@@ -107,6 +108,7 @@
 | P6 | `listCalendars` で `accessRole: 'reader'` のCalendar（例: 日本の祝日）へ `insert` | 403の `reason` | `forbidden` / `requiredAccessLevel` → §8.7の `ConfigurationError`。別の値なら判定対象のreasonを差し替える |
 | P7 | 前後1年の `list`（Read-only） | 全EventのIDが `^[A-Za-z0-9_]+$` に合うか（件数だけ記録） | 合う前提。合わないIDがあれば `parseScheduleId` の許容文字を広げる |
 | P8 | 前後1年の `list` で `organizer.self !== true` のEvent、AI Foundation専用Calendarに作ったEventの `organizer` を `get`（Read-only） | 専用Calendarの予定の `organizer.email` がCalendar ID・`self` の値、招待予定の `organizer` / `eventType` | 専用Calendarの予定は `organizer.email === calendarId` の前提。違えば §8.6 手順5の判定を合わせる |
+| P9 | 時刻予定（`timeZone` 付き / なし）と終日予定（3日間）に、(a) `patch({ start })` だけ (b) `patch({ end })` だけ (c) `end` より後の `start` だけ | (a)(b)で送らなかった側と `timeZone` が完全に不変か。(c)のHTTP statusとreason | (a)(b)は不変の前提（§8.6の片側patch）。片側だけでは受理されない・反対側が変わる場合は、両端点の送信に戻し、同時編集で反対側を上書きし得ることをQ6・仕様書に明記したうえでPlanを修正する。(c)は400の前提（§8.6の競合時の扱い） |
 
 Probe結果がPlanの前提と異なり設計判断が変わる場合（P3で種類の切替ができない等）は、実装前にPlanを修正してReviewを受け直す。
 
@@ -152,6 +154,9 @@ schedule: z
 | C3 | `writable_calendars` があれば `default_calendar` 必須、かつそのKeyの1つ | `sources.schedule.default_calendar: must be one of personal, events` |
 | C4 | `default_calendar` だけがある設定は拒否 | `sources.schedule.default_calendar: needs writable_calendars` |
 | C5 | 同じCalendar IDを複数の別名に割り当てない | `sources.schedule.writable_calendars.<alias>: same calendar ID as <alias>` |
+| C6 | Calendar IDに `primary`（大文字小文字を問わない）を使わない（rev.2） | `sources.schedule.writable_calendars.<alias>: "primary" is not allowed; set the calendar's own ID from its settings` |
+
+- C6: `primary` はGoogle Calendar APIが認証ユーザーのメインCalendarへ動的に解決する特別な識別子で、設定値として固定のCalendarを指さない。ID形式の厳密な検証（`@` の有無など）は行わない。誤ったCalendar IDの検出は §6.4のセットアップ確認で行う。
 
 - 別名に `@` や `.` を許さないため、別名とGoogle Calendar ID（必ず `@` を含む）は文字列として衝突しない（§8.3の `schedule_list` の解決で利用）。
 - 両方とも省略した設定は有効（Serverは起動し、`schedule_list` は使える。`schedule_create` / `schedule_update` は `ConfigurationError`）。従来の「未設定でもServerは起動する」を維持する。
@@ -166,6 +171,25 @@ schedule: z
     personal: "<旧writable_calendar_idの値>"
   ```
 - READMEの「ローカル設定」「Google Calendar」節に移行手順を書く。実装時は、利用者の承認を得て手元の `config.local.yaml`（Git管理外）を移行してからIntegration Testを行う。
+
+### 6.4 書き込み先Calendarの実体確認（rev.2）
+
+設定値は非空文字列であれば許可リストとして有効になるため、**別名が意図したCalendarを指していること**を運用手順として確認する。
+
+本番運用での対応:
+
+| 別名 | 意図するGoogle Calendar |
+|---|---|
+| `personal`（default） | 「AI Foundation」（既存の専用Calendar。旧 `writable_calendar_id`） |
+| `events` | 「Event Catalog」（期間イベント用。2026-10-25に利用者が作成済み） |
+
+確認手順（実装の手順2で `config.local.yaml` を移行した直後、Integration Testの前に実施）:
+
+1. 読み取り専用のScratchpad Script（Repositoryにcommitしない）で、`writable_calendars` の各IDについて `calendarList.get` / `listCalendars` の結果から `summary` と `accessRole` を取得し、(a) `summary` が上表と一致、(b) `accessRole` が `owner` または `writer`、(c) 2つのIDが異なる、を確認する。
+2. §14.1の Integration Test で `personal` / `events` の両方へテスト用Eventを作成し、生のAPIで**設定したCalendar ID側**から `events.get` できること、もう一方のCalendarには存在しないことを確認する（作成したEventは削除）。
+3. 結果は「別名 → `summary` / `accessRole` / 一致したか」だけをPlanに記録する。**Calendar IDはPlan・PR・Review Comment・Commitに書かない。**
+
+READMEにも、Calendar IDは各Calendarの「カレンダーの設定 → カレンダーの統合」から写すこと、`primary` やメールアドレスを推測して使わないこと、設定後に上記1と同じ確認（`summary` が意図どおりか）をすることを書く。
 
 ---
 
@@ -372,12 +396,22 @@ async list(filter: ScheduleListFilter): Promise<Schedule[]> {
 | `end` だけ | 同様に、種類が既存と同じで、既存 `start` 以上であること |
 
 - 既存Eventの値の比較は既存の `toSchedule` と同じ変換（終日のendはinclusive）で行う。時刻予定は `Date.parse` で瞬間を比較し、終日予定は日付文字列で比較する。
-- `start` か `end` のどちらかを指定したら、patchには**両方**を送る（片方だけ送ると種類切替時に不整合になるため）:
-  - 時刻予定: `start: { dateTime, date: null }`、`end: { dateTime, date: null }`。`timeZone` は送らない（既存値を保持。P4）
-  - 終日予定: `start: { date, dateTime: null }`、`end: { date: addDays(endInclusive, 1), dateTime: null }`（P3の結果次第で `timeZone: null` も）
+- patchには**Inputで指定した端点だけ**を送る（rev.2。未指定の端点は送らず、Google Calendar側の値をそのまま残す）:
+
+| Input | patchの `start` / `end` |
+|---|---|
+| `start` だけ（時刻） | `start: { dateTime }` のみ。`end` と `timeZone` は送らない（P4 / P9） |
+| `end` だけ（時刻） | `end: { dateTime }` のみ |
+| `start` だけ（終日） | `start: { date }` のみ |
+| `end` だけ（終日） | `end: { date: addDays(endInclusive, 1) }` のみ |
+| 両方・同じ種類 | 両方を上の形で送る |
+| 両方・時刻 → 終日 | `start: { date, dateTime: null }`、`end: { date: addDays(endInclusive, 1), dateTime: null }`（P3の結果次第で `timeZone: null` も） |
+| 両方・終日 → 時刻 | `start: { dateTime, date: null }`、`end: { dateTime, date: null }` |
+
+- 片側だけの更新で `get` の値を使うのは**検証（種類・順序）のためだけ**で、その値を書き戻さない。
 - `title` → `summary`、`description` / `location` → 同名Field（`null` はP1で確定した表現）。未指定のFieldはpatchに含めない。
 
-**同時編集**: 手順4と7の間にUI等で変更されても検出しない（`If-Match` / ETagは使わない）。patchは指定Fieldだけを変更するため、他のFieldの変更は失われない（Q6）。
+**同時編集**: 手順4と7の間にUI等で変更されても検出しない（`If-Match` / ETagは使わない）。patchはInputで指定したFieldと端点だけを送るため、未指定のField・端点への同時変更は失われない。`get` 後に反対側の端点が変わり、patch結果が `end < start` になる場合はGoogle Calendarが400で拒否する前提（P9）で、既存の `toFoundationError` により `ProviderApiError` として返す（Q6）。
 
 ### 8.7 Error一覧
 
@@ -488,9 +522,9 @@ const calendarsText = aliases.length
 
 User承認後、`main` から `feat/schedule-calendars` を作成して実装する。
 
-0. **前提**: 利用者がGoogle Calendarで期間イベント用Calendarを作成し（既存のものを使ってもよい）、そのIDを `config.local.yaml` へ設定することを承認する（§6.3。Calendar IDはRepositoryに書かない）。
+0. **前提**: 期間イベント用Calendar「Event Catalog」は利用者が作成済み（2026-10-25）。そのIDを `config.local.yaml` へ設定することの承認を得る（§6.3。Calendar IDはRepositoryに書かない）。
 1. 実装前Probe（§5）を実施し、結果を本Planに記録する。前提と違えばPlanを修正してReviewを受け直す。
-2. Config Schemaと `tests/config/schema.test.ts`、`config.yaml`、`src/connectors/index.ts`。手元の `config.local.yaml` を新形式へ移行する。
+2. Config Schemaと `tests/config/schema.test.ts`、`config.yaml`、`src/connectors/index.ts`。手元の `config.local.yaml` を新形式へ移行し、**§6.4の実体確認（手順1）を行う**。
 3. Domain（§7）と `tests/domain/schedule.test.ts`。
 4. `attended` 関連の削除（§10のSource・Test）。
 5. Client・`calendars.ts`・Mapping とそのTest。
@@ -522,6 +556,7 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 | `default_calendar` が未定義の別名 / `writable_calendars` なしで `default_calendar` のみ / `writable_calendars` のみ | 拒否（C3 / C4） |
 | 別名 `Personal` / `my.cal` / `a@b` / `1st` / 33文字 / 空 | 拒否 |
 | 同じIDを2つの別名へ | 拒否（C5） |
+| Calendar IDが `primary` / `Primary` | 拒否（C6） |
 | Calendar IDが空・空白のみ | 拒否 |
 
 既存の `writable_calendar_id` を受理する3ケースは削除・置換する。
@@ -541,7 +576,7 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 - `toSchedule`: `description` / `location` のKeyなし・`''` → `null`、HTML・改行・前後空白を含む値は完全一致、`calendar` 引数がそのまま出力される。
 - `toGoogleEvent`: `null` のときKeyを送らない、値は原文。期間イベント（`2026-11-01`〜`2026-11-03`）の `end.date` が `2026-11-04`。
 - `parseScheduleId`: 正常（グループCalendar、`ja.japanese#holiday@group.v.calendar.google.com` のような `#` を含むID、`abc_20261020T010000Z`、`abc_20261020`）、異常（接頭辞違い、`google_calendar:` のみ、Calendar IDなし、Event ID空、`../x`、空白、`todoist:1`）。
-- `toEventPatch`: 未指定Fieldが含まれない、`null` クリア、時刻 → 終日・終日 → 時刻の切替で反対側が `null`、終日のend +1、`start` だけ指定でも両方送る。
+- `toEventPatch`: 未指定Fieldが含まれない、`null` クリア、時刻 → 終日・終日 → 時刻の切替で反対側が `null`、終日のend +1、**`start` だけ / `end` だけの指定では反対側の端点がpatchに含まれない**（時刻・終日の両方）。
 - `WritableCalendars`: `forCreate` の省略 → default、未知の別名・Calendar ID → `InputValidationError`（Messageに別名一覧、Calendar IDを含まない）、未設定 → `ConfigurationError`。`label` / `aliasOf` / `resolveForList`。
 
 ### 13.5 Connector（`tests/connectors/google-calendar/connector.test.ts`）
@@ -587,10 +622,13 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 | 時刻予定の `start` / `end` 両方 | 両方 `{ dateTime, date: null }` |
 | 時刻 → 終日（両方指定） | `{ date, dateTime: null }`、endは+1 |
 | 終日 → 時刻（両方指定） | `{ dateTime, date: null }` |
-| `start` だけ（同じ種類、既存end以前） | 両方送られ、endは既存値 |
+| `start` だけ（時刻、既存end以前） | patchが `{ start: { dateTime } }` だけ（`end` Keyなし） |
+| `end` だけ（時刻、既存start以後） | patchが `{ end: { dateTime } }` だけ（`start` Keyなし） |
 | `start` だけ（種類が違う） / 既存endより後 | `InputValidationError`、`patches` 空 |
 | `end` だけ（既存startより前） | `InputValidationError`、`patches` 空 |
-| 終日予定の `end` だけ延長 | `end.date` が新しい最終日+1、`start` は既存 |
+| 終日予定の `end` だけ延長 | patchが `{ end: { date: 新しい最終日+1 } }` だけ |
+| 終日予定の `start` だけ前倒し | patchが `{ start: { date } }` だけ |
+| patch 400（競合で `end < start`） | `ProviderApiError` |
 | 設定外Calendar（`primary@example.com`）のID | `InputValidationError`、`gets` / `patches` とも空 |
 | 不正ID | `InputValidationError`、`gets` 空 |
 | 存在しない（get 404） / `status: 'cancelled'` | `NotFoundError`、`patches` 空 |
@@ -633,7 +671,8 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 | 説明欄・場所 | 複数行＋HTMLの `description` と `location` 付きで作成 → 生のAPIの `events.get` と `schedule_list` の両方で原文と一致 |
 | 期間イベント | 終日3日間を作成 → 生のAPIの `end.date` が最終日+1、`schedule_list` で最終日inclusive。開始前から跨ぐ期間・最終日だけの期間・全体を含む期間で返り、直前・直後の期間で返らない |
 | `calendar` 絞り込み | default別名で絞ると作成した予定が返り、`calendar` が別名。2つ目の別名が設定されている場合だけ、そこへ作成して互いの絞り込みに混ざらないこと（`it.runIf`） |
-| update | `title` だけ変更で他Fieldが保持、`description` 変更、`description: null` / `location: null` で生のAPIの値が消える、時刻予定の `start` だけ移動、時刻 → 終日の切替、逆順は拒否 |
+| 書き込み先の分配（rev.2、§6.4 手順2） | 設定済みの各別名へ1件ずつ作成し、生のAPIで設定したCalendar IDから `events.get` でき、他の別名のCalendar IDからは404になる。各IDの `calendarList` の `accessRole` が `owner` / `writer`。`summary` はstderrへ出すだけで判定しない（個人の命名をTestに持ち込まない。照合は §6.4 手順1） |
+| update | `title` だけ変更で他Fieldが保持、`description` 変更、`description: null` / `location: null` で生のAPIの値が消える、時刻予定の `start` だけ移動（生のAPIで `end` と `timeZone` が不変）、終日予定の `end` だけ延長（`start` 不変）、時刻 → 終日の切替、逆順は拒否 |
 | 繰り返し | 生のAPIで `COUNT=2` の系列を作成 → 一覧の回のIDと系列のIDの両方で `schedule_update` が拒否され、生のAPIで値が変わっていない |
 | 設定外Calendar | `listCalendars` から設定外の読めるCalendar（例: メインCalendar）のIDで `google_calendar:<id>:nonexistent` を作り、`schedule_update` が `InputValidationError`（APIへの書き込みなし。該当Calendarがなければskip） |
 
@@ -645,6 +684,7 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 
 | # | 操作 | 期待 |
 |---|---|---|
+| M0 | §6.4 手順1（読み取り専用Script） | `personal` →「AI Foundation」、`events` →「Event Catalog」、両方 `owner` / `writer`、IDが異なる |
 | M1 | 旧 `writable_calendar_id` のままServer起動 | 起動時に移行手順付きのConfigError |
 | M2 | `schedule_create`（`calendar` 省略、時刻） | 通常Calendarに作成、`calendar` がdefault別名 |
 | M3 | `schedule_create`（`calendar: 'events'`、終日3日間、`description` にURL） | Google Calendar UIで期間イベント用Calendarに3日間で表示、説明欄にURL |
@@ -668,7 +708,7 @@ Issue #12の方針どおり**完全に任意**で、Planの必須項目・マー
 
 - Tool表: `schedule_create`「設定した書き込み先Calendar（別名）へ予定・期間イベントを作成（説明欄・場所）」、`schedule_list`「期間に重なる予定を全Calendar、または1つのCalendarから取得」、`schedule_update`（新規）「書き込み先Calendarの単発予定を更新」。
 - 「ローカル設定」: `writable_calendar_id` の例を `default_calendar` / `writable_calendars` へ。旧設定は起動時Errorになることと移行手順（§6.3）。未設定時にConfiguration Errorになる3 Tool。
-- 「Google Calendar」節（Credentials）: 手順5を「通常予定用と期間イベント用（任意）のCalendarを作り、IDを `writable_calendars` に別名で設定」へ。Scopeの文を「`writable_calendars` 以外へ書き込まない」へ。
+- 「Google Calendar」節（Credentials）: 手順5を「通常予定用と期間イベント用（任意）のCalendarを作り、IDを `writable_calendars` に別名で設定」へ。IDは各Calendarの「カレンダーの設定 → カレンダーの統合」から写し、`primary` やメールアドレスを推測して使わない（`primary` は起動時Error）。設定後に別名が意図したCalendarを指しているか確認する（§6.4）。Scopeの文を「`writable_calendars` 以外へ書き込まない」へ。
 - 「参加済みフラグ（Google Calendar）」節を削除し、「Calendarの使い分け（Google Calendar）」節を追加: 期間イベント用Calendar（気になる開催情報、参加の有無を問わない）と通常Calendar（行くと決めた日時）、Todoistは購入・予約の行動。訪問が決まっても開催情報は動かさず通常Calendarに別途登録。通常Calendarの予定は参加実績ではなく、不参加・結果は説明欄に自由記述。説明欄・場所は原文で保存・取得（HTMLを含みうる）。公式URLは説明欄へ。更新は単発予定だけ。
 - Integration Test節: `AI_FOUNDATION_IT_ATTENDANCE_*` の記述を削除し、2つ目の別名がある場合の追加検証を記載。
 - 「Current Phase」: Issue #15の記述を「複数Calendar・期間イベント（Issue #12）」へ置き換え。
@@ -695,7 +735,7 @@ Issue #12の方針どおり**完全に任意**で、Planの必須項目・マー
 
 | # | Acceptance Criteria（具体化） | 確認方法 |
 |---|---|---|
-| AC1 | 設定済み別名で通常／期間イベント用Calendarへ作成でき、`calendar` 省略時は `default_calendar`。旧 `writable_calendar_id` は移行手順付きの起動時Errorになり、新形式で従来どおり作成できる | §13.2、§13.5 create、§14.1、§14.2 M1〜M3 |
+| AC1 | 設定済み別名で通常／期間イベント用Calendarへ作成でき、`calendar` 省略時は `default_calendar`。旧 `writable_calendar_id` は移行手順付きの起動時Errorになり、新形式で従来どおり作成できる。各別名が意図したCalendarを指し、作成が正しいCalendarに分配される | §6.4、§13.2、§13.5 create、§14.1（書き込み先の分配）、§14.2 M0〜M3 |
 | AC2 | 期間イベントを終日・最終日inclusiveで作成し、Googleのexclusive endと相互変換する（作成・一覧・更新） | §13.4、§13.5（create / update）、§14.1 期間イベント |
 | AC3 | `calendar` 省略で読み取り可能な全Calendar、指定で1つのCalendarから、期間に重なるEventを取得（開始前から跨ぐ・境界日・全期間を含む）。ソート規則は不変 | §13.5 list、§14.1 |
 | AC4 | `description` / `location` を作成・取得・更新でき、改行・HTMLを原文で保持。更新時の未指定（保持）と `null`（クリア）を区別 | §13.3〜§13.6、§14.1 説明欄・update、§14.2 M4 / M5 |
@@ -728,11 +768,11 @@ LLM Client VerificationはACに含めない（§15）。
 
 ### Q5. start / end の片方だけの更新
 
-片方だけ変えた場合は、もう片方を保持したうえで順序と種類を検証し、違反したら両方の指定を求める。「長さを保って移動する」解釈は採らない（未指定Fieldは保持、という詳細設計の原則に合わせる）。そのため時刻予定の開始だけを後ろへずらすと、終了より後になる場合はErrorになる。Tool descriptionで「移動するときは `start` と `end` を両方渡す」と案内する。
+片方だけ変えた場合は、もう片方を保持したうえで順序と種類を検証し、違反したら両方の指定を求める。patchには指定した端点だけを送り、保持する側は送らない（rev.2）。「長さを保って移動する」解釈は採らない（未指定Fieldは保持、という詳細設計の原則に合わせる）。そのため時刻予定の開始だけを後ろへずらすと、終了より後になる場合はErrorになる。Tool descriptionで「移動するときは `start` と `end` を両方渡す」と案内する。
 
 ### Q6. 同時編集の検出をしない
 
-`get` と `patch` の間にUIで同じEventが変更された場合、`patch` で送ったFieldだけが上書きされる（他のFieldは保たれる）。個人利用・単発予定のMVPではETagによる競合検出は過剰と判断した。
+`get` と `patch` の間にUIで同じEventが変更された場合、`patch` で送ったFieldと端点だけが上書きされる（未指定のFieldと、片側更新での反対側の端点は保たれる）。反対側の変更で順序が逆転する場合はGoogle Calendarの400に任せる（P9）。両端点を送るのは利用者が両方を指定したときだけで、そのときは指定値で上書きするのが意図どおり。個人利用・単発予定のMVPではETagによる競合検出は過剰と判断した。
 
 ### Q7. 招待された予定と特殊な種類の予定を事前に拒否する
 
@@ -745,3 +785,16 @@ Entity定義（Schedule = Google Calendar）は変わらず、Calendarの使い�
 ### Q9. 出力の `calendar` に設定外CalendarのIDを出す
 
 `Schedule.calendar` は「設定済み別名、または他の読み取り可能Calendarの識別子」（v0.1）。識別子にはGoogle CalendarのIDを使う（既存の `id` にも同じ値が含まれており、新たに露出する情報はない）。Calendarの表示名（`summary`）は一意でなく変更されうるため使わない。
+
+---
+
+## 19. Review対応履歴
+
+### rev.2（PR #27 Plan Review rev.1反映）
+
+ChatGPTのPlan Review rev.1は「修正推奨（P2 1件、P3 1件）」。
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] §8.6 / §13.5 — 片方だけの日時更新でも、事前に `get` した値で両端点をpatchしており、「未指定Fieldは保持」「指定Fieldだけ変更」と矛盾する。`get`→`patch` 間にUIで反対側が変わると古い値を書き戻す | 種類を変えない片側更新では指定した端点だけを送るよう §8.6を変更（両端点は両方指定時だけ。種類の切替は従来どおり両方指定が必須）。`get` の値は検証にだけ使う。競合で `end < start` になる場合はGoogle Calendarの400 → `ProviderApiError`。§4に前提、§5にProbe P9（片側patchで反対側と `timeZone` が不変か、逆転時の400）を追加し、P9が前提と違う場合は両端点送信へ戻して上書きの可能性を明記する方針とした。§13.4 / §13.5のTest期待値（反対側がpatchに含まれない）、§14.1、Q5 / Q6を更新 |
+| [P3] §6 / §12 / §14 — 設定値は非空文字列なら有効なため、`primary` や誤ったCalendar IDも許可リストに入る。意図したCalendarに結び付いていることの確認手順が必要 | §6.4を新設: `personal` →「AI Foundation」、`events` →「Event Catalog」を、読み取り専用Scriptで `summary` / `accessRole` を取得して確認（手順1）、Integration Testで各別名へ作成して設定したCalendar ID側にだけ存在することを確認（手順2）。記録は別名と `summary` / `accessRole` だけでCalendar IDは書かない。§12 手順2、§14.1（書き込み先の分配）、§14.2 M0、AC1に反映。READMEに「IDは設定画面から写す・`primary` を使わない・設定後に確認する」注意書きを追加（§16.1）。加えて、`primary` はAPIが動的に解決する識別子のため、Config検証C6で拒否する（ID形式の厳密な検証はしない） |
