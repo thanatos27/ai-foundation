@@ -833,7 +833,7 @@ ScratchpadのScript（Repositoryにcommitしない）で、AI Foundation Calenda
 | M0 | §20.2 |
 | M1 | 旧 `writable_calendar_id` を含むConfigの読み込みが `sources.schedule.writable_calendar_id: was replaced by writable_calendars and default_calendar; e.g. …` で失敗することを確認 |
 | M2 / M3 / M5 / M6 | MCP Serverは経由せず、Integration Test（実Google Calendar、本BranchのConnector）で同じ操作を確認: 既定Calendarへの作成と `calendar` の別名、`events` への3日間の終日予定（Google側のendが+1日）、`description: null` で生のAPIから値が消えること、繰り返しの系列・回と設定外Calendarの予定の更新拒否 |
-| M4 | 未実施（Google Calendar UIで説明欄に書式を付ける操作が必要）。HTMLの原文保持はProbe P5とIntegration Testで確認済み |
+| M4 | 再接続したMCP Server（本BranchのBuild）の `schedule_list` で確認。Google Calendar UIで改行と太字を付けた説明欄が `…<br><b>…</b>` のHTMLのまま返った。対象はメインCalendar（書き込み先以外）の終日予定で、`calendar` にはCalendar IDが返り、`location` は `null`。`calendar: 'personal'` の同日の一覧には含まれない（Calendarごとの絞り込みどおり） |
 | M7 | `attended_only` の拒否をDomain / Tool Test（MCP経由の `Input validation error`）で確認 |
 | M8 | OAuth同意画面・`.env` は変更なし。既存のRefresh TokenでProbe・Integration Testを実行でき、再認可は不要だった |
 
