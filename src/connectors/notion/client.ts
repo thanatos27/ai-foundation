@@ -19,7 +19,7 @@ export const NOTION_API_VERSION = '2026-03-11';
 export interface NotionClient {
   dataSources: Pick<Client['dataSources'], 'retrieve' | 'query'>;
   pages: Pick<Client['pages'], 'create' | 'retrieve' | 'update'>;
-  blocks: { children: Pick<Client['blocks']['children'], 'append'> };
+  blocks: { children: Pick<Client['blocks']['children'], 'append' | 'list'> };
 }
 
 export type NotionClientFactory = (apiToken: string) => NotionClient;

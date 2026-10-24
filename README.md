@@ -1,6 +1,6 @@
 # AI Foundation
 
-各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / ProjectをAIから統一的に操作するMCPベースの個人AI基盤。
+各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / Project / AreaをAIから統一的に操作するMCPベースの個人AI基盤。
 
 ## Source of Truth
 
@@ -11,12 +11,13 @@
 | CollectionItem | Notion |
 | Knowledge | Obsidian / Google Drive |
 | Project | GitHub / Google Drive |
+| Area（PARAのAreas） | Notion |
 
 AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface、SoTルール、Connector、静的設定を提供する。Routingと複数Toolの組み合わせはAI Clientが判断する。
 
 ## Current Phase
 
-Phase 5 — Project。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project、および Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -35,6 +36,8 @@ Phase 5 — Project。Todoist・Google Calendar・Notion・Obsidian Vault・GitH
 | `knowledge_append` | `obsidian:<vault-relative-path>` を指定して本文末尾へ追記（Frontmatterは変更しない） |
 | `project_list` | `GITHUB_TOKEN` の `/user/repos` が返すGitHub Repository（Discovery集合）をProjectとして一覧（query: name / owner/repository / descriptionの部分一致、owner: 完全一致。いずれも大文字小文字を区別しない）。owner/repository順 |
 | `project_get` | `github:<owner>/<repository>` を指定してProjectとGitHub固有Details（description / owner / default_branch / visibility / archived / fork / updated_at）を取得（Read-only） |
+| `area_list` | Notionの `Areas` 親ページ直下の子ページをArea（継続的に管理する領域）として一覧（query: タイトルの部分一致、大文字小文字を区別しない）。タイトル順。Read-only |
+| `area_get` | `notion:<page-id>` を指定してAreaと目次本文（Markdown相当のテキスト）を取得。リンク先・子ページの中身は取得しない（Read-only） |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
 
@@ -43,6 +46,8 @@ CollectionItemの `status` は自由文字列（例: `wishlist` / `playing` / `r
 Knowledgeは1件 = 1 Markdown file（UTF-8）で、`title` / `description` / `area` / `tags` をYAML Frontmatterに持つ。IDはVault相対パス（`obsidian:AI Foundation/Knowledge/CAP定理.md`）で、ローカルの絶対パスは含まない。ObsidianでファイルをKnowledge Directory内の別フォルダへ移動するとIDが変わる（旧IDはNot foundになり、`knowledge_search` で新しいIDが見つかる）。
 
 Projectは1 GitHub Repository = 1 Projectで、IDは `github:<owner>/<repository>`。Project一覧はConfigに書かず、Tool呼び出しのたびにGitHub APIから取得する（Cacheなし）。public / private / internal、archived、fork、Organization所有のRepositoryも区別せず含む。RepositoryをGitHub上でrename・移管すると、旧IDの `project_get` は現在のIDで結果を返す。README・ファイル・Issue・Pull Requestは取得しない。
+
+Area（PARAのAreas: 食事・資産・運動・家事など、完了を目指さず継続的に管理する領域）は、Notionの `Areas` 親ページ直下の子ページ1つ = 1 Areaで、IDは `notion:<page-id>`。Areaのページは関連情報へのリンクを集めた目次として使い、AI Foundationは目次を返すだけでリンク先を巡回しない。完了を目指す一時的な活動はProject。Task / Knowledgeの `area`（`work` / `personal`）とは別の概念。詳細は [Areas](#areas)。
 
 ## Getting Started
 
@@ -108,7 +113,7 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
 
 ### ローカル設定（`config.local.yaml`）
 
-予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Areas親ページのID（`sources.area.notion.parent_page_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
 
 ```yaml
 sources:
@@ -126,9 +131,13 @@ sources:
       storage: filesystem
       vault_path: "C:/Users/you/Documents/Obsidian/MyVault"
       knowledge_dir: "AI Foundation/Knowledge"
+  area:
+    provider: notion
+    notion:
+      parent_page_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 ToolがConfiguration Errorになる。
+未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 Toolが、`sources.area` / `parent_page_id` がなければAreaの2 ToolがConfiguration Errorになる。`sources.area` 自体を省略したConfig（Areas以前に作ったもの）もそのまま起動できる。
 
 ### Obsidian
 
@@ -147,6 +156,53 @@ KnowledgeはObsidian VaultのMarkdownとしてFilesystem経由で読み書きす
 - `vault_path` 自体は同期フォルダへのSymbolic Link / Junctionでもよいが、Vaultから `knowledge_dir` までと `knowledge_dir` の内側のSymbolic Link / Junctionは辿らない（Configuration ErrorまたはInput Validation Error）
 
 VaultはGoogle Drive等の同期フォルダに置いてよい。AI Foundationは同期を管理せず、手元のFilesystemに見えている状態だけを扱う。同期の競合で作られたファイル（`CAP定理 (1).md` 等）も通常のKnowledgeとして検索される。Google Drive for desktopを「ストリーミング」で使うと検索のたびにファイルの読み込みが発生して遅くなるため、Vaultのフォルダは「ミラーリング」（またはオフラインで使用可能）を推奨する。
+
+### Areas
+
+Areaは、Notionの専用Workspaceにある通常ページ `Areas` の**直下の子ページ**。専用DatabaseやAI Foundation側の登録は不要で、子ページを作る・ゴミ箱へ移すだけで増減する。Collectionと同じIntegration（`NOTION_API_TOKEN`）を使い、Read-onlyでアクセスする。
+
+1. Notionで通常ページ `Areas` を作り、ページのメニュー（`•••`）→ Connections からCollectionと同じIntegrationを追加する（子ページは共有を継承する）
+2. `Areas` のページID（URL末尾の32桁の英数字）を `config.local.yaml` の `sources.area.notion.parent_page_id` に設定する。**このRepositoryはPublicなので、ページID・Area IDは `config.yaml`・Test・ドキュメントに書かず、Commitしない**
+3. Areaごとに `Areas` 直下へ子ページを作る。列（Column）・トグルの中に置いた子ページや、子ページのさらに子ページはAreaにならない（`area_list` に出ず、`area_get` もNot foundになる）
+4. Integration Test（`npm run test:integration`）は、`Areas` 直下に子ページが**最低1件**あることを前提とする（読み取りのみで、Notionは変更しない）
+
+ゴミ箱へ移した子ページは `area_list` に出ず、`area_get` もNot foundになる。Notionの「アーカイブ」は判定に使わない（ゴミ箱に入っていなければAreaとして扱う）。
+
+#### 目次テンプレート
+
+Areaのページには関連情報へのリンクを書く。AI Foundationで辿れる参照先はFoundation IDで書くと、LLMが対応Toolでそのまま読める（`obsidian:…` → `knowledge_get`、`github:<owner>/<repository>` → `project_get`）。対応Toolのない参照先（Notionの他ページ、Google Drive、Web）はURLやNotionのリンク・mentionで書けば、リンクとして提示される。
+
+```markdown
+# 食事管理
+
+## 記録
+- 食事記録（Notionの子ページ・リンク・mention）
+
+## Knowledge
+- obsidian:Knowledge/栄養の基本.md
+
+## Project
+- github:<owner>/<repository>
+
+## Task
+- Todoistの「食事」ラベル
+```
+
+#### 取得範囲（MVP）
+
+`area_get` の `content` はページ本文をMarkdown相当のテキストにしたもの。
+
+- 変換するBlock: 見出し（H1〜H4）・段落・箇条書き・番号付きリスト・To-do・トグル・引用・コールアウト・列・区切り線・コード・子ページ / 子Database / ページへのリンク（リンクのみ）・ブックマーク / 埋め込み / リンクプレビュー。文字の装飾は無視し、リンク・mentionは `[テキスト](URL)` にする
+- ネストは**3階層まで**取得する。それより深い内容は `[nested blocks not retrieved: depth limit 3]` と表示する
+- 表・画像・ファイル・同期ブロック等の非対応Blockは `[unsupported Notion block: <type>]` と表示する（子を持つ場合は `…; its nested blocks were not retrieved`）
+- 子ページ・リンク先の中身は取得しない
+
+これらの表示がある箇所は取得していない内容があるという意味で、Notionで直接開けば確認できる（`external_ref`）。
+
+#### Troubleshooting
+
+- `Configuration error: sources.area.notion.parent_page_id is not set`: `config.local.yaml` に `sources.area.notion.parent_page_id` を設定する
+- `Configuration error: Notion page … (sources.area.notion.parent_page_id) was not found, is in the trash or is not shared …`: ページIDの誤り、`Areas` がゴミ箱にある、またはIntegrationが `Areas` に追加されていない
 
 ## Credentials
 
@@ -262,7 +318,7 @@ src/
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
 ├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/, github/）
-├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts, area.ts）
 ├─ shared/       Timezone計算などの共通処理
 ├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
@@ -298,5 +354,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Phase 4 Implementation Plan](docs/plans/phase-4-implementation-plan.md)
 - [Phase 5 Design Issue](docs/specs/phase-5-project.md)
 - [Phase 5 Implementation Plan](docs/plans/phase-5-implementation-plan.md)
+- [Areas MVP Design](docs/specs/areas.md)
+- [Areas MVP Implementation Plan](docs/plans/areas-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

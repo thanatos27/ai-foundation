@@ -1,6 +1,6 @@
 # Areas MVP — Implementation Plan
 
-- Status: **rev.2（Plan Review反映済み・User承認待ち）**
+- Status: **rev.2（Plan Review完了・User承認済み。実装済み: §23）**
 - 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #17 レビュー反映）
 - 対象: [Issue #13 MVP: Areas管理（Projectsと共通化した目次ドキュメント方式）](https://github.com/thanatos27/ai-foundation/issues/13)（本文 + コメント「詳細設計 v0.1」「Areas MVP 詳細設計 v0.2」。**v0.2を正**とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 5 Design Issue](../specs/phase-5-project.md), [Phase 5 Implementation Plan](phase-5-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -687,3 +687,42 @@ PR #17 のPlan ReviewでQ1〜Q10はすべて **提案どおり採用**（rev.2�
 | 2. 子を持つ非対応Blockの注記で内容未取得を示す | §11.4 に `…; its nested blocks were not retrieved` の注記を追加。深さ上限の注記も「not retrieved」に統一。§16.4 にTestを追加 |
 | 3. 実APIテストの前提（子ページ最低1件）とIDをCommitしないことをREADMEに明記 | §17（README）、§18.1 に反映 |
 | 4. title Property名が任意になり得ることを踏まえて実装・テスト | §10.2 でProperty名ではなく `type === 'title'` で探すと明記。§16.4 のTest、§18.1 の実レスポンス確認を追加 |
+
+---
+
+## 23. 実装・Integration Verificationで確定した事項
+
+実装Branch: `feat/areas`（Base: `main` の `6caa089`、PR #17 Merge後）。
+
+### 23.1 Verification結果（2026-10-24）
+
+| 項目 | 結果 |
+|---|---|
+| `npm run typecheck` | 成功 |
+| `npm test` | 成功（45 files / 1065 passed / 4 skipped。既存の `project_*` / `collection_*` のTestは無変更で成功） |
+| `npm run build` | 成功 |
+| Integration（`tests/integration/notion-area.integration.test.ts`、Read-only） | 6件成功。`area_list` が1件以上、各idの `area_get` が一覧と同じ `area` を返す、`external_ref` の形式、title Propertyが1つで `parent.type = page_id`、部分一致、Collection PageとUUIDの不存在が `NotFoundError` |
+| 実データの確認 | `Areas` 直下の子ページ1件が一覧・取得できた。本文は空のため `content` は `''` |
+| ゴミ箱（実装前確認、Q7） | §21 Q7のとおり |
+
+### 23.2 未実施（PR後・Implementation Review前後に実施）
+
+- §18.2 手動Verificationのうち、列・トグル・孫ページの除外と、ネストした目次・mention・非対応Blockを含む `content` の目視確認（目次を書いたAreaの用意が必要）
+- §19 LLM Client Verification（MCP Serverを本Branchのコードで再起動してから行う）
+
+### 23.3 Plan外の変更・Planからの細部の変更（Implementation Reviewで確認してほしい点）
+
+| 箇所 | 内容 |
+|---|---|
+| `notion/id.ts` | `parseNotionPageId(id, from)` は `from`（有効なIDを返すTool名）だけを引数にした（Planの `{ kind, from }` から簡略化）。`compactNotionId` を追加。`mapping.ts` は `sameNotionId` をre-exportし、`COLLECTION_ID_PREFIX` を残して既存importを維持 |
+| `area-content.ts` | 空の段落は出力しない。本文中の `in_trash` のBlockは出力しない。`link_preview` はcaptionがないのでURLをそのまま表示。複数行テキストの2行目以降はリストのテキスト位置にindent（コードは自身のindentを維持） |
+| 親ページのError Message | 「not found, is in the trash or is not shared」として、ゴミ箱も含めた |
+| `tests/connectors/notion/fake-client.ts` | `seedPlainPage`（通常ページ。親がページなら `child_page` Blockも追加し、ゴミ箱のページは親のBlockに出さない）、`appendBlocks`（Block tree）、`childBlocks` と `blocks.children.list`（固定page sizeのPagination）を追加 |
+| `README.md` | Source of Truth表にArea（Notion）の行を追加 |
+| `config.local.yaml`（Git管理外） | 末尾のコメントだった `parent_page_id` を `sources.area.notion.parent_page_id` として設定（Integration Test用） |
+
+### 23.4 Implementation Review（PR #18、Codex）
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] `tests/config/schema.test.ts` の `PARENT_ID`（ハイフン付き・URL形式を含む）が実際の `Areas` 親ページIDと一致する（§17「実際のページIDをTest・ドキュメントに書かずCommitしない」に反する） | 架空のfixture IDへ置き換えた。同様に実ページ（Q7確認用のゴミ箱ページ）のIDを使っていた `tests/connectors/notion/area-content.test.ts` / `id.test.ts`、`tests/domain/area-resource.test.ts`、`tests/tools/area.test.ts` も架空のIDへ統一した。`config.local.yaml` の他の個人用の値（Data Source ID・Calendar ID・Vault Path）がTrack対象に含まれないことも確認した |

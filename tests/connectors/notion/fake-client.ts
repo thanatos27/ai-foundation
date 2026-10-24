@@ -19,7 +19,8 @@ type Method =
   | 'pages.create'
   | 'pages.retrieve'
   | 'pages.update'
-  | 'blocks.children.append';
+  | 'blocks.children.append'
+  | 'blocks.children.list';
 
 type Args = Record<string, any>;
 
@@ -49,6 +50,35 @@ export interface PageSeed {
   lastEdited?: number;
 }
 
+/** A plain page (not a data source row), e.g. the Areas parent page or an area. */
+export interface PlainPageSeed {
+  id?: string;
+  title?: string;
+  /** Name of the title property; Notion uses `title` for plain pages. */
+  titleProperty?: string;
+  /** Parent page; omitted for a workspace-level page. */
+  parentPageId?: string;
+  /** Parent block (a column, toggle, ...) instead of a page. */
+  parentBlockId?: string;
+  inTrash?: boolean;
+  isArchived?: boolean;
+}
+
+export interface BlockSeed {
+  id?: string;
+  type: string;
+  /** The type-specific payload, e.g. `{ rich_text: [...] }` or `{ title: 'Meals' }`. */
+  content?: Record<string, unknown>;
+  inTrash?: boolean;
+  /** Nested blocks; `has_children` follows from them. */
+  children?: BlockSeed[];
+}
+
+/** A rich text item as Notion returns it. */
+export function richTextItem(text: string, href: string | null = null) {
+  return { type: 'text', text: { content: text, link: href ? { url: href } : null }, plain_text: text, href, annotations: {} };
+}
+
 const richTextResponse = (text: string) =>
   text === '' ? [] : [{ type: 'text', text: { content: text, link: null }, plain_text: text, href: null }];
 
@@ -68,6 +98,8 @@ export class FakeNotion {
   readonly storedPages = new Map<string, PageObjectResponse>();
   /** Page ID → its paragraphs, in order. */
   readonly storedBlocks = new Map<string, { type: string; text: string }[]>();
+  /** Block or page ID → its child blocks as `blocks.children.list` returns them. */
+  readonly childBlocks = new Map<string, Record<string, unknown>[]>();
   /** Errors to throw, per method, consumed in order. */
   readonly failures = new Map<Method, Error[]>();
   /** Maximum results per query response, to exercise pagination. */
@@ -97,6 +129,55 @@ export class FakeNotion {
     this.storedPages.set(id, this.pageObject(id, properties, seed));
     this.storedBlocks.set(id, []);
     return id;
+  }
+
+  /** Adds a plain page and, when its parent is a page, the `child_page` block for it. Returns its ID. */
+  seedPlainPage(seed: PlainPageSeed = {}): string {
+    const id = seed.id ?? this.nextId();
+    const title = seed.title ?? 'Seeded';
+    const parent = seed.parentPageId
+      ? { type: 'page_id', page_id: seed.parentPageId }
+      : seed.parentBlockId
+        ? { type: 'block_id', block_id: seed.parentBlockId }
+        : { type: 'workspace', workspace: true };
+    this.storedPages.set(id, {
+      object: 'page',
+      id,
+      created_time: this.tick(),
+      last_edited_time: this.tick(),
+      in_trash: seed.inTrash ?? false,
+      is_archived: seed.isArchived ?? false,
+      url: `https://app.notion.com/p/${id.replaceAll('-', '')}`,
+      parent,
+      properties: { [seed.titleProperty ?? 'title']: { id: 'title', type: 'title', title: title === '' ? [] : [richTextItem(title)] } },
+    } as unknown as PageObjectResponse);
+    this.childBlocks.set(id, this.childBlocks.get(id) ?? []);
+    // Like Notion, a page in the trash no longer appears among its parent's blocks.
+    const parentId = seed.parentPageId ?? seed.parentBlockId;
+    if (parentId && !seed.inTrash) {
+      this.appendBlocks(parentId, [{ id, type: 'child_page', content: { title } }]);
+    }
+    return id;
+  }
+
+  /** Adds blocks (with their nested blocks) to the end of a page or block. Returns their IDs. */
+  appendBlocks(parentId: string, seeds: BlockSeed[]): string[] {
+    const list = this.childBlocks.get(parentId) ?? [];
+    this.childBlocks.set(parentId, list);
+    return seeds.map((seed) => {
+      const id = seed.id ?? this.nextId();
+      list.push({
+        object: 'block',
+        id,
+        type: seed.type,
+        [seed.type]: seed.content ?? {},
+        has_children: (seed.children?.length ?? 0) > 0 || (seed.type === 'child_page' && this.childBlocks.has(id)),
+        in_trash: seed.inTrash ?? false,
+        parent: { type: 'page_id', page_id: parentId },
+      });
+      if (seed.children) this.appendBlocks(id, seed.children);
+      return id;
+    });
   }
 
   private readonly dataSources: NotionClient['dataSources'] = {
@@ -167,6 +248,24 @@ export class FakeNotion {
         this.findPage(args.block_id);
         this.storedBlocks.get(this.pageKey(args.block_id)!)!.push(...args.children.map(blockText));
         return { object: 'list', results: [] };
+      }) as any,
+
+      list: (async (args: Args) => {
+        this.record('blocks.children.list', args);
+        const key = [...this.childBlocks.keys()].find((id) => sameId(id, args.block_id));
+        if (!key) throw apiError(404, APIErrorCode.ObjectNotFound);
+        const all = this.childBlocks.get(key)!;
+        const start = args.start_cursor ? Number(args.start_cursor) : 0;
+        const size = Math.min(args.page_size ?? 100, this.pageSize);
+        const hasMore = start + size < all.length;
+        return {
+          object: 'list',
+          type: 'block',
+          block: {},
+          results: structuredClone(all.slice(start, start + size)),
+          has_more: hasMore,
+          next_cursor: hasMore ? String(start + size) : null,
+        };
       }) as any,
     },
   };

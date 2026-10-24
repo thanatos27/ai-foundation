@@ -4,6 +4,7 @@ import { lazyGitHubClient } from './github/client.js';
 import { GitHubProjectConnector } from './github/connector.js';
 import { lazyCalendarApi } from './google-calendar/client.js';
 import { GoogleCalendarScheduleConnector } from './google-calendar/connector.js';
+import { NotionAreaConnector } from './notion/area-connector.js';
 import { lazyNotionClient } from './notion/client.js';
 import { NotionCollectionConnector } from './notion/connector.js';
 import { ObsidianKnowledgeConnector } from './obsidian/connector.js';
@@ -28,6 +29,8 @@ function knowledgeConnector(config: Config): ObsidianKnowledgeConnector {
  */
 export function createConnectors(config: Config, credentials: CredentialProvider): Connectors {
   const timeZone = config.defaults.timezone;
+  // One Notion client for the collection and the areas: same token, same workspace.
+  const notion = lazyNotionClient(credentials);
   return {
     task: new TodoistTaskConnector({ client: lazyTodoistClient(credentials), timeZone }),
     schedule: new GoogleCalendarScheduleConnector({
@@ -36,10 +39,11 @@ export function createConnectors(config: Config, credentials: CredentialProvider
       timeZone,
     }),
     collection: new NotionCollectionConnector({
-      client: lazyNotionClient(credentials),
+      client: notion,
       dataSourceId: config.sources.collection.data_source_id,
     }),
     knowledge: knowledgeConnector(config),
     project: new GitHubProjectConnector({ client: lazyGitHubClient(credentials) }),
+    area: new NotionAreaConnector({ client: notion, parentPageId: config.sources.area?.notion?.parent_page_id }),
   };
 }

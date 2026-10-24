@@ -48,11 +48,13 @@ describe('createServer', () => {
     expect(client.getInstructions()).toBe(INSTRUCTIONS);
   });
 
-  it('lists the task, schedule, collection, knowledge and project tools', async () => {
+  it('lists the task, schedule, collection, knowledge, project and area tools', async () => {
     const client = await connect(createServer(context));
     expect(client.getServerCapabilities()?.tools).toBeDefined();
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'area_get',
+      'area_list',
       'collection_create',
       'collection_search',
       'collection_update',

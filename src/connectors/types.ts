@@ -1,5 +1,8 @@
 import type {
   Area,
+  AreaGetResult,
+  AreaListFilter,
+  AreaResource,
   CollectionCreateInput,
   CollectionItem,
   CollectionSearchFilter,
@@ -84,6 +87,20 @@ export interface ProjectConnector {
   get(id: string): Promise<ProjectGetResult>;
 }
 
+/**
+ * Source of Truth: Notion. Read-only: the areas are the child pages directly under the configured
+ * parent page, discovered from Notion on every call.
+ */
+export interface AreaConnector {
+  /** Every area matching `filter`, sorted by title (ignoring case), then id. */
+  list(filter: AreaListFilter): Promise<AreaResource[]>;
+  /**
+   * The area with this exact id and its table of contents. Only areas that `list` can return are
+   * available (the same boundary); others are not found. Linked pages are never fetched.
+   */
+  get(id: string): Promise<AreaGetResult>;
+}
+
 /** Connectors available to tools. A missing entry means the provider is not wired. */
 export interface Connectors {
   task?: TaskConnector;
@@ -91,4 +108,5 @@ export interface Connectors {
   collection?: CollectionConnector;
   knowledge?: KnowledgeConnector;
   project?: ProjectConnector;
+  area?: AreaConnector;
 }

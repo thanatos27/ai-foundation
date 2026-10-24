@@ -195,5 +195,53 @@ describe('ConfigSchema', () => {
       const schedule = { ...config.sources.schedule, refresh_token: 'xxxx' };
       expect(issuePaths({ ...config, sources: { ...config.sources, schedule } })).toEqual(['sources.schedule']);
     });
+
+    it('rejects an area list under sources.area', () => {
+      const config = validConfig();
+      const area = { provider: 'notion', notion: { parent_page_id: PARENT_ID }, areas: ['Meals'] };
+      expect(issuePaths({ ...config, sources: { ...config.sources, area } })).toEqual(['sources.area']);
+    });
+  });
+
+  describe('sources.area', () => {
+    const withArea = (area: unknown) => {
+      const config = validConfig();
+      return { ...config, sources: { ...config.sources, area } };
+    };
+
+    it('is optional, so configs written before areas still load', () => {
+      expect(ConfigSchema.safeParse(validConfig()).success).toBe(true);
+    });
+
+    it('accepts the provider alone (the parent page is checked when an area tool is called)', () => {
+      expect(ConfigSchema.safeParse(withArea({ provider: 'notion' })).success).toBe(true);
+      expect(ConfigSchema.safeParse(withArea({ provider: 'notion', notion: {} })).success).toBe(true);
+    });
+
+    it.each([PARENT_ID, '1f2e3d4c-5b6a-4798-8796-a5b4c3d2e1f0', PARENT_ID.toUpperCase()])(
+      'accepts the parent page id %s',
+      (id) => {
+        const parsed = ConfigSchema.parse(withArea({ provider: 'notion', notion: { parent_page_id: id } }));
+        expect(parsed.sources.area?.notion?.parent_page_id).toBe(id);
+      },
+    );
+
+    it.each(['', 'Areas', `${PARENT_ID}0`, 'https://app.notion.com/p/Areas-1f2e3d4c5b6a47988796a5b4c3d2e1f0'])(
+      'rejects the parent page id %j',
+      (id) => {
+        expect(issuePaths(withArea({ provider: 'notion', notion: { parent_page_id: id } }))).toEqual([
+          'sources.area.notion.parent_page_id',
+        ]);
+      },
+    );
+
+    it('rejects another provider and unknown keys', () => {
+      expect(issuePaths(withArea({ provider: 'google_drive' }))).toEqual(['sources.area.provider']);
+      expect(issuePaths(withArea({ provider: 'notion', notion: { parent_page_id: PARENT_ID, token: 'x' } }))).toEqual([
+        'sources.area.notion',
+      ]);
+    });
   });
 });
+
+const PARENT_ID = '1f2e3d4c5b6a47988796a5b4c3d2e1f0';

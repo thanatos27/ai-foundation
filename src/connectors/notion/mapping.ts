@@ -6,6 +6,7 @@ import {
   CollectionTypeSchema,
 } from '../../domain/index.js';
 import { InputValidationError } from '../../errors.js';
+import { NOTION_ID_PREFIX, parseNotionPageId } from './id.js';
 import { PROPERTY } from './schema.js';
 
 // Notion request limits (https://developers.notion.com/reference/request-limits).
@@ -18,10 +19,9 @@ export const MULTI_SELECT_LIMIT = 100;
 /** Size of a request body. 500KB, read as 500,000 bytes to stay under either reading of "KB". */
 export const REQUEST_BODY_LIMIT_BYTES = 500_000;
 
-export const COLLECTION_ID_PREFIX = 'notion:';
+export { sameNotionId } from './id.js';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const COMPACT_UUID = /^[0-9a-f]{32}$/i;
+export const COLLECTION_ID_PREFIX = NOTION_ID_PREFIX;
 
 export interface TextRichText {
   type: 'text';
@@ -30,17 +30,7 @@ export interface TextRichText {
 
 /** `notion:<page-id>` → page ID. Accepts the hyphenated UUID and the 32-hex form used in Notion URLs. */
 export function parseCollectionId(id: string): string {
-  const pageId = id.startsWith(COLLECTION_ID_PREFIX) ? id.slice(COLLECTION_ID_PREFIX.length) : undefined;
-  if (!pageId || !(UUID.test(pageId) || COMPACT_UUID.test(pageId))) {
-    throw new InputValidationError(`id must be "${COLLECTION_ID_PREFIX}<page-id>" as returned by collection_search: ${id}`);
-  }
-  return pageId;
-}
-
-/** Compares Notion IDs regardless of hyphens and case. */
-export function sameNotionId(a: string, b: string): boolean {
-  const normalize = (id: string) => id.replaceAll('-', '').toLowerCase();
-  return normalize(a) === normalize(b);
+  return parseNotionPageId(id, 'collection_search');
 }
 
 /**

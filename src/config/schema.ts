@@ -1,6 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
-import { AreaSchema, KnowledgeSourceSchema, ProjectSourceSchema } from '../domain/index.js';
+import { AreaResourceSourceSchema, AreaSchema, KnowledgeSourceSchema, ProjectSourceSchema } from '../domain/index.js';
 
 function isValidTimeZone(timeZone: string): boolean {
   try {
@@ -22,6 +22,13 @@ const VaultRelativeDirSchema = z
   .refine((dir) => !dir.startsWith('/') && !/^[A-Za-z]:/.test(dir), { message: 'must be relative to the vault' })
   .refine((dir) => dir.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'), {
     message: 'must not contain empty, "." or ".." segments',
+  });
+
+/** A Notion page ID: the hyphenated UUID or the 32-hex form used in Notion URLs. */
+const NotionPageIdSchema = z
+  .string()
+  .regex(/^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})$/i, {
+    message: 'must be a Notion page ID (UUID or 32 hex characters)',
   });
 
 /**
@@ -81,6 +88,24 @@ export const ConfigSchema = z.strictObject({
     project: z.strictObject({
       providers: z.array(ProjectSourceSchema).min(1),
     }),
+    /**
+     * PARA areas (not the work / personal `defaults.area`). Optional so that existing local configs
+     * keep working; the area tools return a configuration error without it.
+     */
+    area: z
+      .strictObject({
+        provider: AreaResourceSourceSchema,
+        notion: z
+          .strictObject({
+            /**
+             * The page whose direct child pages are the areas. Not a secret, but personal: keep it in
+             * a local config file. Optional so the server still starts; the area tools need it.
+             */
+            parent_page_id: NotionPageIdSchema.optional(),
+          })
+          .optional(),
+      })
+      .optional(),
   }),
 });
 
