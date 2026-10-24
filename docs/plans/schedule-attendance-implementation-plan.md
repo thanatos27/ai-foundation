@@ -551,3 +551,7 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 修正後: `npm run typecheck` 成功、`npm test` 54 files / 1330 passed / 5 skipped。
 
 - 残る既知の性能特性: 閉じないHTMLコメント（`<!--`）が大量に並ぶ入力は、修正前と同じく長さの二乗に比例する（`<!-- ` × 20,000 で約330ms）。Google Calendar UIでは生成されない入力のため、MVPでは対応しない。
+
+#### Re-review（対象 `c1ad7bf`）
+
+前回の [P2] は解消済み、新たな修正必須事項なし。Codexが対象Commitの判定関数とTest定義で62ケース、追加の6ケース（本文側のフラグ、コメント内、属性値と本文の双方にフラグ等）を独立に確認。残る確認事項は実Google CalendarのFixture検証・手動Verification・LLM Client Verification（§12・§13）。
