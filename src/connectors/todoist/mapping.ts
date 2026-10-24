@@ -73,6 +73,19 @@ export function dueArgs(due: string): { dueDate: string } | { dueDatetime: strin
 /** Update request field that removes the due (the SDK's alias for `"no date"`). */
 export const CLEAR_DUE = { dueString: null } as const;
 
+/** Language of every recurrence AI Foundation sends; rules are written in English. */
+export const RECURRENCE_LANG = 'en';
+
+/** Add / update request fields that set a recurring rule. */
+export function recurrenceArgs(rule: string): { dueString: string; dueLang: string } {
+  return { dueString: rule, dueLang: RECURRENCE_LANG };
+}
+
+/** Todoist due → recurrence: the rule text of a recurring due, else null. */
+export function recurrenceOf(due: TodoistTask['due']): string | null {
+  return due?.isRecurring && due.string ? due.string : null;
+}
+
 const EXPLICIT_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 /**
@@ -88,6 +101,20 @@ export function dueOf(due: TodoistTask['due'], timeZone: string): string | null 
   return formatInTimeZone(instant, zone);
 }
 
+/**
+ * Update request fields that put back `previous`, the due read before a failed change: the same
+ * rule for a recurring due (Todoist may recalculate its next date), the same date / time for a
+ * one-off due, or no due.
+ */
+export function restoreDueArgs(
+  previous: TodoistTask['due'],
+  timeZone: string,
+): typeof CLEAR_DUE | { dueString: string; dueLang: string } | ReturnType<typeof dueArgs> {
+  if (!previous) return CLEAR_DUE;
+  if (previous.isRecurring) return { dueString: previous.string, dueLang: previous.lang ?? RECURRENCE_LANG };
+  return dueArgs(dueOf(previous, timeZone)!);
+}
+
 /** Todoist task → domain task. `status` overrides the label-derived one (e.g. `done`). */
 export function toTask(task: TodoistTask, timeZone: string, status?: Task['status']): Task {
   return {
@@ -101,5 +128,6 @@ export function toTask(task: TodoistTask, timeZone: string, status?: Task['statu
     area: labelOf(task.labels, AREA_LABELS) ?? null,
     project_ref: null,
     tags: task.labels.filter((label) => !isReservedTag(label)),
+    recurrence: recurrenceOf(task.due),
   };
 }

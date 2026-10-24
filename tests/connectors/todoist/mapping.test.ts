@@ -4,6 +4,9 @@ import {
   dueOf,
   labelsFor,
   parseTaskId,
+  recurrenceArgs,
+  recurrenceOf,
+  restoreDueArgs,
   toTask,
   updatedLabels,
 } from '../../../src/connectors/todoist/mapping.js';
@@ -144,7 +147,17 @@ describe('toTask', () => {
       area: 'work',
       project_ref: null,
       tags: ['accounting'],
+      recurrence: null,
     });
+  });
+
+  it('maps a recurring due to the next occurrence and the rule', () => {
+    const task = todoistTask({ due: { isRecurring: true, string: 'every monday', date: '2026-10-26', lang: 'en' } });
+    expect(toTask(task, TZ)).toMatchObject({ due: '2026-10-26', recurrence: 'every monday' });
+  });
+
+  it('has no recurrence without a due', () => {
+    expect(toTask(todoistTask({ due: null }), TZ)).toMatchObject({ due: null, recurrence: null });
   });
 
   it('defaults to inbox with no area', () => {
@@ -158,5 +171,55 @@ describe('toTask', () => {
 
   it('lets the caller override the status', () => {
     expect(toTask(todoistTask({ labels: ['af-next'] }), TZ, 'done').status).toBe('done');
+  });
+});
+
+describe('recurrence', () => {
+  it('reads the rule of a recurring due only', () => {
+    expect(recurrenceOf(null)).toBeNull();
+    expect(recurrenceOf({ isRecurring: false, string: '26 Oct', date: '2026-10-26' })).toBeNull();
+    expect(recurrenceOf({ isRecurring: true, string: 'every monday', date: '2026-10-26' })).toBe('every monday');
+    expect(recurrenceOf({ isRecurring: true, string: '毎週月曜', date: '2026-10-26', lang: 'ja' })).toBe('毎週月曜');
+  });
+
+  it('reads a timed recurring due as Todoist returns it (time in date, no datetime)', () => {
+    const due = { isRecurring: true, string: 'every day at 9am', date: '2026-10-25T09:00:00', timezone: null, lang: 'en' };
+    expect(recurrenceOf(due)).toBe('every day at 9am');
+    expect(dueOf(due, TZ)).toBe('2026-10-25T09:00:00+09:00');
+  });
+
+  it('treats a recurring due without rule text as no recurrence', () => {
+    expect(recurrenceOf({ isRecurring: true, string: '', date: '2026-10-26' })).toBeNull();
+  });
+
+  it('sends a rule as an English dueString', () => {
+    expect(recurrenceArgs('every monday')).toEqual({ dueString: 'every monday', dueLang: 'en' });
+  });
+});
+
+describe('restoreDueArgs', () => {
+  it('clears the due when there was none', () => {
+    expect(restoreDueArgs(null, TZ)).toEqual({ dueString: null });
+  });
+
+  it('sets a recurring rule again in its own language', () => {
+    expect(restoreDueArgs({ isRecurring: true, string: '毎日', date: '2026-10-25', lang: 'ja' }, TZ)).toEqual({
+      dueString: '毎日',
+      dueLang: 'ja',
+    });
+    expect(restoreDueArgs({ isRecurring: true, string: 'every day', date: '2026-10-25' }, TZ)).toEqual({
+      dueString: 'every day',
+      dueLang: 'en',
+    });
+  });
+
+  it('puts back a one-off date or time', () => {
+    expect(restoreDueArgs({ isRecurring: false, string: '1 Dec', date: '2026-12-01' }, TZ)).toEqual({
+      dueDate: '2026-12-01',
+    });
+    const fixed = { isRecurring: false, string: '2026-11-20 09:00', date: '2026-11-20T00:00:00Z', timezone: 'Asia/Tokyo' };
+    expect(restoreDueArgs(fixed, TZ)).toEqual({ dueDatetime: '2026-11-20T00:00:00Z' });
+    const floating = { isRecurring: false, string: '20 Nov 18:00', date: '2026-11-20T18:00:00', timezone: null };
+    expect(restoreDueArgs(floating, TZ)).toEqual({ dueDatetime: '2026-11-20T09:00:00Z' });
   });
 });

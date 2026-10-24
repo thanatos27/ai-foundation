@@ -1,6 +1,6 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.3（Plan承認済み。実装前Probe実施・Probeレビュー反映済み: §17 / §18。本実装は未着手）**
+- Status: **rev.3（Plan承認済み。実装済み: §19。Implementation Review待ち）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -680,3 +680,28 @@ User判断が必要なもの（承認済みPlanからの変更になるため）
 
 - **提案A（P6）: `recurrence` を送った呼び出しの400を `InputValidationError` にする。** Todoistの400は `Bad Request` しか返さず、§16 Q6のままだとAI Clientには `Todoist API error: HTTP 400: …Bad Request` しか届かず、書式の誤りだと判断しにくい。rev.2で `task_update` の `recurrence` は単独操作になったため、その呼び出しの400は実質的に規則の解釈失敗に限られる。`task_create` でも、title / Labelは事前にDomainで検証済み。**案**: `recurrence` を送った `addTask` / `updateTask` の400に限り `InputValidationError: Todoist could not parse recurrence "<rule>" (HTTP 400). Use an English rule such as "every monday".` にする（`cause` に元のErrorを保持）。それ以外の400は従来どおり `ProviderApiError`。
 - **提案B（P8 / P8b）: 繰り返し規則の復元に `starting <date>` を使う。** §7.4の復元（受理されない文字列で `task_update` した場合）は、現Planでは元の `string` を送るだけなので次回日付がずれる（P8: 10/26 → 11/02）。**案**: `restoreDueArgs` で、元の `lang` が `en`（または未設定）なら `"<string> starting <date の日付部分>"` を送り、次回日付まで完全に戻す。日本語など英語以外の規則は `starting` が400になるため、従来どおり元の `string` / `lang` を送り、次回日付が再計算され得ることをMessageで示す（§16 Q5の制約は英語以外の規則だけに縮小する）。なお、元の次回日付が過去（期限切れ）の場合に `starting <過去日>` がどう解釈されるかは未確認で、実装時のIntegration Testで確認する。
+
+---
+
+## 19. 実装で確定した事項
+
+### 19.1 Verification結果（2026-10-25）
+
+| 項目 | 結果 |
+|---|---|
+| `npm run typecheck` / `npm run build` | 成功 |
+| `npm test` | 54 files、1399 passed / 5 skipped（skipは本Issue以前からのもの） |
+| Integration Test（`todoist-recurrence.integration.test.ts` ＋既存 `todoist.integration.test.ts`、実Todoist） | 2 files、9 passed。終了後、Inboxに `[af-it` / `[af-probe` で始まるTaskが残っていないことを確認（0件） |
+| 既存Task系Test | 無変更で成功。変更したのは §11.1の例外（`toTask` の `toEqual` に `recurrence: null` を追加）だけ |
+| `docs/specs/mvp-v0.1.md` | 差分なし |
+| 手動Verification（§12.2）・LLM Client Verification（§13） | 未実施。Implementation Review後に実施して記録する |
+
+### 19.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- **復元後のMessage**: 繰り返しの期限を戻して次回期限が変わった場合の文末を `Its previous rule "<string>" was set again, and Todoist recalculated the next due (now <次回期限>).` とした（§7.4の案の「次回日付」を具体的な値で示す形）。次回期限が変わらなかった場合はこの文を付けない。
+- **ロールバックの確認**（§7.2）: `deleteTask` が `true` 以外を返すか例外を投げた場合、`getTask` の404だけを削除済みとみなす。残存の確認には `toFoundationError` を通さず `TodoistRequestError` の404を直接見る（Task IDの `NotFoundError` 変換を経由させないため）。
+- **400の変換**（§7.2 / §7.4）: `recurrenceRequestError` をConnector内の関数として追加し、`recurrence` を送った `addTask` / `updateTask` の `catch` でだけ使う。`toFoundationError` は変更していない。`recurrence: null`（`CLEAR_DUE`）の更新は規則を送らないため、従来どおり `toFoundationError` を使う。
+- **`update` のLabel送信条件**: `getTask` を `due` / `recurrence` 指定時にも呼ぶようになったため、`labels` を送る条件を「`current` がある」から「status / area / tags を変える かつ `current` がある」に変えた（`due` だけの更新でLabelを送らない。既存Testで確認）。
+- **Tool説明**（§8）: 共通文に `Todoist may return the rule reworded.` を加えた（§18 P2〜P4の正規化）。
+- **Fake**（§11.4）: `dueString` から作る期限の日付は `dueStringDate`（既定 `2026-10-26`）で固定し、`every` / `every!` で始まる文字列だけを繰り返しとして扱う。`deleteResult` で `deleteTask` の戻り値を `false` にできる。
+- **Integration Test**（§12.1）: I11（`recurrence` と他の項目の同時指定）はDomainで拒否されConnectorまで届かないため、Integration Testには含めず、Domain / Tool Test（§11.2 / §11.5）で確認した。Plan外で「`every blah` の作成が `Invalid input`（HTTP 400）になる」ケースを追加した。I3は `{ due }` と `{ due: null, title }` の2通りで確認した。

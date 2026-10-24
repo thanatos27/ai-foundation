@@ -31,6 +31,10 @@ export function todoistTask(overrides: Partial<TodoistTask> = {}): TodoistTask {
 }
 
 export const notFound = () => new TodoistRequestError('Not Found', 404);
+export const badRequest = () => new TodoistRequestError('Bad Request', 400);
+
+/** Date the fake gives a task whose dueString it reads (Todoist computes it from the rule and today). */
+export const FAKE_DUE_STRING_DATE = '2026-10-26';
 
 type Call = { method: string; args: unknown[] };
 
@@ -38,6 +42,8 @@ type Call = { method: string; args: unknown[] };
  * In-memory stand-in for the SDK methods the connector uses. Closing a recurring task advances
  * its due by one day and keeps it open; closing any other task marks it checked, or removes it
  * when `closedTasksDisappear` is set (both behaviours are handled by the connector).
+ * A dueString starting with "every" becomes a recurring due on `dueStringDate`; any other text
+ * becomes a one-off due on that date (as Todoist reads "tomorrow"), and null / "no date" no due.
  */
 export class FakeTodoistApi implements TodoistClient {
   readonly calls: Call[] = [];
@@ -45,6 +51,10 @@ export class FakeTodoistApi implements TodoistClient {
   inboxProjectId = 'inbox-project';
   pageSize = 2;
   closedTasksDisappear = false;
+  /** Next date of any due set from a dueString. */
+  dueStringDate = FAKE_DUE_STRING_DATE;
+  /** What `deleteTask` resolves to when it does not fail. */
+  deleteResult = true;
   /** Thrown by the next call of the named method. */
   failures: Partial<Record<keyof TodoistClient, unknown>> = {};
   private nextId = 100;
@@ -95,7 +105,7 @@ export class FakeTodoistApi implements TodoistClient {
       content: args.content as string,
       labels: (args.labels as string[]) ?? [],
       projectId: (args.projectId as string) ?? this.inboxProjectId,
-      due: dueFromArgs(args),
+      due: this.dueFromArgs(args),
     });
     this.tasks.set(id, task);
     return task;
@@ -109,7 +119,7 @@ export class FakeTodoistApi implements TodoistClient {
       ...task,
       ...(args.content !== undefined ? { content: args.content as string } : {}),
       ...(args.labels !== undefined ? { labels: args.labels as string[] } : {}),
-      ...('dueString' in args || 'dueDate' in args || 'dueDatetime' in args ? { due: dueFromArgs(args) } : {}),
+      ...('dueString' in args || 'dueDate' in args || 'dueDatetime' in args ? { due: this.dueFromArgs(args) } : {}),
     });
     this.tasks.set(id, updated);
     return updated;
@@ -129,9 +139,26 @@ export class FakeTodoistApi implements TodoistClient {
     }
     return true;
   }) as unknown as TodoistClient['closeTask'];
+
+  deleteTask = (async (id: string) => {
+    this.call('deleteTask', id);
+    if (!this.tasks.has(id)) throw notFound();
+    if (!this.deleteResult) return false;
+    this.tasks.delete(id);
+    return true;
+  }) as unknown as TodoistClient['deleteTask'];
+
+  private dueFromArgs(args: Record<string, unknown>): TodoistTask['due'] {
+    if (typeof args.dueString === 'string' && args.dueString !== 'no date') {
+      const lang = (args.dueLang as string | undefined) ?? 'en';
+      const isRecurring = /^every!?\s/i.test(args.dueString);
+      return { isRecurring, string: args.dueString, date: this.dueStringDate, timezone: null, lang };
+    }
+    return dueFromDateArgs(args);
+  }
 }
 
-function dueFromArgs(args: Record<string, unknown>): TodoistTask['due'] {
+function dueFromDateArgs(args: Record<string, unknown>): TodoistTask['due'] {
   if (typeof args.dueDate === 'string') {
     return { isRecurring: false, string: args.dueDate, date: args.dueDate, datetime: null, timezone: null };
   }

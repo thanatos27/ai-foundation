@@ -36,6 +36,35 @@ describe('task tools', () => {
     expect(byName.task_complete?.outputSchema).toBeDefined();
   });
 
+  it('exposes recurrence on create and update and explains it', async () => {
+    const { tools } = await client.listTools();
+    const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+    const property = (name: string) =>
+      (byName[name]?.inputSchema.properties as Record<string, Record<string, unknown>>).recurrence;
+
+    expect(property('task_create')).toMatchObject({ type: 'string' });
+    expect(JSON.stringify(property('task_update'))).toContain('null');
+    expect(byName.task_create?.description).toContain('every! 3 days');
+    expect(byName.task_update?.description).toContain('recurrence: null removes the rule together with the due');
+    expect(byName.task_update?.description).toContain('recurrence must be the only field');
+    expect(byName.task_update?.description).not.toContain('removes its recurrence');
+    expect(byName.task_list?.description).toContain('recurrence');
+    expect(byName.task_complete?.description).toContain('the same recurrence');
+  });
+
+  it('passes recurrence through unchanged', async () => {
+    const created = await client.callTool({ name: 'task_create', arguments: { title: 'ゴミ出し', recurrence: 'every monday' } });
+    expect(created.isError).toBeFalsy();
+    expect(connector.calls.at(-1)).toEqual({ method: 'create', arg: { title: 'ゴミ出し', recurrence: 'every monday' } });
+    expect(created.structuredContent).toMatchObject({ task: { recurrence: 'every monday' } });
+
+    for (const recurrence of ['every day', null]) {
+      const updated = await client.callTool({ name: 'task_update', arguments: { id: 'todoist:1', recurrence } });
+      expect(updated.isError).toBeFalsy();
+      expect(connector.calls.at(-1)).toEqual({ method: 'update', arg: { id: 'todoist:1', recurrence } });
+    }
+  });
+
   it('creates a task and returns it as structured content and JSON text', async () => {
     const input = { title: '経費精算', status: 'next', due: '2026-10-16', area: 'work', tags: ['accounting'] };
     const result = await client.callTool({ name: 'task_create', arguments: input });
@@ -83,6 +112,12 @@ describe('task tools', () => {
     ['task_list', { status: ['done'] }],
     ['task_update', { id: 'todoist:1' }],
     ['task_update', { id: 'todoist:1', status: 'done' }],
+    ['task_create', { title: 'a', recurrence: '' }],
+    ['task_create', { title: 'a', recurrence: 'every day', due: '2026-11-01' }],
+    ['task_update', { id: 'todoist:1', recurrence: 'every day', due: null }],
+    ['task_update', { id: 'todoist:1', recurrence: 1 }],
+    ['task_update', { id: 'todoist:1', recurrence: 'every day', title: 'a' }],
+    ['task_update', { id: 'todoist:1', recurrence: null, tags: [] }],
     ['task_complete', {}],
   ])('rejects invalid %s input without calling the connector: %j', async (name, args) => {
     const result = await client.callTool({ name, arguments: args });

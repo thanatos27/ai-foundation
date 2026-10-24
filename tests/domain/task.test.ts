@@ -31,6 +31,14 @@ describe('TaskSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts a recurrence rule, null or none', () => {
+    const task = { type: 'task', title: 'a', status: 'next', due: '2026-10-26' };
+    expect(TaskSchema.safeParse({ ...task, recurrence: 'every monday' }).success).toBe(true);
+    expect(TaskSchema.safeParse({ ...task, recurrence: null }).success).toBe(true);
+    expect(TaskSchema.safeParse(task).success).toBe(true);
+    expect(TaskSchema.safeParse({ ...task, recurrence: '' }).success).toBe(false);
+  });
+
   it.each([
     ['unknown status', { type: 'task', title: 'a', status: 'today' }],
     ['empty title', { type: 'task', title: '', status: 'next' }],
@@ -80,6 +88,32 @@ describe('TaskCreateInputSchema', () => {
   it('rejects an unknown area', () => {
     expect(TaskCreateInputSchema.safeParse({ title: 'a', area: 'study' }).success).toBe(false);
   });
+
+  describe('recurrence', () => {
+    it('accepts a rule and keeps it as given', () => {
+      const result = TaskCreateInputSchema.safeParse({ title: 'a', status: 'next', recurrence: ' every monday ' });
+      expect(result.data?.recurrence).toBe(' every monday ');
+    });
+
+    it('accepts due: null with a rule, since it means no due on create', () => {
+      expect(TaskCreateInputSchema.safeParse({ title: 'a', recurrence: 'every day', due: null }).success).toBe(true);
+    });
+
+    it('rejects a due together with a rule', () => {
+      const result = TaskCreateInputSchema.safeParse({ title: 'a', recurrence: 'every day', due: '2026-11-01' });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['recurrence']);
+    });
+
+    it.each([
+      ['an empty rule', ''],
+      ['a blank rule', '   '],
+      ['a number', 123],
+      ['null', null],
+    ])('rejects %s', (_label, recurrence) => {
+      expect(TaskCreateInputSchema.safeParse({ title: 'a', recurrence }).success).toBe(false);
+    });
+  });
 });
 
 describe('TaskListFilterSchema', () => {
@@ -119,6 +153,8 @@ describe('TaskUpdateInputSchema', () => {
     ['due cleared', { due: null }],
     ['area cleared', { area: null }],
     ['tags cleared', { tags: [] }],
+    ['recurrence', { recurrence: 'every day' }],
+    ['recurrence cleared', { recurrence: null }],
   ])('accepts a single field: %s', (_label, fields) => {
     expect(TaskUpdateInputSchema.safeParse({ id: 'todoist:1', ...fields }).success).toBe(true);
   });
@@ -127,6 +163,27 @@ describe('TaskUpdateInputSchema', () => {
     const result = TaskUpdateInputSchema.safeParse({ id: 'todoist:1' });
     expect(result.success).toBe(false);
     expect(result.error?.issues[0]?.message).toContain('At least one of');
+    expect(result.error?.issues[0]?.message).toContain('recurrence');
+  });
+
+  it.each([
+    ['due', { due: '2026-11-01' }],
+    ['due cleared', { due: null }],
+    ['title', { title: 'a' }],
+    ['status', { status: 'next' }],
+    ['area cleared', { area: null }],
+    ['tags cleared', { tags: [] }],
+  ])('rejects recurrence together with %s', (_label, fields) => {
+    for (const recurrence of ['every day', null]) {
+      const result = TaskUpdateInputSchema.safeParse({ id: 'todoist:1', recurrence, ...fields });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(['recurrence']);
+      expect(result.error?.issues[0]?.message).toContain('on its own');
+    }
+  });
+
+  it('still accepts due together with other fields', () => {
+    expect(TaskUpdateInputSchema.safeParse({ id: 'todoist:1', due: '2026-11-01', title: 'a', status: 'next' }).success).toBe(true);
   });
 
   it.each([
@@ -135,6 +192,9 @@ describe('TaskUpdateInputSchema', () => {
     ['missing id', { title: 'a' }],
     ['a reserved tag', { id: 'todoist:1', tags: ['af-area-work'] }],
     ['an unknown key', { id: 'todoist:1', title: 'a', project_ref: 'x' }],
+    ['an empty recurrence', { id: 'todoist:1', recurrence: '' }],
+    ['a blank recurrence', { id: 'todoist:1', recurrence: '  ' }],
+    ['a non-string recurrence', { id: 'todoist:1', recurrence: true }],
   ])('rejects %s', (_label, input) => {
     expect(TaskUpdateInputSchema.safeParse(input).success).toBe(false);
   });

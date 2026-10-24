@@ -18,14 +18,14 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）、および Google Calendar参加済みフラグ（[Issue #15](https://github.com/thanatos27/ai-foundation/issues/15)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）、Google Calendar参加済みフラグ（[Issue #15](https://github.com/thanatos27/ai-foundation/issues/15)）、および繰り返しタスク（[Issue #11](https://github.com/thanatos27/ai-foundation/issues/11)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
-| `task_create` | Todoist InboxへTaskを作成（title / status / due / area / tags） |
-| `task_list` | Inbox内の未完了Taskを取得（status / area / due_before / due_after / tagsでFilter） |
-| `task_update` | `todoist:<id>` を指定して部分更新 |
-| `task_complete` | `todoist:<id>` を指定して完了 |
+| `task_create` | Todoist InboxへTaskを作成（title / status / due / area / tags / recurrence） |
+| `task_list` | Inbox内の未完了Taskを取得（status / area / due_before / due_after / tagsでFilter）。各Taskに繰り返し規則 `recurrence` が付く |
+| `task_update` | `todoist:<id>` を指定して部分更新。`recurrence` で繰り返し規則を変更、`recurrence: null` で規則と期限を解除 |
+| `task_complete` | `todoist:<id>` を指定して完了（繰り返しTaskは次回分へ進む） |
 | `schedule_create` | AI Foundation専用Calendarへ予定を作成（時刻予定 / 終日予定） |
 | `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得（`attended_only: true` で参加済みフラグ `#attended` の付いた予定だけ） |
 | `collection_create` | Notionの専用Collectionへ本・ゲーム・映画等を作成（title / collection_type / status / metadata / tags / note） |
@@ -83,7 +83,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google Calendar参加済みフラグのIntegration Testは読み取りのみで、Google Calendar UIで手動作成したFixtureのある期間を `AI_FOUNDATION_IT_ATTENDANCE_START=YYYY-MM-DD` / `AI_FOUNDATION_IT_ATTENDANCE_END=YYYY-MM-DD` で指定した場合だけFixtureを検証する（Fixtureの内容は [Implementation Plan §12.2](docs/plans/schedule-attendance-implementation-plan.md#122-手動fixturegoogle-calendar-uiで作成検証後にユーザーが削除)）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し（繰り返しタスクのTestはそのRunで作成したTaskだけを操作する）、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google Calendar参加済みフラグのIntegration Testは読み取りのみで、Google Calendar UIで手動作成したFixtureのある期間を `AI_FOUNDATION_IT_ATTENDANCE_START=YYYY-MM-DD` / `AI_FOUNDATION_IT_ATTENDANCE_END=YYYY-MM-DD` で指定した場合だけFixtureを検証する（Fixtureの内容は [Implementation Plan §12.2](docs/plans/schedule-attendance-implementation-plan.md#122-手動fixturegoogle-calendar-uiで作成検証後にユーザーが削除)）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -244,6 +244,19 @@ Areaのページには関連情報へのリンクを書く。AI Foundationで辿
 
 判定規則の詳細と既知の制約は [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md) を参照。
 
+### 繰り返しタスク（Todoist）
+
+`task_create` / `task_update` の `recurrence` に、Todoistの繰り返し規則を英語で書く（例: `every day`、`every monday`、`every weekday at 9am`、`every month on the 25th`）。完了日を基準に次回を決めるときは `every!`（例: `every! 3 days`）を使う。次回の期限はTodoistが計算し、`due` に入る（`recurrence` が規則、`due` が次回の予定日）。Config・Credentialの追加は不要。
+
+- 取得結果の `recurrence` は、Todoistが保持する文字列をそのまま返す。Todoistが書き換えることがある（`after 3 days` → `every! 3 days`、`every month on the 25th` → `every 25th`。`starting …` は規則の文字列に残らない）。Todoistが解釈できれば日本語（`毎週月曜`）でも受理され、日本語のまま返る
+- title / status / area / tags の変更では繰り返しは変わらない。`task_complete` で次回分へ進み、規則は維持される
+- `recurrence` で規則を変えるとTodoistが次回の期限を計算し直す。時刻は、規則に含めない限り現在の時刻が引き継がれる（変えるときは `every day at 7am` のように書く）。`recurrence` の変更・解除は、他の項目と同じ `task_update` では指定できない
+- `recurrence: null` は規則と期限の両方を消す。繰り返しTaskの `due` を変更・解除しようとすると、繰り返しが消えるため何も変えずにErrorになる。次回1回分だけの延期はTodoistで直接行う
+- Todoistが繰り返しとして解釈しない文字列（`tomorrow` など）を指定すると、作成時はTaskを作らず、更新時は元に戻してErrorを返す。繰り返しの期限を元に戻した場合、次回の期限はTodoistが計算し直すことがある。削除・復元自体に失敗したときだけ、残った状態とTask IDをErrorで示す（外部APIのため完全な原子性はない）
+- 曜日・時刻・完了日はTodoistアカウントのtimezoneで解釈される（`defaults.timezone` と同じにしておく）
+
+詳細と既知の制約は [繰り返しタスク Design](docs/specs/task-recurrence.md) を参照。
+
 ## Credentials
 
 認証情報は環境変数で渡す。`config.yaml` には書けない（未知のKeyとして起動時にErrorになる）。変数名は [.env.example](.env.example) を参照。
@@ -400,5 +413,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Life Log MVP Implementation Plan](docs/plans/lifelog-implementation-plan.md)
 - [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md)
 - [Google Calendar参加済みフラグ Implementation Plan](docs/plans/schedule-attendance-implementation-plan.md)
+- [繰り返しタスク Design](docs/specs/task-recurrence.md)
+- [繰り返しタスク Implementation Plan](docs/plans/task-recurrence-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)
