@@ -370,7 +370,7 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 | Test | 内容 |
 |---|---|
 | 不変条件（常に実行） | 期間 `daysFromToday(-30)`〜`daysFromToday(30)` で `list({start,end})` と `list({start,end,attended_only:true})` を取得し、(1) `attended_only:true` の結果が全件結果の部分列である（同じidの要素は `toEqual`、相対順序も同じ）、(2) `attended_only:false` の結果が省略時と `toEqual`、を確認する。件数をstderrへ出す（タイトル・説明欄は出さない） |
-| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_START` / `AI_FOUNDATION_IT_ATTENDANCE_END` 設定時のみ。rev.3） | §12.2のFixtureがある期間で、省略時と `attended_only:true` を取得する。期待値は日付ではなく**Fixtureごとの規則**（全回返る / 返らない / 1回だけ返る）でTest内に定数で持ち、(1) 全Fixtureが期間内にある（欠けていれば失敗、`3 other calendar` は `1 plain` と別Calendar、`7 daily` は2回以上）、(2) 「全回返る」Fixtureは省略時と同じ要素・同じ順序で返る、(3) 「返らない」Fixtureは返らない、(4) `7 daily` はちょうど1回だけ返る、(5) 終日Fixtureは `YYYY-MM-DD` のまま、を確認する |
+| Fixture（`AI_FOUNDATION_IT_ATTENDANCE_START` / `AI_FOUNDATION_IT_ATTENDANCE_END` 設定時のみ） | §12.2のFixtureがある期間で、省略時と `attended_only:true` を取得する。期待値は日付ではなく**Fixtureごとの規則**（全回返る / 返らない / 1回だけ返る）でTest内に定数で持ち、(1) 全Fixtureが期間内にある（欠けていれば失敗、`3 other calendar` は `1 plain` と別Calendar、`7 daily` は2回以上）、(2) 「全回返る」Fixtureは省略時と同じ要素・同じ順序で返る、(3) 「返らない」Fixtureは返らない、(4) `7 daily` はちょうど1回だけ返る、(5) 終日Fixtureは `YYYY-MM-DD` のまま、を確認する |
 
 - Fixtureの期待値はTest内に定数で持ち、`hasAttendedFlag` を使って期待値を計算しない（判定関数とは独立に確認する）。
 - 既存 `google-calendar.integration.test.ts` は変更しない。
@@ -390,8 +390,6 @@ User承認後、`main` から `feat/schedule-attendance` を作成して実装�
 | `AF-ATT 5 suffix` | WRITABLE | 時刻 | `#attended2` などフラグでない値、または空 | 返らない |
 | `AF-ATT 6 empty` | WRITABLE | 時刻 | （なし） | 返らない |
 | `AF-ATT 7 daily` | WRITABLE | 毎日の繰り返し（期間内に2回以上） | 系列はタグなし。1回だけ「この予定のみ」で説明欄に `#attended` | その1回だけ返る |
-
-> **rev.3（実データに合わせて変更）**: 当初は1日 `D` に集約し、終日は2日間・繰り返しは3回で終了する前提で、期待一覧を日付付きで固定していた。実際に作成されたFixtureは10/16〜10/22に分散し、`4 all-day` は系列の説明欄にタグを付けた毎日の繰り返し、`5 suffix` は説明欄が空だったため、User判断によりFixtureを作り直さず、Testを期間指定・Fixtureごとの規則に変更した。`#attended2` の実データでの確認はAutomated Test（§11.3 / §11.4）で担保する。
 
 - 実行（このファイルだけ）: `AI_FOUNDATION_INTEGRATION=1 AI_FOUNDATION_IT_ATTENDANCE_START=<開始日> AI_FOUNDATION_IT_ATTENDANCE_END=<終了日> npx vitest run --config vitest.integration.config.ts tests/integration/google-calendar-attendance.integration.test.ts`。
 
@@ -559,7 +557,7 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 
 ### 18.4 Fixture Integration Test / 手動Verification（2026-10-24、実Google Calendar、Read-only）
 
-ユーザーがGoogle Calendar UIでFixtureを作成。作成内容が当初の §12.2（1日 `D` に集約）と異なったため、User判断でIntegration TestをFixtureごとの規則による検証に変更した（§12.1 / §12.2 rev.3）。
+ユーザーがGoogle Calendar UIでFixtureを作成。
 
 実際のFixture（期間 2026-10-16〜2026-10-25）:
 
