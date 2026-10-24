@@ -533,7 +533,7 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 | `npm test` | 54 files / 1323 passed / 5 skipped（skipは既存のもの）。既存のSchedule系Test（Domain / Connector / Mapping / Client / Tool）・`server.test.ts`・`e2e/stdio.test.ts` は**無変更で**成功 |
 | Integration Test（§12.1 不変条件、実Google Calendar、Read-only） | 成功（`daysFromToday(-30)`〜`daysFromToday(30)` で、`attended_only:true` が全件結果の部分列、`false` が省略時と同一） |
 | Integration Test（§12.1 Fixture） | 成功（§18.4） |
-| 手動Verification（§12.3） | M1〜M4は成功（§18.4）。M5・M6・LLM Client Verification（§13）は§18.4を参照 |
+| 手動Verification（§12.3）/ LLM Client Verification（§13） | §18.4 / §18.5 |
 
 ### 18.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
 
@@ -585,3 +585,17 @@ Branch `feat/schedule-attendance`（Base: `main` の `1a4ec01`、PR #23 Merge）
 
 - M1〜M4は、MCP Serverを経由せず、本BranchのConnector（`GoogleCalendarScheduleConnector`）とDomain Schemaを読み取りのみのScriptで直接呼んで確認した。
 - `4 all-day`（系列の説明欄にタグ）で、系列に付けたタグが全回に効くことを実データで確認できた（README・仕様書の運用説明どおり）。
+
+### 18.5 LLM Client Verification（2026-10-24、Claude Code、MCP Serverを本Branchの `dist`（`c1ad7bf` 以降のBuild）で再接続）
+
+再接続後の `schedule_list` のTool定義に、更新したdescriptionと `attended_only: { type: 'boolean' }`（`required` は `start` / `end` のまま）が公開されていることを確認した。
+
+| # | 依頼 | 結果 |
+|---|---|---|
+| L1 | 「10/16〜10/22で参加済みにした予定を教えて」 | `schedule_list({start:'2026-10-16', end:'2026-10-22', attended_only:true})` を呼び、9件（`3 other calendar`、`4 all-day` 7回、`1 plain`、`2 bold`）だけが返った。`5` / `6` とテスト用ではない予定は含まれない |
+| L2 | 「10/16〜10/22の予定を教えて」 | `attended_only` なしで呼び、12件（Fixture 11件＋テスト用ではない予定1件）が返った |
+| L3 | 「`AF-ATT 6 empty` には参加しなかった？」 | Tool説明（"an event without the tag is unconfirmed, not \"not attended\""）に従い、「フラグがないため未確認で、不参加とは判断できない」と回答 |
+| L4 | 「`AF-ATT 6 empty` を参加済みにして」 | フラグを書き込むToolがないため `schedule_create` 等は呼ばず、Google Calendarで説明欄に `#attended` を書くよう案内 |
+
+- 制約: L1〜L4は、本実装を行ったのと同じClaude Codeセッションで実施した。Tool定義が実際に公開され、MCP経由で期待どおりに動くことは確認できたが、実装を知らないLLMが自然文から `attended_only` を選ぶかどうかの評価としては限定的。必要に応じて新しいセッションで再確認する。
+- テスト用ではない予定のタイトルは、Public Repositoryのため記録しない。
