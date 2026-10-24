@@ -43,7 +43,12 @@ export function registerScheduleTools(server: McpServer, { config, connectors }:
       description:
         `List events overlapping a period across every Google Calendar the user can read. ` +
         `start / end are "YYYY-MM-DD" (whole days, end inclusive, in ${timeZone}) or ISO 8601 date-times with an offset. ` +
-        `All-day events are returned with "YYYY-MM-DD" start / end, end inclusive.`,
+        `All-day events are returned with "YYYY-MM-DD" start / end, end inclusive. ` +
+        `Set attended_only to true to return only events the user marked as attended by writing the standalone, ` +
+        `case-sensitive tag #attended in the event description in Google Calendar; ` +
+        `an event without the tag is unconfirmed, not "not attended". RSVP responses are not used. ` +
+        `For an attendance history, pass the period yourself, e.g. ` +
+        `{"start":"2026-09-01","end":"2026-09-30","attended_only":true} for events attended in September.`,
       inputSchema: ScheduleListFilterSchema,
       outputSchema: ScheduleListOutputSchema,
       annotations: { readOnlyHint: true, openWorldHint: true },

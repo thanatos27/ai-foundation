@@ -48,11 +48,14 @@ export type ScheduleCreateInput = z.infer<typeof ScheduleCreateInputSchema>;
  * Input of `schedule_list`: events overlapping [start, end]. A date `end` includes that whole day.
  * Dates are resolved in the configured time zone by the connector, which also checks the order
  * when dates and date-times are mixed.
+ * `attended_only: true` keeps only events the user marked as attended in the source
+ * (Google Calendar: `#attended` in the description). Omitted or false: every event.
  */
 export const ScheduleListFilterSchema = z
   .strictObject({
     start: DateOrDateTimeSchema,
     end: DateOrDateTimeSchema,
+    attended_only: z.boolean().optional(),
   })
   .refine((value) => !sameDateKind(value) || endNotBeforeStart(value), END_BEFORE_START);
 export type ScheduleListFilter = z.infer<typeof ScheduleListFilterSchema>;

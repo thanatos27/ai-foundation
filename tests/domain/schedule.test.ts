@@ -97,6 +97,38 @@ describe('ScheduleListFilterSchema', () => {
   ])('rejects %s', (_label, input) => {
     expect(ScheduleListFilterSchema.safeParse(input).success).toBe(false);
   });
+
+  it.each([true, false])('keeps attended_only: %s', (attended_only) => {
+    expect(ScheduleListFilterSchema.parse({ start: '2026-10-12', end: '2026-10-18', attended_only })).toEqual({
+      start: '2026-10-12',
+      end: '2026-10-18',
+      attended_only,
+    });
+  });
+
+  it('adds no attended_only when it is omitted', () => {
+    expect(ScheduleListFilterSchema.parse({ start: '2026-10-12', end: '2026-10-18' })).not.toHaveProperty(
+      'attended_only',
+    );
+  });
+
+  it.each([
+    ['attended_only: null', { attended_only: null }],
+    ['attended_only: "true"', { attended_only: 'true' }],
+    ['attended_only: 1', { attended_only: 1 }],
+    ['an unknown attended key', { attended: true }],
+    ['an unknown attendedOnly key', { attendedOnly: true }],
+  ])('rejects %s', (_label, extra) => {
+    expect(ScheduleListFilterSchema.safeParse({ start: '2026-10-12', end: '2026-10-18', ...extra }).success).toBe(
+      false,
+    );
+  });
+
+  it('still rejects end before start with attended_only', () => {
+    const result = ScheduleListFilterSchema.safeParse({ start: '2026-10-18', end: '2026-10-12', attended_only: true });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path)).toEqual([['end']]);
+  });
 });
 
 describe('normalizeScheduleCreateInput', () => {
