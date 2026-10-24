@@ -1,6 +1,6 @@
 # 複数Calendar・期間イベント・説明欄 — Implementation Plan
 
-- Status: **rev.2（Plan Review rev.1 反映、再Review待ち）**
+- Status: **rev.2（Plan Review rev.2で承認。User承認済み）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #27 Review反映。§19）
 - 対象: [Issue #12](https://github.com/thanatos27/ai-foundation/issues/12)（コメント「MVP方針更新：カレンダーによる分類＋説明欄の汎用利用」と「MVP詳細設計 v0.1（ユーザー承認済み / 2026-10-25）」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Google Calendar参加済みフラグ Design](../specs/schedule-attendance.md)（本Issueで廃止）, [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -619,7 +619,7 @@ User承認後、`main` から `feat/schedule-calendars` を作成して実装す
 | `description: '新\n<b>本文</b>'` | patchに原文 |
 | `description: null` / `location: null` | patchに `null`（P1の表現） |
 | `description` 未指定 | patchにKeyなし |
-| 時刻予定の `start` / `end` 両方 | 両方 `{ dateTime, date: null }` |
+| 時刻予定の `start` / `end` 両方（同じ種類） | 両方 `{ dateTime }`（`date` Keyなし。§8.6「両方・同じ種類」） |
 | 時刻 → 終日（両方指定） | `{ date, dateTime: null }`、endは+1 |
 | 終日 → 時刻（両方指定） | `{ dateTime, date: null }` |
 | `start` だけ（時刻、既存end以前） | patchが `{ start: { dateTime } }` だけ（`end` Keyなし） |
@@ -798,3 +798,7 @@ ChatGPTのPlan Review rev.1は「修正推奨（P2 1件、P3 1件）」。
 |---|---|
 | [P2] §8.6 / §13.5 — 片方だけの日時更新でも、事前に `get` した値で両端点をpatchしており、「未指定Fieldは保持」「指定Fieldだけ変更」と矛盾する。`get`→`patch` 間にUIで反対側が変わると古い値を書き戻す | 種類を変えない片側更新では指定した端点だけを送るよう §8.6を変更（両端点は両方指定時だけ。種類の切替は従来どおり両方指定が必須）。`get` の値は検証にだけ使う。競合で `end < start` になる場合はGoogle Calendarの400 → `ProviderApiError`。§4に前提、§5にProbe P9（片側patchで反対側と `timeZone` が不変か、逆転時の400）を追加し、P9が前提と違う場合は両端点送信へ戻して上書きの可能性を明記する方針とした。§13.4 / §13.5のTest期待値（反対側がpatchに含まれない）、§14.1、Q5 / Q6を更新 |
 | [P3] §6 / §12 / §14 — 設定値は非空文字列なら有効なため、`primary` や誤ったCalendar IDも許可リストに入る。意図したCalendarに結び付いていることの確認手順が必要 | §6.4を新設: `personal` →「AI Foundation」、`events` →「Event Catalog」を、読み取り専用Scriptで `summary` / `accessRole` を取得して確認（手順1）、Integration Testで各別名へ作成して設定したCalendar ID側にだけ存在することを確認（手順2）。記録は別名と `summary` / `accessRole` だけでCalendar IDは書かない。§12 手順2、§14.1（書き込み先の分配）、§14.2 M0、AC1に反映。READMEに「IDは設定画面から写す・`primary` を使わない・設定後に確認する」注意書きを追加（§16.1）。加えて、`primary` はAPIが動的に解決する識別子のため、Config検証C6で拒否する（ID形式の厳密な検証はしない） |
+
+### rev.2 承認（PR #27 Plan Review rev.2）
+
+ChatGPTのPlan Review rev.2で承認（P2 / P3 解消）。軽微な整合確認として、§13.5「時刻予定の `start` / `end` 両方」の期待値を §8.6「両方・同じ種類」の定義（`{ dateTime }`、`date` Keyなし）に揃えた。
