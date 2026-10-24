@@ -816,8 +816,8 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 | `npm run typecheck` | 成功 |
 | `npm test` | 成功（53 files / 1233 passed / 5 skipped。skipはWindowsで開発者モードがないため作れないFile symlinkのTestで、Life Log分の1件を含む。Directory Junctionの境界Testは実行している） |
 | `npm run build` | 成功 |
-| Integration Test（`tests/integration/obsidian-lifelog.integration.test.ts`） | **未実行**。`config.local.yaml` に `sources.lifelog` がなく、実Vaultへ書き込むため、User確認後に検証用Directoryで実行する。既定（`AI_FOUNDATION_INTEGRATION` なし）でskipされることは確認済み |
-| 手動Verification（§17.2）/ LLM Client Verification（§19） | 未実施（Integration Testと合わせて実施する） |
+| Integration Test（`tests/integration/obsidian-lifelog.integration.test.ts`） | 5件成功（実Vault、Userが作成した空の `AI Foundation/LifeLog`）。作成→取得→追記、UTF-8・LF・Frontmatterなし、同日別記事、同名拒否で既存不変、Knowledge IDの拒否・存在しない記事のNotFound、Knowledge Directoryのファイル一覧とmtimeが不変。終了後のLife Log Directoryは空（作成した記事だけを削除）。Knowledgeの既存Integration Test（`obsidian.integration.test.ts`、5件）も同時に実行して成功。既定（`AI_FOUNDATION_INTEGRATION` なし）でskipされることも確認済み |
+| 手動Verification（§17.2）/ LLM Client Verification（§19） | 未実施（MCP Serverを本Branchの `dist` で再接続して実施する） |
 
 ### 23.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
 
