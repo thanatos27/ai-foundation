@@ -1,11 +1,11 @@
 # Areas MVP — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち）**
-- 作成: Coding Agent (Claude Code) / 2026-10-24
+- Status: **rev.2（Plan Review反映済み・User承認待ち）**
+- 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #17 レビュー反映）
 - 対象: [Issue #13 MVP: Areas管理（Projectsと共通化した目次ドキュメント方式）](https://github.com/thanatos27/ai-foundation/issues/13)（本文 + コメント「詳細設計 v0.1」「Areas MVP 詳細設計 v0.2」。**v0.2を正**とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 3 Design Issue](../specs/phase-3-collection.md), [Phase 5 Design Issue](../specs/phase-5-project.md), [Phase 5 Implementation Plan](phase-5-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-仕様に明記がなく本Planで決めた箇所は [§21 懸念点 / 未確定事項](#21-懸念点--未確定事項) にQとしてまとめている。Plan Reviewで判断をお願いしたい。
+仕様に明記がなく本Planで決めた箇所は [§21 懸念点 / 未確定事項](#21-懸念点--未確定事項) にQとしてまとめている。ChatGPTによるPlan Review（PR #17）でQ1〜Q10はすべて提案どおり採用となった。補記の指摘への対応は [§22 Review対応履歴](#22-review対応履歴) を参照。Q7は実装前に実Notion APIで確認する（§14 手順0）。
 
 ---
 
@@ -76,9 +76,12 @@
 | `connectors/index.ts` | `lazyNotionClient` を1つ作りCollectionとAreaで共有、`NotionAreaConnector` を生成 | 配線 |
 | `tools/area.ts`（新規）, `tools/index.ts` | `area_list` / `area_get` | Tool公開 |
 | `tests/server.test.ts`, `tests/e2e/stdio.test.ts` | 公開Tool 15件 → 17件 | Tool公開 |
-| `README.md` | Tool一覧、Areaの登録方法、目次テンプレート | Issue AC |
+| `README.md` | Tool一覧、Areaの登録方法、目次テンプレート、MVPの取得範囲 | Issue AC、Q4 |
+| `instructions.ts` | `Area:` の項を追記（Q6） | LLMがAreaとそのSoTを知るため |
+| `docs/specs/areas.md`（新規） | Issue #13本文 + v0.2を仕様ファイルとして記録（Q6） | 過去Phaseと同じく仕様をRepositoryに残す |
+| `tests/server.test.ts` | Instructions文面のAssertionを更新（Q6） | Q6 |
 
-**変更しないもの**: `src/errors.ts`、`src/domain/common.ts`（`AreaSchema` を含む）、`src/domain/project.ts`、`src/connectors/github/**`、`src/tools/project.ts`、`src/credentials/**`（`NOTION_API_TOKEN` を再利用）、`.env.example`、Collectionの挙動・Message。`src/instructions.ts` はQ6の判断次第。
+**変更しないもの**: `src/errors.ts`（403 Messageを含む、Q8）、`src/domain/common.ts`（`AreaSchema` を含む）、`src/domain/project.ts`、`src/connectors/github/**`、`src/tools/project.ts`、`src/credentials/**`（`NOTION_API_TOKEN` を再利用）、`.env.example`、Collectionの挙動・Message、`docs/specs/mvp-v0.1.md`（破壊的に書き換えない。Q6）。
 
 ---
 
@@ -100,6 +103,7 @@
 | `src/connectors/index.ts` | 変更 | 配線 |
 | `src/tools/area.ts` | 新規 | `area_list` / `area_get` |
 | `src/tools/index.ts` | 変更 | `registerAreaTools` 呼び出し |
+| `src/instructions.ts` | 変更 | `Area:` の項を `Project:` の後に追記（Q6） |
 
 ### 4.2 Tests
 
@@ -122,9 +126,9 @@
 | File | 変更 |
 |---|---|
 | `config.yaml` | §7.2 |
-| `README.md` | Current Phase / Tool一覧、「Areas」節（登録方法・目次テンプレート・Troubleshooting）、Directory Structure |
+| `README.md` | Current Phase / Tool一覧、「Areas」節（登録方法・目次テンプレート・MVPの取得範囲・Troubleshooting）、Directory Structure、Documentation |
 | `docs/plans/areas-implementation-plan.md` | 本Plan。実装後に「実装・Integration Verificationで確定した事項」を追記する |
-| `docs/specs/areas.md` | Q6の判断次第（Issue #13 v0.2を仕様ファイルとして残すか） |
+| `docs/specs/areas.md` | 新規（Q6）。Issue #13本文と詳細設計v0.2（Plan Reviewで確定したQ1〜Q10を含む）を記録する。`mvp-v0.1.md` は書き換えない |
 
 ---
 
@@ -304,10 +308,12 @@ export interface NotionAreaConnectorOptions {
 
 ### 9.3 一覧と取得の境界が一致する理由
 
+**同じ静的なNotion状態に対して** `list` が返す集合と `get` が成功する集合が一致する設計とする。`list` と `get` は別々のAPI呼び出しなので、その間にNotion上でページの移動・削除・共有変更が起これば結果は変わり得る。原子的な一致は保証しない（Snapshotを持たないのはSoT方針どおり）。
+
 - Notionでは、ページAの直下（トップレベル）にある子ページPは、Aの `blocks.children` に `child_page` Block（Block id = P のPage id）として現れ、Pの `parent` は `{ type: 'page_id', page_id: A }` になる。
 - 親ページ内の列（`column`）・トグル・同期Block等の中に置いた子ページは、`parent` が `{ type: 'block_id' }` になり、Aの直下の `children` にも現れない。**両Toolとも対象外**になる（v0.2「子ページを再帰的にArea扱いしない」とも整合）。READMEに「Areaは親ページ直下（列やトグルの外）に置く」と書く。
-- ゴミ箱: 一覧は `child_page.in_trash`、取得は `page.in_trash` で除外する。Notionの「アーカイブ」（`page.is_archived`）の扱いはQ7。
-- Testでは、同じFake上のPage群に対して「`list` が返すid集合」と「`get` が成功するid集合」が一致することを1ケースで確認する（直下 / 列の中 / 孫 / 別親 / ゴミ箱 / Collection Page を混在させる）。
+- ゴミ箱: 一覧は `child_page.in_trash`、取得は `page.in_trash` で除外する。`page.is_archived` は**どちらのToolも判定に使わない**（`get` だけが除外する不整合を作らない。Q7）。
+- Testでは、静的なFake状態に対して「`list` が返すid集合」と「`get` が成功するid集合」が一致することを1ケースで確認する（直下 / 列の中 / 孫 / 別親 / ゴミ箱 / Collection Page を混在させる）。
 
 ### 9.4 query Filter / Sort（`area-connector.ts` 内の純粋関数）
 
@@ -336,10 +342,11 @@ export interface NotionAreaConnectorOptions {
 |---|---|---|
 | `id` | `formatNotionId(block.id)` | `formatNotionId(page.id)` |
 | `type` | `'area'` | `'area'` |
-| `title` | `block.child_page.title` | `title` 型Propertyの `plain_text` を連結 |
+| `title` | `block.child_page.title` | `type === 'title'` のPropertyの `title[].plain_text` を連結（Property名に依存しない） |
 | `source` | `'notion'` | `'notion'` |
 | `external_ref` | `notionPageUrl(block.id)` | `notionPageUrl(page.id)` |
 
+- `get` のタイトルは `page.properties` を名前で引かず、値の `type === 'title'` で探す。通常ページの子ページではProperty名は `title` だが、Notionでは名前が任意になり得るため（Collectionの `Name` のように）名前を固定しない。`title` 型Propertyがない・複数ある場合は `ProviderApiError`。Testでは任意のProperty名、複数のRich text要素の連結、mentionを含むタイトルを扱い、Integration Test（§18.1）で実レスポンスの形と `child_page.title` との一致を確認する。
 - 空タイトル（Notion上の「Untitled」）は `"Untitled"` とする（Q3）。両Toolで同じ扱い。
 - `external_ref` は一覧ではPage本体を取得しないため `page.url` を使えない。同じAreaが両Toolで同じ `external_ref` になるよう、どちらも `notionPageUrl` で組み立てる（Q2）。
 
@@ -396,8 +403,11 @@ Rich text → テキスト:
 | 状況 | 本文に出す注記 |
 |---|---|
 | 非対応Block | `[unsupported Notion block: <type>]`（Block 1つにつき1行。連続する同種は `… x<n>` にまとめる） |
-| 深さ上限で子を取得しなかった | 親Blockの直後に1段深いindentで `[nested blocks not shown]` |
-| 非対応Blockが子を持つ | 子は取得しない（注記1行のみ） |
+| 非対応Blockが子を持つ（`has_children: true`） | 子は取得せず、`[unsupported Notion block: <type>; its nested blocks were not retrieved]` とする（内容が未取得であることを明示する） |
+| 深さ上限で子を取得しなかった | 親Blockの直後に1段深いindentで `[nested blocks not retrieved: depth limit 3]` |
+| `child_page` / `child_database` / `link_to_page` | リンクのみ。中身を取得しないのは仕様どおりなので注記しない（Tool descriptionで「リンク先は取得しない」と明記する） |
+
+いずれの注記も「未取得」であることが分かる文言にし、LLMが本文を全文取得済みと誤認しないようにする。
 
 注記の文言はTool descriptionにも記載し、LLMが「Notionで直接開けば見られる」と案内できるようにする。
 
@@ -439,6 +449,7 @@ return {
 
 ## 14. 実装順序
 
+0. **実装前のQ7確認（Read-only）**: 実Notion APIで、`Areas` 直下の子ページを「アーカイブ」した状態（Notion UIで可能な場合）と「ゴミ箱へ移動」した状態で、`blocks.children.list` の `child_page`（返るか・`in_trash`）と `pages.retrieve` の `in_trash` / `is_archived` を確認する。`list` と `get` の判定がずれる（例: アーカイブ済みが一覧に出ない一方で `pages.retrieve` は `in_trash: false`）場合は、**実装に入る前に報告する**。テスト用ページの準備はUserにお願いする
 1. `domain/area-resource.ts` + Test
 2. `config/schema.ts` + `config.yaml` + Test
 3. `notion/id.ts` 抽出（`mapping.ts` を委譲に変更）→ 既存Collection Testが無変更で通ることを確認
@@ -448,7 +459,7 @@ return {
 7. `connectors/types.ts` / `index.ts`
 8. `tools/area.ts` / `tools/index.ts` + `FakeAreaConnector` + Tool Test
 9. `server.test.ts` / e2e更新、`npm run typecheck` / `npm test`
-10. README
+10. `instructions.ts`、`docs/specs/areas.md`、README
 11. Integration Test・手動Verification・LLM Client Verification（§18、§19）、本Planへ結果を追記
 
 実装Branchは `main` から作成する `feat/areas`。
@@ -485,7 +496,8 @@ return {
 |---|---|
 | 一覧 | 0件 / 複数件、`child_page` 以外（段落・`child_database`・`link_to_page`）の除外、ゴミ箱の除外、Paginationを跨ぐ件数（Fakeのpage sizeを小さくする） |
 | Filter / Sort | 部分一致・大文字小文字無視・0件Hit、タイトル同一時のid順、Pagination中の重複除去 |
-| 取得 | 正常（Areaとcontent）、32hex / 大文字IDで取得しても返すidは正規形、子ページ本文・リンク先を取得しないこと（呼び出し記録） |
+| 取得 | 正常（Areaとcontent）、32hex / 大文字IDで取得しても返すidは正規形、子ページ本文・リンク先を取得しないこと（呼び出し記録）、title PropertyがNotion既定名以外でもタイトルを取れる・title Propertyなし → `ProviderApiError`、`is_archived: true`（`in_trash: false`）のPageは一覧にも取得にも出る |
+| 本文の未取得表示 | 子を持つ非対応Blockの注記、深さ上限の注記 |
 | 境界 | 親外Page、列の中の子ページ、孫ページ、Collection Page、ゴミ箱Page → `NotFoundError`。`list` のid集合 = `get` 成功のid集合 |
 | 親ページ | 未設定 / 404 / ゴミ箱 → `ConfigurationError`（list・get両方） |
 | Error | 401 → `CredentialError`、429 / 500 → `ProviderApiError`、2ページ目で失敗 → 例外（部分結果なし）、本文取得中の404 → `NotFoundError`、Partial block → `ProviderApiError` |
@@ -504,8 +516,9 @@ return {
 - Current Phase / Tool一覧に `area_list` / `area_get` を追加
 - 「Areas」節:
   1. Notionの専用Workspaceに通常ページ `Areas` を作り、Integrationを Connections に追加する（子ページは共有を継承する）
-  2. `Areas` のページIDを `config.local.yaml` の `sources.area.notion.parent_page_id` に設定する
-  3. Areaごとに `Areas` 直下へ子ページを作る（列・トグルの中に置かない、子ページの子はAreaにならない）
+  2. `Areas` のページIDを `config.local.yaml` の `sources.area.notion.parent_page_id` に設定する。**このRepositoryはPublicなので、ページIDは `config.yaml` やTest・ドキュメントに書かずCommitしない**（`config.local.yaml` はgit-ignored）
+  3. Areaごとに `Areas` 直下へ子ページを作る（列・トグルの中に置かない、子ページの子はAreaにならない）。Integration Test（`npm run test:integration`）は、子ページが**最低1件**あることを前提とする
+- MVPの取得範囲（Q4）: `area_get` は対応Block（見出し・段落・リスト・to_do・toggle・quote・callout・列・divider・code・リンク系）を変換し、ネストは深さ3まで取得する。表・画像・ファイル等の非対応Blockと、深さ3を超える内容は取得せず注記を出す。子ページ・リンク先の中身は取得しない
 - 目次テンプレート（例）:
 
   ```markdown
@@ -529,17 +542,18 @@ return {
 
 ### 18.1 Integration Test（`tests/integration/notion-area.integration.test.ts`、手動起動・Read-only）
 
-`AI_FOUNDATION_INTEGRATION=1`、`NOTION_API_TOKEN`、`config.local.yaml` の `parent_page_id` がある場合のみ実行。書き込みはしない。
+`AI_FOUNDATION_INTEGRATION=1`、`NOTION_API_TOKEN`、`config.local.yaml` の `parent_page_id` がある場合のみ実行。書き込みはしない。**前提**: `Areas` 親ページの直下に子ページを最低1件、手動で用意しておく（README §Areas）。親ページID・Area IDはTestに書かず、`config.local.yaml` と `area_list` の結果から得る。
 
 - `area_list` が1件以上を返し、各idで `area_get` が成功する
-- `external_ref`（`https://www.notion.so/<32hex>`）がArea pageを指す形式である
+- `area_list` の `title` と `area_get` の `area.title`（Page Propertyから取得）が一致する。実レスポンスのtitle Propertyの形（§10.2）を確認する
+- `external_ref`（`https://www.notion.so/<32hex>`）がArea pageを指す形式である。手動でブラウザから開けることも確認する（Q2）
 - Collection data source内のPage idで `area_get` → `NotFoundError`
 - 存在しないUUIDで `area_get` → `NotFoundError`
 
 ### 18.2 手動Verification（記録のみ）
 
 - 列の中・トグルの中・孫の子ページが一覧に出ず、`area_get` もNotFoundになる
-- ゴミ箱へ移したAreaが一覧から消え、`area_get` がNotFoundになる。Notionの「アーカイブ」がある場合の挙動（Q7）
+- ゴミ箱へ移したAreaが一覧から消え、`area_get` がNotFoundになる。Notionの「アーカイブ」の挙動（Q7。実装前に §14 手順0 で確認済みの内容を、実装後に再確認する）
 - 目次にネストした箇条書き・リンク・mention・子ページ・非対応Block（画像等）を置き、`content` を目視確認
 
 ---
@@ -576,34 +590,36 @@ Claude Codeから以下を依頼し、Tool選択と出力を記録する。
 
 ## 21. 懸念点 / 未確定事項
 
-### Q1. `sources.area` をOptionalにする
+PR #17 のPlan ReviewでQ1〜Q10はすべて **提案どおり採用**（rev.2）。Q7は実装前に実APIで確認する条件付き。
+
+### Q1. `sources.area` をOptionalにする（採用）
 
 - 提案: `sources.area` ブロック自体をOptionalにする。既存の `config.local.yaml`（`sources.area` なし）でもServerが起動し、Area Toolだけが `ConfigurationError` を返す。
 - 代替: 他の `sources.*` と同様に必須にする（`config.yaml` には追加するが、各自の `config.local.yaml` へ追記しないと起動時にConfigErrorになる）。
 
-### Q2. `external_ref` を `https://www.notion.so/<32hex>` で組み立てる
+### Q2. `external_ref` を `https://www.notion.so/<32hex>` で組み立てる（採用）
 
 - 背景: 一覧では子ページ本体を取得しない（v0.2）ため、`page.url`（現在は `https://app.notion.com/p/<slug>-<id>` 形式）を得られない。
 - 提案: `list` / `get` とも `notionPageUrl(id)` で組み立て、同じAreaの `external_ref` を一致させる。Notionはこの形式を正規URLへRedirectする（Integrationで確認）。
 - 代替: `get` だけ `page.url` を返す（同一Areaで2つのTool結果の `external_ref` が異なる）。
 
-### Q3. 空タイトルを `"Untitled"` にする
+### Q3. 空タイトルを `"Untitled"` にする（採用）
 
 - 提案: Notionの表示に合わせて `"Untitled"` を返す（Domainの `title.min(1)` を満たし、一覧から黙って消えない）。
 - 代替: 空タイトルのAreaを一覧から除外して警告を出す（Collectionの不正Typeと同じ扱い。ただし `get` との境界がずれる）。
 
-### Q4. 本文ネストの深さ上限3と、対応Blockの範囲
+### Q4. 本文ネストの深さ上限3と、対応Blockの範囲（採用）
 
 - 提案: §11.2の表のとおり。`table` は目次に使われ得るが、行の取得と表の整形が必要なためMVPでは非対応（注記のみ）とする。深さ3は「見出し配下の箇条書き → 子項目 → 孫項目」程度を想定。
 - 代替: トップレベルのみ（Request数最小、ネストはすべて注記）/ 深さ無制限（Request数がBlock数に比例）。
 
-### Q5. Notionの Markdown API（`pages.retrieveMarkdown`）を使わない
+### Q5. Notionの Markdown API（`pages.retrieveMarkdown`）を使わない（採用）
 
 - 事実: SDK 5.27 / API `2026-03-11` に `GET /v1/pages/{id}/markdown` があり、ネストを含む本文をNotion形式のMarkdownで1回で返す（`truncated` / `unknown_block_ids` 付き）。
 - 提案: v0.2の確定事項（`blocks.children.list` をWrapperへ追加して変換）に従う。出力形式・省略の注記・巡回しない範囲をAI Foundation側で決めてTestで固定できるため。
 - 代替: Markdown APIで本文を取得する（実装量は大きく減るが、Notion独自タグを含む出力形式とTruncateの挙動がNotion側の仕様に依存する。採用する場合はv0.2の変更になる）。
 
-### Q6. MVP仕様・Instructionsへの反映
+### Q6. MVP仕様・Instructionsへの反映（採用）
 
 - `src/instructions.ts` はMVP §15の文面で、Areaの記載がない。LLMがAreaの存在とSoTを知るため、以下を追記したい。仕様文面の変更になるため確認したい。
 
@@ -614,23 +630,25 @@ Claude Codeから以下を依頼し、Tool選択と出力を記録する。
   ```
 
 - 合わせて、過去Phaseと同様にIssue #13 v0.2を `docs/specs/areas.md` として残し、`mvp-v0.1.md` の将来設計（「Project Status / Area」の記述）からリンクするか。
+- 決定（rev.2）: `instructions.ts` へ上記を追記し、`docs/specs/areas.md` を追加する。`mvp-v0.1.md` は破壊的に書き換えない（リンク追加などの非破壊的な変更に留める）。
 
-### Q7. Notionの「アーカイブ」（`is_archived`）
+### Q7. Notionの「アーカイブ」（`is_archived`）（採用・実装前に実API確認）
 
 - 事実: API `2026-03-11` のPageは `in_trash` と `is_archived` を別に持つ。`child_page` Blockは `in_trash` のみで、一覧ではPage本体を取得しないため `is_archived` を見られない。
 - 提案: 両Toolとも `in_trash` だけで除外し、境界を一致させる。`is_archived` のPageが一覧に出るかはIntegrationで確認し、出る場合は結果をPlanに記録して別途判断する。
 - 代替: `get` で `is_archived` も `NotFoundError` にする（一覧に出るのに取得できない不整合が起こり得る）。
+- 決定（rev.2）: 提案どおり両Toolとも `in_trash` のみで除外し、`get` だけ `is_archived` を除外することはしない。**実装前に** 実Notion APIで挙動を確認し（§14 手順0）、`list` と `get` の判定がずれる場合は実装に入る前に報告する。
 
-### Q8. `restricted_resource`（403）のMessage
+### Q8. `restricted_resource`（403）のMessage（採用）
 
 - 現状のMessageは「read, update and insert content」を要求する（Collection向け）。Areaは読み取りだけだが、同じIntegrationを共有するため、Messageはそのまま使う提案。Area専用の文言にする場合は `toFoundationError` に引数を追加する。
 
-### Q9. 親ページを毎回確認する（Request 1回追加）
+### Q9. 親ページを毎回確認する（Request 1回追加）（採用）
 
 - 提案: `list` / `get` で毎回 `pages.retrieve(parent)` する。親ページがゴミ箱・未共有のときに `ConfigurationError` で原因を示し、`get` だけ成功する不整合を防ぐ。
 - 代替: Collectionの `schemaCheck` のようにProcessごとに1回だけ確認する（親ページの状態変化に追従しない）。
 
-### Q10. Partial block（`isFullBlock` でない要素）をErrorにする
+### Q10. Partial block（`isFullBlock` でない要素）をErrorにする（採用）
 
 - 提案: `blocks.children.list` が種別を持たないBlockを返した場合 `ProviderApiError`。それがAreaかどうか判定できず、黙って捨てると一覧から欠落するため。通常は発生しない想定。
 - 代替: 警告を出して無視する。
@@ -645,4 +663,16 @@ Claude Codeから以下を依頼し、Tool選択と出力を記録する。
 
 ## 22. Review対応履歴
 
-（Plan Review後に追記）
+### rev.2（PR #17 レビュー反映）
+
+判定: 設計方針承認。Q1〜Q10はすべて提案どおり採用（§21）。
+
+| 指摘 | 対応 |
+|---|---|
+| Q4: MVPの取得範囲をREADMEにも明記 | §17 に取得範囲（対応Block・深さ3・非対応と省略の注記）を追加 |
+| Q6: `instructions.ts` へArea追記、`docs/specs/areas.md` 追加、MVP仕様を破壊的に書き換えない | §3、§4.1、§4.3、§14、Q6に反映 |
+| Q7: `in_trash` のみで除外、実APIで確認し齟齬は実装前に報告 | §9.3、§14 手順0（実装前のRead-only確認）、§16.4、§18.2、Q7に反映 |
+| 1. `list` 集合 = `get` 可能集合は原子的に保証できない | §9.3 を「同じ静的なNotion状態で一致する設計」と書き直し、Fake testで固定する旨を明記 |
+| 2. 子を持つ非対応Blockの注記で内容未取得を示す | §11.4 に `…; its nested blocks were not retrieved` の注記を追加。深さ上限の注記も「not retrieved」に統一。§16.4 にTestを追加 |
+| 3. 実APIテストの前提（子ページ最低1件）とIDをCommitしないことをREADMEに明記 | §17（README）、§18.1 に反映 |
+| 4. title Property名が任意になり得ることを踏まえて実装・テスト | §10.2 でProperty名ではなく `type === 'title'` で探すと明記。§16.4 のTest、§18.1 の実レスポンス確認を追加 |
