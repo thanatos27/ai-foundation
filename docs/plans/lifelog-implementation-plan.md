@@ -1,6 +1,6 @@
 # Life Log MVP — Implementation Plan
 
-- Status: **rev.2（Plan Review rev.1の指摘を反映。User承認まで本実装は開始しない）**
+- Status: **rev.2（Plan Review完了・User承認済み。実装済み: §23）**
 - 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #20 レビュー反映）
 - 対象: [Issue #14 [MVP] Life Log：Markdownによる個人活動アーカイブ](https://github.com/thanatos27/ai-foundation/issues/14)（本文 + コメント「詳細設計 v0.1」「詳細設計 v0.2」。**v0.2を正**とし、v0.1のGoogle Drive直結案は採らない）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 4 Design Issue](../specs/phase-4-knowledge.md), [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Areas Implementation Plan](areas-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -800,3 +800,40 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 | 1. `O_APPEND` の競合保証を正確に。任意サイズ・複数プロセスでの全体原子性は保証しない。書き込み失敗時の部分追記 | §10.3 に「`O_APPEND` が保証すること・しないこと」と書き込み失敗の行を追加。§16.4 の同時追記Testを「同一プロセス・小さいテキストでの条件付き検証」と位置付け、書き込み失敗のTestを追加。§18 のMVP制約に追記 |
 | 2. 共通コアのBuffer化でKnowledgeのBOM除去・Lenient decode・Messageが変わらないことを既存Test無変更で固定。Life Logのみfatal decode。作成・追記後のUTF-8の完全性もテスト | §4.2（共通コアはdecodeしない、`read` の分岐は現行どおり）、§4.3（Knowledge Adapterのdecode手順。既存Test無変更 + 新規 `filesystem-storage-decoding.test.ts`）、§14.2、§16.4「UTF-8の完全性」、§16.6 |
 | 3. Obsidianで手動作成した規則どおりの記事も取得・追記可能と明示。移行時もファイル名規則が参照互換の前提 | §6.3 を新設。§13、§16.4「手動作成の記事」、§17.2、§18 に反映 |
+
+---
+
+## 23. 実装で確定した事項
+
+実装Branch: `feat/lifelog`（Base: `main` の `492bf4c`、PR #20 Merge後）。§15の順に、手順ごとにCommitした（手順2の共通化リファクタリングは単独Commit `fa0d837`）。
+
+### 23.1 Verification結果（2026-10-24）
+
+| 項目 | 結果 |
+|---|---|
+| 手順2の完了条件 | リファクタリング後、既存Test（46 files / 1089 passed / 4 skipped）が**Testファイル無変更で**成功 |
+| Knowledgeの文字コード挙動 | 新規 `filesystem-storage-decoding.test.ts` を、リファクタリング前のソースに対しても実行して成功することを確認（変更前の挙動を固定していることの確認） |
+| `npm run typecheck` | 成功 |
+| `npm test` | 成功（53 files / 1233 passed / 5 skipped。skipはWindowsで開発者モードがないため作れないFile symlinkのTestで、Life Log分の1件を含む。Directory Junctionの境界Testは実行している） |
+| `npm run build` | 成功 |
+| Integration Test（`tests/integration/obsidian-lifelog.integration.test.ts`） | **未実行**。`config.local.yaml` に `sources.lifelog` がなく、実Vaultへ書き込むため、User確認後に検証用Directoryで実行する。既定（`AI_FOUNDATION_INTEGRATION` なし）でskipされることは確認済み |
+| 手動Verification（§17.2）/ LLM Client Verification（§19） | 未実施（Integration Testと合わせて実施する） |
+
+### 23.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
+
+| 箇所 | 内容 |
+|---|---|
+| `vault-directory.ts` | Markdownファイル名の判定（再帰 `list` 用）を、Knowledge固有名の `isKnowledgeFileName` ではなくModule内の `isMarkdownFileName`（同じ条件）にした |
+| `filesystem-storage.ts` | `segmentsBelow` は `knowledge_dir` 未設定時に `''` を基準に計算するが、`FilesystemVaultDirectory` が先に `ConfigurationError` を投げるため使われない（コメントで明記） |
+| `filename.ts` | 上限値を `MAX_FILE_NAME_BYTES` としてexportした（値・Messageは同一） |
+| `lifelog-id.ts` | 200 byteの上限は、Knowledgeと同じく**拡張子を除いた**ファイル名（日付を含む）で判定する（§6.1の「ファイル名全体」を、Knowledgeの測り方に合わせた）。超過時のMessageは `…(over 200 bytes with the date)…` |
+| `lifelog-id.ts` | IDのMessageは `use the id returned by lifelog_create or "lifelog:" followed by the exact file name`（Q9の参照方法に合わせた） |
+| `lifelog-storage.ts` | `LifeLogFile` から `ref` を除いた（`external_ref` は `refOf(name)` だけで作るため） |
+| `filesystem-lifelog-storage.ts` | `TextDecoder('utf-8', { fatal: true, ignoreBOM: true })` でdecodeしたうえでBOMを除去する |
+| `lifelog-connector.ts` | `get` / `append` はIDの検証を `directory` 未設定の確認より先に行う（不正なIDは設定に関係なく `InputValidationError`） |
+| `config/schema.ts` | 重なりの判定はsourcesをまたぐため、`ConfigObjectSchema`（従来の `ConfigSchema` の中身）に `.refine` をかけたものを `ConfigSchema` としてexportした（既存部分の差分を小さくするため） |
+| `vault-directory.test.ts` | 権限Errorの変換（§16.4「権限」）は、`node:fs/promises` の `readFile` / `open` を `vi.mock` で包み、`EACCES` / `EPERM` / `EBUSY` を投げてMessage（errno codeのみ・絶対パスなし）と `cause` を確認した。POSIXの `chmod` Testは追加していない（OSに依存せず同じ経路を検証できるため） |
+| `lifelog-connector.test.ts` | 「外部編集との共存」「追記の書き込み失敗」は、実Storageを包む `LifeLogStorage` で読み込みと追記の間の書き込み・追記の失敗を再現した |
+| `tests/helpers/vault.ts` | 一時Vaultに `AI Foundation/LifeLog` も作るようにした（既存Testへの影響なし） |
+| e2e | Repositoryの `config.yaml`（`vault_path` なし）で `lifelog_create` が `vault_path is not set`、Knowledge IDの `lifelog_get` が `must start with "lifelog:"` になるCaseを追加 |
+
