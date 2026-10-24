@@ -1249,3 +1249,68 @@ AI Foundationの役割は、
 ```
 
 とする。
+
+
+---
+
+## 22. MVP v0.1以降の拡張 — PARA Areas（2026-10-24実装）
+
+> この節はMVP v0.1策定後に実装した機能の追補であり、上記の「5種類のEntity」「Area = work / personal」「MVP対象外」などは**当時のv0.1のスコープ**を示している。最新のAreasの詳細な契約は[Areas MVP仕様](areas.md)、実装・検証記録は[Areas Implementation Plan](../plans/areas-implementation-plan.md)を正とする。
+
+### 22.1 用語とEntityの追加
+
+PARAの**Areas**は、食事管理・資産管理・運動・整理整頓・家事など、終了期限のない継続的な責任領域を指す。一時的な成果や完了を目指す**Project**とは区別する。
+
+追加したPARAのEntityは `AreaResource` であり、v0.1 §4の `Area = work | personal`（TaskやKnowledgeの属性）とは**別概念**。既存の `AreaSchema`、`defaults.area`、Task・Knowledgeの分類は変更していない。
+
+```yaml
+id: "notion:<page-id>"
+type: area
+title: string
+source: notion
+external_ref: "https://www.notion.so/<page-id>"
+```
+
+### 22.2 Source of Truth / 登録方法
+
+PARA AreasのSoTは**Notion**。専用Workspaceの通常ページ `Areas` の**直下の子ページ1つ = Area 1つ** とする。子ページの作成・編集・移動・ゴミ箱への移動はNotionのUIで行う。AI FoundationにはArea専用DBやRegistryを持たず、毎回Notionの現在の状態を読む。
+
+列・トグル内の子ページや孫ページはAreaとして発見しない。Notionのゴミ箱へ移動したページは除外する。アーカイブ状態そのもの（`is_archived`）ではフィルタしない。
+
+```yaml
+sources:
+  area:
+    provider: notion
+    notion:
+      parent_page_id: "<Areas parent page ID>"
+```
+
+`sources.area` と `parent_page_id` はOptionalで、未設定でもServerは起動するが、該当ToolはConfiguration Errorを返す。実ページIDは個人用 `config.local.yaml` にのみ設定し、Public Repositoryへコミットしない。認証はCollectionと共通の `NOTION_API_TOKEN` を使う。
+
+### 22.3 MCP Tool
+
+| Tool | Input | Output | 制約 |
+|---|---|---|---|
+| `area_list` | `{ query?: string }` | `{ items: AreaResource[] }` | 親ページ直下のArea一覧。queryはタイトルの大文字小文字を無視した部分一致。ソート済みで本文は返さない |
+| `area_get` | `{ id: "notion:<page-id>" }` | `{ area: AreaResource, content: string }` | exact IDで対象Areaの目次を取得。対象親ページ外のIDはNotFound |
+
+両Toolとも**Read-only**。本文はNotion BlockをMarkdown相当の文字列へ変換し、ネストは3階層まで取得する。非対応Blockや上限超過は未取得であることを注記する。子ページの本文、参照リンク先、他Providerの情報は自動巡回しない。
+
+### 22.4 Project・Knowledge・Collectionとの関係
+
+Areaページは関連情報の**目次・参照先**を管理する。情報そのもののSoTを複製しない。
+
+- 一時的な活動・成果物はProjectとして管理し、AreaからそのProjectのID・URLを参照できる
+- 汎用的な知識はKnowledgeとして管理し、AreaからKnowledge ID・リンクを参照できる
+- 本・ゲーム等はCollectionとして管理し、Areaから該当ページのリンクを参照できる
+- `obsidian:` や `github:` のIDは対応する既存Toolで個別に取得する。対応ToolのないNotion別ページ・Google Drive等はリンク提示に留める
+
+Areaには作成・更新・削除Toolを追加しない。Google DriveをArea Providerにする対応や、全参照先の横断取得も本拡張の対象外とする。
+
+### 22.5 完了状況と参照先
+
+- 設計: [Issue #13](https://github.com/thanatos27/ai-foundation/issues/13) / [PR #17](https://github.com/thanatos27/ai-foundation/pull/17)
+- 実装: [PR #18](https://github.com/thanatos27/ai-foundation/pull/18)
+- 詳細な操作・設定例: [README](../../README.md#areas)
+
+既存のProject / Collection Toolの入出力契約は維持し、公開Tool数は**15 → 17**になった。
