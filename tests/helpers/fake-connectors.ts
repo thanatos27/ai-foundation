@@ -86,9 +86,12 @@ export class FakeScheduleConnector implements ScheduleConnector {
       id: 'google_calendar:af@group.calendar.google.com:evt1',
       source: 'google_calendar',
       type: 'schedule',
+      calendar: input.calendar ?? 'personal',
       title: input.title,
       start: input.start,
       end: input.end ?? null,
+      description: input.description ?? null,
+      location: input.location ?? null,
     };
   }
 
@@ -96,6 +99,22 @@ export class FakeScheduleConnector implements ScheduleConnector {
     this.calls.push({ method: 'list', arg: filter });
     if (this.failWith) throw this.failWith;
     return this.schedules;
+  }
+
+  async update(input: Parameters<ScheduleConnector['update']>[0]): Promise<Schedule> {
+    this.calls.push({ method: 'update', arg: input });
+    if (this.failWith) throw this.failWith;
+    return {
+      id: input.id,
+      source: 'google_calendar',
+      type: 'schedule',
+      calendar: 'personal',
+      title: input.title ?? 'a',
+      start: input.start ?? '2026-10-19',
+      end: input.end ?? null,
+      description: input.description ?? null,
+      location: input.location ?? null,
+    };
   }
 }
 

@@ -3,10 +3,19 @@ import {
   ScheduleCreateInputSchema,
   ScheduleListFilterSchema,
   ScheduleSchema,
+  ScheduleUpdateInputSchema,
   normalizeScheduleCreateInput,
 } from '../../src/domain/index.js';
 
-const base = { type: 'schedule', title: 'AI Foundationを進める', start: '2026-10-17T14:00:00+09:00' };
+const base = {
+  type: 'schedule',
+  calendar: 'personal',
+  title: 'AI Foundationを進める',
+  start: '2026-10-17T14:00:00+09:00',
+  description: null,
+  location: null,
+};
+const HTML = '<p>公式: <a href="https://example.com">サイト</a></p>\n2行目\n  ';
 
 describe('ScheduleSchema', () => {
   it('accepts an open-ended schedule', () => {
@@ -26,6 +35,20 @@ describe('ScheduleSchema', () => {
   it('accepts an all-day schedule, including a single day with end == start', () => {
     expect(ScheduleSchema.safeParse({ ...base, start: '2026-10-19', end: '2026-10-21' }).success).toBe(true);
     expect(ScheduleSchema.safeParse({ ...base, start: '2026-10-19', end: '2026-10-19' }).success).toBe(true);
+  });
+
+  it('carries calendar, description and location as given', () => {
+    const result = ScheduleSchema.safeParse({ ...base, calendar: 'other@example.com', description: HTML, location: '会場' });
+    expect(result.success && [result.data.calendar, result.data.description, result.data.location]).toEqual([
+      'other@example.com',
+      HTML,
+      '会場',
+    ]);
+  });
+
+  it.each(['calendar', 'description', 'location'])('requires %s', (key) => {
+    const { [key as keyof typeof base]: _omitted, ...rest } = base;
+    expect(ScheduleSchema.safeParse(rest).success).toBe(false);
   });
 
   it('does not carry related_task', () => {
@@ -64,8 +87,17 @@ describe('ScheduleCreateInputSchema', () => {
     ['all-day single day', { start: '2026-10-19' }],
     ['all-day multiple days', { start: '2026-10-19', end: '2026-10-21' }],
     ['all-day with end == start', { start: '2026-10-19', end: '2026-10-19' }],
+    ['a calendar alias', { start: '2026-10-19', calendar: 'events' }],
+    ['description and location', { start: '2026-10-19', description: HTML, location: '会場' }],
+    ['null description and location', { start: '2026-10-19', description: null, location: null }],
   ])('accepts %s', (_label, fields) => {
     expect(ScheduleCreateInputSchema.safeParse({ title: 'a', ...fields }).success).toBe(true);
+  });
+
+  it('keeps description and location exactly as given', () => {
+    expect(
+      ScheduleCreateInputSchema.parse({ title: 'a', start: '2026-10-19', description: HTML, location: ' 会場 ' }),
+    ).toMatchObject({ description: HTML, location: ' 会場 ' });
   });
 
   it.each([
@@ -75,6 +107,9 @@ describe('ScheduleCreateInputSchema', () => {
     ['all-day end earlier than start', { start: '2026-10-19', end: '2026-10-18' }],
     ['a calendar_id', { start: '2026-10-19', calendar_id: 'someone@example.com' }],
     ['related_task', { start: '2026-10-19', related_task: null }],
+    ['an empty calendar', { start: '2026-10-19', calendar: '' }],
+    ['an empty description', { start: '2026-10-19', description: '' }],
+    ['an empty location', { start: '2026-10-19', location: '' }],
   ])('rejects %s', (_label, fields) => {
     expect(ScheduleCreateInputSchema.safeParse({ title: 'a', ...fields }).success).toBe(false);
   });
@@ -86,6 +121,8 @@ describe('ScheduleListFilterSchema', () => {
     ['date-times', { start: '2026-10-12T00:00:00+09:00', end: '2026-10-19T00:00:00+09:00' }],
     ['a single day', { start: '2026-10-14', end: '2026-10-14' }],
     ['mixed kinds (ordered by the connector)', { start: '2026-10-14', end: '2026-10-14T05:00:00+09:00' }],
+    ['a calendar alias', { start: '2026-10-14', end: '2026-10-14', calendar: 'events' }],
+    ['a calendar ID', { start: '2026-10-14', end: '2026-10-14', calendar: 'someone@example.com' }],
   ])('accepts %s', (_label, input) => {
     expect(ScheduleListFilterSchema.safeParse(input).success).toBe(true);
   });
@@ -98,36 +135,57 @@ describe('ScheduleListFilterSchema', () => {
     expect(ScheduleListFilterSchema.safeParse(input).success).toBe(false);
   });
 
-  it.each([true, false])('keeps attended_only: %s', (attended_only) => {
-    expect(ScheduleListFilterSchema.parse({ start: '2026-10-12', end: '2026-10-18', attended_only })).toEqual({
-      start: '2026-10-12',
-      end: '2026-10-18',
-      attended_only,
-    });
-  });
-
-  it('adds no attended_only when it is omitted', () => {
-    expect(ScheduleListFilterSchema.parse({ start: '2026-10-12', end: '2026-10-18' })).not.toHaveProperty(
-      'attended_only',
-    );
-  });
-
   it.each([
-    ['attended_only: null', { attended_only: null }],
-    ['attended_only: "true"', { attended_only: 'true' }],
-    ['attended_only: 1', { attended_only: 1 }],
-    ['an unknown attended key', { attended: true }],
-    ['an unknown attendedOnly key', { attendedOnly: true }],
+    ['attended_only: true', { attended_only: true }],
+    ['attended_only: false', { attended_only: false }],
+    ['an empty calendar', { calendar: '' }],
   ])('rejects %s', (_label, extra) => {
     expect(ScheduleListFilterSchema.safeParse({ start: '2026-10-12', end: '2026-10-18', ...extra }).success).toBe(
       false,
     );
   });
+});
 
-  it('still rejects end before start with attended_only', () => {
-    const result = ScheduleListFilterSchema.safeParse({ start: '2026-10-18', end: '2026-10-12', attended_only: true });
-    expect(result.success).toBe(false);
-    expect(result.error?.issues.map((issue) => issue.path)).toEqual([['end']]);
+describe('ScheduleUpdateInputSchema', () => {
+  const id = 'google_calendar:af@group.calendar.google.com:evt1';
+
+  it.each([
+    ['title', { title: '定例' }],
+    ['start', { start: '2026-10-19T10:00:00+09:00' }],
+    ['end', { end: '2026-10-21' }],
+    ['description', { description: HTML }],
+    ['location', { location: '会場' }],
+    ['a null description', { description: null }],
+    ['a null location', { location: null }],
+    ['both end points', { start: '2026-10-19', end: '2026-10-21' }],
+    ['an end equal to the start', { start: '2026-10-19', end: '2026-10-19' }],
+  ])('accepts only %s', (_label, fields) => {
+    expect(ScheduleUpdateInputSchema.safeParse({ id, ...fields }).success).toBe(true);
+  });
+
+  it('keeps omitted fields out and null as null', () => {
+    const parsed = ScheduleUpdateInputSchema.parse({ id, description: null });
+    expect(parsed).toEqual({ id, description: null });
+    expect(parsed).not.toHaveProperty('location');
+  });
+
+  it.each([
+    ['only an id', {}],
+    ['a null title', { title: null }],
+    ['an empty title', { title: '' }],
+    ['a null start', { start: null }],
+    ['a null end', { end: null }],
+    ['an empty description', { description: '' }],
+    ['a calendar', { calendar: 'events' }],
+    ['mixed end points', { start: '2026-10-19', end: '2026-10-19T15:00:00+09:00' }],
+    ['an end before the start', { start: '2026-10-19', end: '2026-10-18' }],
+    ['a start without offset', { start: '2026-10-19T10:00:00' }],
+  ])('rejects %s', (_label, fields) => {
+    expect(ScheduleUpdateInputSchema.safeParse({ id, ...fields }).success).toBe(false);
+  });
+
+  it('rejects an empty id', () => {
+    expect(ScheduleUpdateInputSchema.safeParse({ id: '', title: 'a' }).success).toBe(false);
   });
 });
 
@@ -136,6 +194,8 @@ describe('normalizeScheduleCreateInput', () => {
     expect(normalizeScheduleCreateInput({ title: 'a', start: '2026-10-17T14:00:00+09:00' })).toEqual({
       kind: 'timed',
       title: 'a',
+      description: null,
+      location: null,
       start: '2026-10-17T14:00:00+09:00',
       end: '2026-10-17T15:00:00+09:00',
     });
@@ -160,6 +220,8 @@ describe('normalizeScheduleCreateInput', () => {
     expect(normalizeScheduleCreateInput({ title: 'a', start: '2026-10-19', end: null })).toEqual({
       kind: 'all_day',
       title: 'a',
+      description: null,
+      location: null,
       startDate: '2026-10-19',
       endDate: '2026-10-19',
     });
@@ -170,5 +232,11 @@ describe('normalizeScheduleCreateInput', () => {
       startDate: '2026-10-19',
       endDate: '2026-10-21',
     });
+  });
+
+  it('passes description and location through', () => {
+    expect(
+      normalizeScheduleCreateInput({ title: 'a', start: '2026-10-19', description: HTML, location: '会場' }),
+    ).toMatchObject({ description: HTML, location: '会場' });
   });
 });

@@ -64,24 +64,85 @@ describe('ConfigSchema', () => {
     expect(issuePaths(config)).toEqual(['defaults.timezone']);
   });
 
-  it('accepts a writable calendar ID for schedules', () => {
-    const config = validConfig();
-    const schedule = { ...config.sources.schedule, writable_calendar_id: 'abc@group.calendar.google.com' };
-    const result = ConfigSchema.safeParse({ ...config, sources: { ...config.sources, schedule } });
-    expect(result.success && result.data.sources.schedule.writable_calendar_id).toBe('abc@group.calendar.google.com');
-  });
+  describe('writable calendars', () => {
+    const withSchedule = (fields: Record<string, unknown>) => {
+      const config = validConfig();
+      return { ...config, sources: { ...config.sources, schedule: { ...config.sources.schedule, ...fields } } };
+    };
+    const calendars = { personal: 'a@group.calendar.google.com', events: 'b@group.calendar.google.com' };
 
-  it('allows the writable calendar ID to be omitted', () => {
-    const result = ConfigSchema.safeParse(validConfig());
-    expect(result.success && result.data.sources.schedule.writable_calendar_id).toBeUndefined();
-  });
+    it('accepts aliases with a default', () => {
+      const result = ConfigSchema.safeParse(withSchedule({ default_calendar: 'personal', writable_calendars: calendars }));
+      expect(result.success && result.data.sources.schedule).toEqual({
+        provider: 'google_calendar',
+        default_calendar: 'personal',
+        writable_calendars: calendars,
+      });
+    });
 
-  it('rejects an empty writable calendar ID', () => {
-    const config = validConfig();
-    const schedule = { ...config.sources.schedule, writable_calendar_id: '' };
-    expect(issuePaths({ ...config, sources: { ...config.sources, schedule } })).toEqual([
-      'sources.schedule.writable_calendar_id',
-    ]);
+    it('allows the writable calendars to be omitted', () => {
+      const result = ConfigSchema.safeParse(validConfig());
+      expect(result.success && result.data.sources.schedule.writable_calendars).toBeUndefined();
+    });
+
+    it.each([
+      ['alone', {}],
+      ['with the new keys', { default_calendar: 'personal', writable_calendars: calendars }],
+    ])('rejects the old writable_calendar_id %s, explaining the migration', (_label, fields) => {
+      const result = ConfigSchema.safeParse(withSchedule({ writable_calendar_id: 'a@group.calendar.google.com', ...fields }));
+      expect(result.success).toBe(false);
+      const issue = result.error?.issues.find((i) => i.path.join('.') === 'sources.schedule.writable_calendar_id');
+      expect(issue?.message).toContain('writable_calendars');
+      expect(issue?.message).toContain('default_calendar');
+    });
+
+    it.each([
+      ['no calendar', { default_calendar: 'personal', writable_calendars: {} }, 'sources.schedule.writable_calendars'],
+      ['no default', { writable_calendars: calendars }, 'sources.schedule.default_calendar'],
+      ['an unknown default', { default_calendar: 'work', writable_calendars: calendars }, 'sources.schedule.default_calendar'],
+      ['a default without calendars', { default_calendar: 'personal' }, 'sources.schedule.default_calendar'],
+      [
+        'the same ID twice',
+        { default_calendar: 'personal', writable_calendars: { personal: 'a@x', events: 'a@x' } },
+        'sources.schedule.writable_calendars.events',
+      ],
+      [
+        'primary',
+        { default_calendar: 'personal', writable_calendars: { personal: 'primary' } },
+        'sources.schedule.writable_calendars.personal',
+      ],
+      [
+        'Primary',
+        { default_calendar: 'personal', writable_calendars: { personal: 'Primary' } },
+        'sources.schedule.writable_calendars.personal',
+      ],
+      [
+        'an empty ID',
+        { default_calendar: 'personal', writable_calendars: { personal: '' } },
+        'sources.schedule.writable_calendars.personal',
+      ],
+      [
+        'a blank ID',
+        { default_calendar: 'personal', writable_calendars: { personal: '  ' } },
+        'sources.schedule.writable_calendars.personal',
+      ],
+    ])('rejects %s', (_label, fields, path) => {
+      expect(issuePaths(withSchedule(fields))).toContain(path);
+    });
+
+    it.each(['Personal', 'my.cal', 'a@b', '1st', '', 'a'.repeat(33)])('rejects the alias %j', (alias) => {
+      const result = ConfigSchema.safeParse(
+        withSchedule({ default_calendar: 'personal', writable_calendars: { personal: 'a@x', [alias]: 'b@x' } }),
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it.each(['personal', 'events', 'event_catalog', 'trip-2026', 'a'.repeat(32)])('accepts the alias %j', (alias) => {
+      const result = ConfigSchema.safeParse(
+        withSchedule({ default_calendar: alias, writable_calendars: { [alias]: 'a@group.calendar.google.com' } }),
+      );
+      expect(result.success).toBe(true);
+    });
   });
 
   it('accepts a data source ID for collections', () => {

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AreaResourceSourceSchema,
   AreaSchema,
+  CalendarAliasSchema,
   KnowledgeSourceSchema,
   LifeLogSourceSchema,
   ProjectSourceSchema,
@@ -46,6 +47,44 @@ function dirsOverlap(a: string, b: string): boolean {
   return shorter!.every((segment, index) => longer![index] === segment);
 }
 
+/** The checks on `sources.schedule` that span its keys (docs/specs/schedule-calendars.md). */
+function checkWritableCalendars(
+  schedule: { default_calendar?: string | undefined; writable_calendars?: Record<string, string> | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  const { default_calendar: defaultCalendar, writable_calendars: calendars } = schedule;
+  if (!calendars) {
+    if (defaultCalendar !== undefined) {
+      ctx.addIssue({ code: 'custom', message: 'needs writable_calendars', path: ['default_calendar'] });
+    }
+    return;
+  }
+  const aliases = Object.keys(calendars);
+  if (aliases.length === 0) {
+    ctx.addIssue({ code: 'custom', message: 'must list at least one calendar', path: ['writable_calendars'] });
+    return;
+  }
+  if (defaultCalendar === undefined || !aliases.includes(defaultCalendar)) {
+    ctx.addIssue({ code: 'custom', message: `must be one of ${aliases.join(', ')}`, path: ['default_calendar'] });
+  }
+  const seen = new Map<string, string>();
+  for (const [alias, calendarId] of Object.entries(calendars)) {
+    // `primary` is resolved by Google to the signed-in user's main calendar, not a fixed one.
+    if (calendarId.toLowerCase() === 'primary') {
+      ctx.addIssue({
+        code: 'custom',
+        message: `"primary" is not allowed; set the calendar's own ID from its settings`,
+        path: ['writable_calendars', alias],
+      });
+    }
+    const other = seen.get(calendarId);
+    if (other !== undefined) {
+      ctx.addIssue({ code: 'custom', message: `same calendar ID as ${other}`, path: ['writable_calendars', alias] });
+    }
+    seen.set(calendarId, alias);
+  }
+}
+
 /**
  * Static Foundation configuration (spec §13).
  *
@@ -60,15 +99,27 @@ const ConfigObjectSchema = z.strictObject({
   }),
   sources: z.strictObject({
     task: z.strictObject({ provider: z.enum(['todoist']) }),
-    schedule: z.strictObject({
-      provider: z.enum(['google_calendar']),
-      /**
-       * The only calendar AI Foundation writes to. Not a secret, but personal: keep it in a
-       * local config file rather than the committed config.yaml. Optional so the server still
-       * starts (and schedule_list works) without it.
-       */
-      writable_calendar_id: z.string().min(1).optional(),
-    }),
+    schedule: z
+      .strictObject({
+        provider: z.enum(['google_calendar']),
+        /** The writable calendar schedule_create uses when no calendar is given. */
+        default_calendar: CalendarAliasSchema.optional(),
+        /**
+         * The only calendars AI Foundation writes to, by alias (e.g. `personal`, `events`). Not
+         * secret, but personal: keep the IDs in a local config file rather than the committed
+         * config.yaml. Optional so the server still starts (and schedule_list works) without it.
+         */
+        writable_calendars: z.record(CalendarAliasSchema, z.string().trim().min(1)).optional(),
+        /** Replaced by writable_calendars: rejected with a migration hint instead of "unrecognized key". */
+        writable_calendar_id: z
+          .never({
+            error:
+              'was replaced by writable_calendars and default_calendar; e.g. writable_calendars: { personal: "<this ID>" } ' +
+              'and default_calendar: personal (see README "Google Calendar")',
+          })
+          .optional(),
+      })
+      .superRefine(checkWritableCalendars),
     collection: z.strictObject({
       provider: z.enum(['notion']),
       /**

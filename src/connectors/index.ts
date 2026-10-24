@@ -55,7 +55,8 @@ export function createConnectors(config: Config, credentials: CredentialProvider
     task: new TodoistTaskConnector({ client: lazyTodoistClient(credentials), timeZone }),
     schedule: new GoogleCalendarScheduleConnector({
       api: lazyCalendarApi(credentials),
-      writableCalendarId: config.sources.schedule.writable_calendar_id,
+      writableCalendars: config.sources.schedule.writable_calendars,
+      defaultCalendar: config.sources.schedule.default_calendar,
       timeZone,
     }),
     collection: new NotionCollectionConnector({

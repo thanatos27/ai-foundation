@@ -69,6 +69,7 @@ describe('createServer', () => {
       'project_list',
       'schedule_create',
       'schedule_list',
+      'schedule_update',
       'task_complete',
       'task_create',
       'task_list',

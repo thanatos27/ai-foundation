@@ -13,11 +13,17 @@ sources:
 
   schedule:
     provider: google_calendar
-    # The only calendar AI Foundation writes to (required by schedule_create).
-    # This repository is public: do not set it here. Copy this file to
-    # config.local.yaml (git-ignored), set it there and start the server with
+    # The only calendars AI Foundation writes to, by alias (required by
+    # schedule_create / schedule_update; schedule_list reads every calendar).
+    # Aliases: lowercase letters, digits, "_" or "-". Copy each ID from the
+    # calendar's settings ("Integrate calendar"); never use "primary".
+    # This repository is public: do not set them here. Copy this file to
+    # config.local.yaml (git-ignored), set them there and start the server with
     # --config config.local.yaml or AI_FOUNDATION_CONFIG.
-    # writable_calendar_id: "xxxxxxxx@group.calendar.google.com"
+    # default_calendar: personal
+    # writable_calendars:
+    #   personal: "xxxxxxxx@group.calendar.google.com"   # events you plan to attend
+    #   events: "yyyyyyyy@group.calendar.google.com"     # event periods you are interested in
 
   collection:
     provider: notion
