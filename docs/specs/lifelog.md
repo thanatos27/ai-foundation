@@ -1,6 +1,6 @@
 # Life Log MVP — Design
 
-[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)（本文、詳細設計 v0.1 / v0.2）と、[Implementation Plan](../plans/lifelog-implementation-plan.md) のPlan Review（PR #20）で確定した事項をまとめる。[MVP v0.1仕様](mvp-v0.1.md) は既存節を変更せず（§23に追補）、本書をLife Logの仕様とする。詳細設計はv0.2を正とし、v0.1のGoogle Drive直結案は採らない。
+[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)（本文、詳細設計 v0.1 / v0.2）と、[Implementation Plan](../plans/lifelog-implementation-plan.md) のPlan Review（PR #20）で確定した事項をまとめる。[MVP v0.1仕様](mvp-v0.1.md) は当時の仕様として維持し、本書をv0.1以降に追加されたLife Logの仕様とする。詳細設計はv0.2を正とし、v0.1のGoogle Drive直結案は採らない。
 
 ## Goal
 
