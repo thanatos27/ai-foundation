@@ -1,6 +1,6 @@
 # 複数Calendar・期間イベント・説明欄 — Design
 
-[Issue #12](https://github.com/thanatos27/ai-foundation/issues/12)（MVP方針更新・MVP詳細設計 v0.1）と、[Implementation Plan](../plans/schedule-calendars-implementation-plan.md) のPlan Review（PR #27）・実装前Probeで確定した事項をまとめる。[MVP v0.1仕様](mvp-v0.1.md) は当時の仕様として維持し、本書をv0.1以降に追加された仕様とする。[Google Calendar参加済みフラグ](schedule-attendance.md)（Issue #15）は本書で廃止した。
+[Issue #12](https://github.com/thanatos27/ai-foundation/issues/12) の仕様。実装の詳細は [Implementation Plan](../plans/schedule-calendars-implementation-plan.md) を参照。[MVP v0.1仕様](mvp-v0.1.md) は当時の仕様として維持し、本書をv0.1以降に追加された仕様とする。[Google Calendar参加済みフラグ](schedule-attendance.md)（Issue #15）は本書で廃止した。
 
 ## Goal
 
