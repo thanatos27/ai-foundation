@@ -45,3 +45,12 @@ sources:
     # Do not list projects or repositories here; limit them with the token's repository access.
     providers:
       - github
+
+  area:
+    # PARA areas (not defaults.area): the child pages directly under one Notion page
+    # (see README "Areas"). Do not list areas here; add or remove child pages in Notion.
+    provider: notion
+    # The Areas parent page (required by the area tools).
+    # This repository is public: do not set it here. Set it in config.local.yaml.
+    # notion:
+    #   parent_page_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

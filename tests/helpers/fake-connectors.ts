@@ -1,4 +1,5 @@
 import type {
+  AreaConnector,
   CollectionConnector,
   KnowledgeConnector,
   ProjectConnector,
@@ -6,6 +7,8 @@ import type {
   TaskConnector,
 } from '../../src/connectors/types.js';
 import {
+  type AreaGetResult,
+  type AreaResource,
   type CollectionItem,
   type Knowledge,
   type KnowledgeSearchResult,
@@ -234,6 +237,33 @@ export class FakeProjectConnector implements ProjectConnector {
         fork: false,
         updated_at: '2026-10-15T13:00:00Z',
       },
+    };
+  }
+}
+
+/** In-memory area connector that records the domain input of every call. */
+export class FakeAreaConnector implements AreaConnector {
+  readonly calls: { method: keyof AreaConnector; arg: unknown }[] = [];
+  failWith: Error | undefined;
+  areas: AreaResource[] = [];
+  content = '';
+
+  private record(method: keyof AreaConnector, arg: unknown): void {
+    this.calls.push({ method, arg });
+    if (this.failWith) throw this.failWith;
+  }
+
+  async list(filter: Parameters<AreaConnector['list']>[0]): Promise<AreaResource[]> {
+    this.record('list', filter);
+    return this.areas;
+  }
+
+  async get(id: string): Promise<AreaGetResult> {
+    this.record('get', id);
+    const pageId = id.slice('notion:'.length);
+    return {
+      area: { id, type: 'area', title: 'Area', source: 'notion', external_ref: `https://www.notion.so/${pageId.replaceAll('-', '')}` },
+      content: this.content,
     };
   }
 }

@@ -55,6 +55,8 @@ const listToolsOverStdio = (args: string[] = [], env = childEnv()) =>
   withStdioClient((client) => client.listTools(), args, env);
 
 const TOOL_NAMES = [
+  'area_get',
+  'area_list',
   'collection_create',
   'collection_search',
   'collection_update',
@@ -87,7 +89,7 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and lists the task, schedule, collection, knowledge and project tools', async () => {
+  it('starts with the repository config.yaml and lists the task, schedule, collection, knowledge, project and area tools', async () => {
     expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
   });
 
@@ -108,6 +110,21 @@ describe('stdio server (e2e)', { timeout: 30_000 }, () => {
     expect(JSON.stringify(list.content)).toContain('Credential error: GitHub credential is not configured: set GITHUB_TOKEN');
     expect(invalid.isError).toBe(true);
     expect(JSON.stringify(invalid.content)).toContain('Invalid input: project id must be');
+  });
+
+  it('reports a missing area parent page on use, after validating the area id', async () => {
+    const [list, invalid] = await withStdioClient((client) =>
+      Promise.all([
+        client.callTool({ name: 'area_list', arguments: {} }),
+        client.callTool({ name: 'area_get', arguments: { id: 'meals' } }),
+      ]),
+    );
+    expect(list.isError).toBe(true);
+    expect(JSON.stringify(list.content)).toContain(
+      'Configuration error: sources.area.notion.parent_page_id is not set',
+    );
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid.content)).toContain('Invalid input: id must be \\"notion:<page-id>\\" as returned by area_list');
   });
 
   it('reports a missing collection data source on use', async () => {
