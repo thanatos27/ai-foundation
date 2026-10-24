@@ -1,6 +1,6 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.3（Plan承認済み。実装済み: §19。Implementation Review指摘対応済み・再レビュー待ち）**
+- Status: **rev.3（Plan承認済み。実装済み: §19。Implementation Review完了・手動Verification記録済み）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -694,7 +694,7 @@ User判断が必要なもの（承認済みPlanからの変更になるため）
 | Integration Test（`todoist-recurrence.integration.test.ts` ＋既存 `todoist.integration.test.ts`、実Todoist） | 2 files、9 passed。終了後、Inboxに `[af-it` / `[af-probe` で始まるTaskが残っていないことを確認（0件） |
 | 既存Task系Test | 無変更で成功。変更したのは §11.1の例外（`toTask` の `toEqual` に `recurrence: null` を追加）だけ |
 | `docs/specs/mvp-v0.1.md` | 差分なし |
-| 手動Verification（§12.2）・LLM Client Verification（§13） | 未実施。Implementation Review後に実施して記録する |
+| 手動Verification（§12.2）・LLM Client Verification（§13） | 手動Verificationは §19.5に記録。LLM Client Verificationは実施しない |
 
 ### 19.2 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
 
@@ -738,3 +738,18 @@ Verification（修正後）: `npm run typecheck` / `npm run build` 成功、`npm
 | 固定zoneの単発の日時に `every day` | 日付だけで、`timezone` も `null` になる |
 
 固定zoneの繰り返し（`timezone` を持つもの）は、2段階で戻しても `timezone` が `null` になる可能性がある。その場合は `isSameDue` が不一致と判定し、`ProviderApiError` で状態を示す（Todoist UIで作る繰り返しはfloatingな時刻が通常のため、MVPではこれ以上扱わない）。
+
+### 19.5 手動Verification（2026-10-25、Claude Code、MCP Serverを本Branchの `dist`（`9769d93`）で再接続）
+
+§12.2をMCP Client（Claude Code）からToolを直接呼んで実施した。M2はTodoist UIで作成した繰り返しTaskを使い、M1は検証後に削除した。Todoist上の状態は `getTask` で確認した。
+
+| # | 操作 | 結果 |
+|---|---|---|
+| M1 | `task_create({ title, recurrence: 'every monday' })` | `recurrence: "every monday"`、`due: "2026-10-26"`（月曜）。Todoist上も `isRecurring: true` |
+| M2 | Todoist UI（日本語）で作成した繰り返しTaskを `task_list` | `recurrence: "毎"`、`due: "2026-10-25"`。Todoistが保持する文字列（`lang: "ja"`）がそのまま返る |
+| M3 | M2のTaskに `task_update({ title })` | 規則 `毎`・期限 `2026-10-25` が変わらない |
+| M4 | M2のTaskに `task_update({ due: '2026-11-01' })` | `Invalid input: task todoist:… recurs ("毎"); changing its due would remove the recurrence. … Nothing was changed.`。Todoist上の期限・規則も変化なし |
+| M5 | `task_update({ recurrence: 'every day', due: '2026-11-01' })`、`task_update({ recurrence: 'every day', title })` | どちらも `Input validation error: … recurrence must be updated on its own …` |
+| M6 | `task_create({ title, recurrence: 'tomorrow' })` | `Invalid input: Todoist did not read recurrence "tomorrow" as a recurring rule (it was read as the one-off due 2026-10-26), so no task was created. …`。Inboxに同じTitleのTaskはない |
+
+LLM Client Verification（§13）は実施しない。
