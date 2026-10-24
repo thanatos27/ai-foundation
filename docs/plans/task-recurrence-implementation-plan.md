@@ -1,6 +1,6 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.2（PR #25 Plan Review rev.1反映・User承認済み。実装前Probe実施済み: §18。本実装は未着手）**
+- Status: **rev.3（Plan承認済み。実装前Probe実施・Probeレビュー反映済み: §17 / §18。本実装は未着手）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -240,19 +240,27 @@ toTask(...) → { …既存, recurrence: recurrenceOf(task.due) }
 
 ```text
 addTask({ content, labels, ...(recurrence ? recurrenceArgs(recurrence) : due != null ? dueArgs(due) : {}) })
+  ├ HTTP 400 かつ recurrence 指定 → InputValidationError（rejected recurrence request。rev.3）
   ↓
 recurrence 指定 かつ created.due?.isRecurring !== true
   → deleteTask(created.id) で作成したTaskを削除（ロールバック。rev.2）
-     成功 → InputValidationError（何も作成されていない）
-     失敗 → ProviderApiError（Taskが残ったこと・id・復旧方法）
+     true を返した → InputValidationError（何も作成されていない）
+     false を返した / throw（タイムアウト等で結果不明を含む）
+       → getTask(created.id) で確認（rev.3）
+          404       → 削除済みとみなし InputValidationError（何も作成されていない）
+          取得できた → ProviderApiError（Taskが残ったこと・id・復旧方法）
+          取得も失敗 → ProviderApiError（Taskが残っている可能性・id・復旧方法）
 それ以外 → toTask(created)
 ```
 
 - **受理されなかった場合は、作成したTaskを削除してErrorを返す**（Plan Review rev.1）。Errorが返ったのにTaskが残り、AI Clientの再試行でInboxに重複Taskができることを防ぐ。
   - 削除に成功: `Invalid input: Todoist did not read recurrence "<rule>" as a recurring rule (it was read as <due summary>), so no task was created. Use a rule such as "every monday" or "every! 3 days".`
-  - 削除に失敗: `ProviderApiError`: `Todoist API error: recurrence "<rule>" was not read as a recurring rule and task todoist:<id> was created with <due summary>, but deleting it failed: <message>. The task still exists: fix it with task_update (recurrence) or delete it in Todoist; do not call task_create again.` 状態が想定外のため `complete` の再取得失敗と同じく `ProviderApiError` にする。
+  - 削除に失敗し、Taskが残っていることを確認: `ProviderApiError`: `Todoist API error: recurrence "<rule>" was not read as a recurring rule and task todoist:<id> was created with <due summary>, but deleting it failed: <message>. The task still exists: fix it with task_update (recurrence) or delete it in Todoist; do not call task_create again.` 状態が想定外のため `complete` の再取得失敗と同じく `ProviderApiError` にする。
+  - 削除の結果も残存も確認できない（`deleteTask` と確認の `getTask` がともに失敗）: 同じ `ProviderApiError` で、`The task may still exist` と書く。
+- **ロールバック成功を過信しない（rev.3、Re-review rev.2の確認ポイント）**: `deleteTask` は型上 `Promise<boolean>` で、P10では成功時 `true`（同じidの再削除も `true`）だった。`true` 以外の戻り値と例外（タイムアウトで結果が不明な場合を含む）は「削除できたか不明」として扱い、`getTask` の404を確認できたときだけ削除済みとみなす。
 - 削除の範囲: Connectorが削除するのは **同じ `create` 呼び出しの `addTask` が返したid** だけ。`update` / `complete` / Toolからの削除経路は作らない（既存Taskを削除する操作は引き続き存在しない）。
 - 原子性の限界: `addTask` と `deleteTask` は別リクエストで、Todoist APIにTransactionはない。`addTask` 〜 `deleteTask` の間にTodoist側で他Clientから同期・表示され得ること、`deleteTask` が失敗し得ることは防げない。後者の場合だけ上記の `ProviderApiError` でTaskの残存を明示する。README / 仕様書の既知の制約にも記載する。
+- **`recurrence` を送った呼び出しの400（rev.3、§16 Q6）**: Todoistは解釈できない `dueString` を400で拒否し、Messageは `Bad Request` だけ（§18 P6）。`recurrence` を指定した `addTask` の400に限り、`InputValidationError`: `Todoist rejected the request with recurrence "<rule>" (HTTP 400). Check the rule syntax, e.g. "every monday" or "every! 3 days".` にする（元のErrorは `cause` に保持）。400は必ずしも規則の構文エラーとは限らないため、「could not parse」とは断定しない。書き込みは起きていないのでロールバックは不要。`recurrence` を含まない呼び出しの400と、400以外のErrorは従来どおり `toFoundationError`。
 - `recurrence` を含まない `create` は呼び出し引数・応答とも従来と同一（`recurrence: null` が出力に増えるだけ）。`deleteTask` は呼ばない。
 
 ### 7.3 `update`（Due保護）
@@ -290,11 +298,12 @@ return toTask(updated)
 `recurrence` に文字列を送ったのに応答の `due.isRecurring !== true` の場合（`tomorrow`、`no date`、日本語＋`dueLang: 'en'` 等。§5 P5 / P6）:
 
 1. `updateTask(todoistId, restoreDueArgs(current.due, timeZone))` で期限を書き込み前に戻す。`recurrence` は単独の更新に限られる（§6）ため、変わったのは期限だけで、これを戻せば他Fieldを含めて書き込み前の状態になる。
-2. 復元に成功: `InputValidationError`: `Todoist did not read recurrence "<rule>" as a recurring rule; task todoist:<id> was left as before (<previous summary>).` 前の期限が繰り返しだった場合は「次回日付はTodoistが再計算した可能性がある」旨を加える（§16 Q5）。
+2. 復元に成功: `InputValidationError`: `Todoist did not read recurrence "<rule>" as a recurring rule; task todoist:<id> was left as before (<previous summary>).` 前の期限が繰り返しだった場合は、文末を `its previous rule "<string>" was set again, and Todoist may have recalculated the next due (now <date>).` とし、復元後の次回日付を示す（§16 Q5）。
 3. 復元に失敗: `ProviderApiError`: `… recurrence "<rule>" was not read as recurring and task todoist:<id> now has <current due summary>; restoring the previous due (<summary>) failed: <message>`。現在の状態と元の期限をMessageに含め、AI Clientが `task_update` で直せるようにする。
 
 - 「前の期限」は §7.3 で読んだ `current.due`。`recurrence` 指定時は必ず `getTask` 済みなので追加の読み取りは不要。
-- Todoistが `dueString` を400で拒否した場合は書き込みが起きていないので復元しない（既存どおり `ProviderApiError`。§16 Q6）。
+- Todoistが `dueString` を400で拒否した場合は書き込みが起きていないので復元しない。`recurrence` を送った `updateTask` の400は、§7.2と同じ `InputValidationError`（`Todoist rejected the request with recurrence "<rule>" (HTTP 400). Check the rule syntax…`、`cause` 保持）にする（rev.3、§16 Q6）。復元の `updateTask` 自体が400になった場合は復元失敗として3.の `ProviderApiError` にする。
+- **復元はbest-effortで、次回日付は再計算され得る（rev.3で確定、§16 Q5）**: 繰り返しの期限は元の `string` / `lang` で戻すため、Todoistが次回日付を計算し直し、元の次回日付と一致しない場合がある（§18 P8: 10/26 → 11/02）。Error Message・README・個別仕様に明記する。`"<string> starting <date>"` で正確に戻す方式（§18 P8b）はMVPでは採らず、将来の改善候補とする。
 
 ### 7.5 `complete` / `list`
 
@@ -312,7 +321,7 @@ return toTask(updated)
 | 共通（`recurrence` 文） | `recurrence is a Todoist recurring rule written in English, e.g. "every day", "every monday", "every weekday at 9am", "every month on the 25th". Use "every!" (e.g. "every! 3 days") to count the next due from the completion date instead of the schedule. Translate the user's words (e.g. 毎週月曜 → "every monday"); Todoist computes the dues, so do not compute dates yourself.` |
 | `task_create` | 共通文＋`Do not pass due together with recurrence. If Todoist does not read the rule as recurring, no task is created and an error is returned.`（rev.2） |
 | `task_list` | `Each task has recurrence (the rule, or null) and due (the next occurrence for a recurring task).` |
-| `task_update` | 共通文＋`recurrence changes the rule (Todoist recomputes the next due from today); recurrence: null removes the rule together with the due. recurrence must be the only field in its task_update; change title / status / area / tags in a separate call. If Todoist does not read the rule as recurring, the task is left as before and an error is returned. The due of a recurring task cannot be changed or cleared with due — that request is rejected without changing anything, because it would remove the recurrence. Postponing a single occurrence is not supported. title / status / area / tags changes keep the recurrence.` 既存の「Changing the due of a recurring task removes its recurrence.」は削除 |
+| `task_update` | 共通文＋`recurrence changes the rule (Todoist recomputes the next due from today); recurrence: null removes the rule together with the due. recurrence must be the only field in its task_update; change title / status / area / tags in a separate call. If Todoist does not read the rule as recurring, the task is left as before and an error is returned. The due of a recurring task cannot be changed or cleared with due — that request is rejected without changing anything, because it would remove the recurrence. Postponing a single occurrence is not supported. title / status / area / tags changes keep the recurrence. Changing the rule keeps the current time of day unless the rule names a time (e.g. "every day at 7am").`（最後の文はrev.3、§18 P8b） 既存の「Changing the due of a recurring task removes its recurrence.」は削除 |
 | `task_complete` | `A recurring task moves to its next occurrence and is returned still open with the new due and the same recurrence.` |
 
 `annotations` は変更しない（`task_update` は既に `destructiveHint: true`）。
@@ -422,7 +431,11 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | create ロールバック | `recurrence: 'tomorrow'`（Fakeで非繰り返し） | `deleteTask(<addTaskが返したid>)` が1回、`InputValidationError`（Messageに「no task was created」、Task IDを含まない）。Fake内のTask数が呼び出し前と同じ、`updateTask` 呼び出しなし |
 | create ロールバック | 上記で `deleteTask` が失敗 | `ProviderApiError`（Messageに `todoist:<id>`・残った期限の要約・「do not call task_create again」）、FakeにTaskが残る |
 | create ロールバック | `recurrence: 'tomorrow'` ＋ status / area / tags | Labels付きで作成されたTaskも削除され、Task数が変わらない |
-| create | `addTask` が400 | `ProviderApiError`、`deleteTask` / `updateTask` 呼び出しなし |
+| create ロールバック | `deleteTask` が `false` を返す／例外 → 確認の `getTask` が404 | `InputValidationError`（no task was created）（rev.3） |
+| create ロールバック | `deleteTask` が `false` を返す → `getTask` でTaskを取得できる | `ProviderApiError`（「still exists」・id）（rev.3） |
+| create ロールバック | `deleteTask` が例外 → `getTask` も例外 | `ProviderApiError`（「may still exist」・id）（rev.3） |
+| create 400 | `recurrence` 指定で `addTask` が400 | `InputValidationError`（Messageに `rejected the request with recurrence`・`HTTP 400`、`could not parse` を含まない）、`cause` が元のError、`deleteTask` / `updateTask` 呼び出しなし（rev.3） |
+| create 400 | `recurrence` なしで `addTask` が400 | 従来どおり `ProviderApiError` |
 | create | `recurrence` なし | 引数は従来どおり、返り値 `recurrence: null`、`deleteTask` 呼び出しなし |
 | update 保持 | 繰り返しTaskの title のみ | `getTask` 呼び出しなし、`updateTask` 引数 `{ content }` のみ、`recurrence` 保持（AC3） |
 | update 保持 | 繰り返しTaskの status / area / tags | `updateTask` 引数のキーが `labels`（＋`content`）のみで `due*` を含まない、`recurrence` 保持（AC3） |
@@ -436,6 +449,9 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | update 受理検証 | 日付期限 / 日時期限 / 期限なしのTaskに `recurrence: 'tomorrow'` | 復元引数がそれぞれ `{ dueDate }` / `{ dueDatetime }` / `{ dueString: null }`、FakeのTaskが呼び出し前と `toEqual` |
 | update 受理検証 | 復元の `updateTask` が失敗 | `ProviderApiError`（現在の期限と元の期限の要約を含む） |
 | update 組み合わせ | Connectorへ `recurrence` ＋ title を直接渡す（Domainを経由しない呼び出し） | Connectorは型上この入力を受け取らない前提のため、Testは書かない（Domain / Tool Testで拒否を確認する。§11.2 / §11.5） |
+| update 400 | `recurrence` 指定で `updateTask` が400 | `InputValidationError`（create 400と同じ文言）、復元の `updateTask` 呼び出しなし（rev.3） |
+| update 400 | `recurrence` なし（title / `due` 等）で `updateTask` が400 | 従来どおり `ProviderApiError` |
+| update 受理検証 | 繰り返しTaskの復元後に次回日付が変わる（Fakeで再計算を模す） | Messageに元の規則と復元後の次回日付（`now <date>`）を含む（rev.3） |
 | update 不存在 | `recurrence` / `due` 指定で `getTask` が404 | `NotFoundError`、`updateTask` 呼び出しなし |
 | complete | 繰り返しTask | 未完了・次回日付・`recurrence` が完了前と同じ（AC7） |
 | complete | 非繰り返しTask | `status: 'done'`、`recurrence: null`（AC7） |
@@ -556,7 +572,7 @@ v0.1は「`due` だけで更新する場合、対象が繰り返しタスクな�
 
 ### Q3. `recurrence` は英語限定、`dueLang: 'en'` を常に送る
 
-`dueLang` を送らない場合、Todoistの解釈言語がアカウント設定・自動判定に依存し得る。英語に固定すると、(1) 同じ入力が常に同じ解釈になる、(2) Tool説明の例と一致する、(3) LLMは日本語の依頼を英語のTodoist構文へ安定して変換できる。日本語のまま渡された場合は §7.4の受理検証で検出される（§5 P5で確認）。Todoist UIで日本語で作られた既存の規則は、取得時にそのままの文字列（`lang: 'ja'`）で返し、復元時もその `lang` を使う。
+`dueLang` を送らない場合、Todoistの解釈言語がアカウント設定・自動判定に依存し得る。英語に固定すると、(1) 同じ入力が常に同じ解釈になる、(2) Tool説明の例と一致する、(3) LLMは日本語の依頼を英語のTodoist構文へ安定して変換できる。~~日本語のまま渡された場合は §7.4の受理検証で検出される~~ → **rev.3訂正（§18 P5）**: `dueLang: 'en'` でもTodoistは言語を自動判定し、`毎週月曜` は繰り返しとして受理され、日本語のまま（`lang: 'ja'`）返る。正しく繰り返しとして登録されるため安全上の問題はなく、`dueLang: 'en'` 送信と英語推奨のTool説明は維持する。README / 仕様書に「Todoistが解釈できれば日本語でも受理され、日本語のまま返る」と書く。Todoist UIで日本語で作られた既存の規則は、取得時にそのままの文字列（`lang: 'ja'`）で返し、復元時もその `lang` を使う。
 
 ### Q4. 受理されなかった `recurrence` の扱い（rev.2: `create` は作成したTaskを削除する）
 
@@ -566,11 +582,13 @@ rev.1では、Connectorに削除操作を持ち込まないため `create` 失�
 
 ### Q5. 復元は「同じ規則・同じ日時」に戻すが、次回日付は再計算され得る
 
-繰り返しの期限を `dueString` で戻すと、Todoistが次回日付を今日以降で再計算するため、元の次回日付（例: 期限切れの過去日）と一致しない場合がある（§5 P8で確認）。floatingな単発時刻は `defaults.timezone` の固定時刻として戻る。いずれもErrorのMessageに書き、完全な復元は保証しない。発生条件は「受理されない文字列を `recurrence` に渡したとき」に限られる。
+繰り返しの期限を `dueString` で戻すと、Todoistが次回日付を再計算するため、元の次回日付と一致しない場合がある（§18 P8で実測: 10/26 → 11/02）。floatingな単発時刻は `defaults.timezone` の固定時刻として戻る。いずれもErrorのMessage（復元後の次回日付を含む）・README・個別仕様に書き、完全な復元は保証しない。発生条件は「受理されない文字列を `recurrence` に渡したとき」に限られる。
 
-### Q6. Todoistの400は `ProviderApiError` のまま
+**rev.3（Probeレビューで確定）**: `"<string> starting <date>"` を送れば英語の規則は次回日付まで戻せた（§18 P8b、3ケース）が、期限切れの過去日・`every!`・日本語や複雑な規則を網羅していないため、MVPでは採らずbest-effort復元のままとする。P8bの結果は将来の改善候補として §18に残す。
 
-`dueString` が解釈できないときTodoistは400を返すと想定する（§5 P6）が、400は他の原因でも返るため、`toFoundationError` で `InputValidationError` へ変換しない。Messageには既存どおりHTTP statusとTodoistのMessageが入るので、AI Clientは書式の誤りと判断できる。
+### Q6. `recurrence` を送った呼び出しの400だけ `InputValidationError` にする（rev.3で変更）
+
+rev.2までは、400は他の原因でも返るため `ProviderApiError` のままとし、「MessageのHTTP statusとTodoistのMessageでAI Clientは書式の誤りと判断できる」としていた。§18 P6でTodoistの400のMessageが `Bad Request` だけと分かり、この前提が成り立たないため、**`recurrence` を指定した `addTask` / `updateTask` の400に限り** `InputValidationError`（`Todoist rejected the request with recurrence "<rule>" (HTTP 400). Check the rule syntax…`）にする（§7.2 / §7.4）。400が規則の構文エラーとは限らないため「could not parse」とは断定せず、元のErrorは `cause` に保持する。`toFoundationError` は変更せず、Connectorの該当呼び出しだけで変換する。`recurrence` を含まない呼び出しの400は従来どおり。
 
 ### Q7. `due` 更新時に `getTask` が1回増える
 
@@ -611,6 +629,17 @@ ChatGPTのPlan Review rev.1は「修正推奨 2件」。Q1 / Q2 / Q3 / Q7、Time
 | [P2] §7.2: `task_create` がErrorを返してもTaskが残り、再試行で重複する | 作成したTaskを `deleteTask` で削除するロールバックに変更（§7.2）。`TodoistClient` のPickに `deleteTask` だけを追加（§3 / §4.4）。削除対象は同じ呼び出しで `addTask` が返したidに限定し、Toolとしては公開しない。削除失敗時だけ残存・id・復旧方法・再試行禁止を `ProviderApiError` で明示し、原子性の限界を明記（§7.2、§16 Q4）。Probe P10、Fake `deleteTask`、§11.4 / §12.1 I8 / §12.2 M6を追加・更新 |
 | [P2] §7.4: `task_update` がErrorでもtitle / labelsが更新済みになる | 更新時に `recurrence`（文字列・`null`）と title / status / area / tags の同時指定をDomainの `refine` で拒否（§2-6、§6、§16 Q11）。§7.3 / §7.4から組み合わせの扱いと「Other requested fields were applied」を削除し、受理検証失敗時は書き込み前の状態に戻る形に整理。Tool説明（§8）、Domain / Tool / Connector / Integration Test（§11.2 / §11.4 / §11.5 / §12.1 I9 / I11）、手動Verification M5、LLM Client Verification L6、AC6を更新 |
 
+### rev.3（PR #25 Re-review rev.2の確認ポイント、実装前Probeレビュー反映）
+
+Re-review rev.2で「Implementation Plan承認・修正必須事項なし」。実装前Probe（§18）のレビューで、Probe結果の反映と提案A / Bの判定を受けた。
+
+| 指摘 | 対応 |
+|---|---|
+| `deleteTask` が例外以外に `false` を返す可能性や、タイムアウトで結果が不明な場合を含め、ロールバック成功を過信しない（Re-review rev.2） | `true` 以外の戻り値・例外は「削除できたか不明」とし、確認の `getTask` で404を得たときだけ削除済みとみなす。残存を確認した場合／確認できない場合を分けて `ProviderApiError` で示す（§7.2）。§11.4に3ケース追加 |
+| Probeの実測（`date` にfloatingな日時、規則文字列の正規化、`dueLang: 'en'` でも日本語を受理、規則変更で時刻を引き継ぐ）をTest・個別仕様に反映 | §18.2の方針どおり実装時に反映。§16 Q3を訂正し、§8 `task_update` の説明に時刻の扱いを追記 |
+| 提案A: 条件付き採用（「could not parse」と断定しない、`cause` 保持、`recurrence` 以外の400は従来どおり） | `recurrence` を送った `addTask` / `updateTask` の400を `InputValidationError: Todoist rejected the request with recurrence "<rule>" (HTTP 400). Check the rule syntax…` にする（§7.2 / §7.4 / §16 Q6）。§11.4に400のケースを追加 |
+| 提案B: MVPでは見送り（best-effort復元を維持し、次回日付が再計算され得ることを明記。P8bは将来の改善候補として記録） | §7.4 / §16 Q5に確定事項として記載。復元成功時のMessageに元の規則と復元後の次回日付を含める。§11.4に1ケース追加 |
+
 ---
 
 ## 18. 実装前Probe結果（2026-10-25、実Todoist）
@@ -642,7 +671,12 @@ ChatGPTのPlan Review rev.1は「修正推奨 2件」。Q1 / Q2 / Q3 / Q7、Time
 - **日本語の規則（P5）**: `dueLang: 'en'` は引き続き送る（英語の結果は変わらず、日本語の入力も阻害しない）。Tool説明は英語での指定を推奨したまま、「Todoistが解釈できれば日本語でも受理され、日本語のまま返る」とREADME / 仕様書に書く。§16 Q3の根拠のうち「日本語は §7.4で検出」を「日本語もTodoistが繰り返しとして受理する」に改める。
 - **規則変更で時刻が引き継がれる（P8b）**: Tool説明・READMEの「規則の変更で次回日付が再計算される」に「時刻を変えるときは規則に含める（例: `every day at 7am`）」を加える。
 
-User判断が必要なもの（承認済みPlanからの変更になるため）:
+User判断が必要なもの（承認済みPlanからの変更になるため）。**判定はChatGPT Probeレビュー（PR #25）で確定し、§17 rev.3で反映した**:
+
+- 提案A → **条件付き採用**。「could not parse」と断定しない文言にし、`cause` 保持、`recurrence` 以外の400は従来どおり（§7.2 / §7.4 / §16 Q6）。
+- 提案B → **MVPでは見送り**。元の `string` / `lang` によるbest-effort復元を維持し、次回日付が再計算され得ることをError・README・個別仕様に明記（§7.4 / §16 Q5）。P8bは将来の改善候補として記録に残す。
+
+以下は判断前の提案（記録として残す）:
 
 - **提案A（P6）: `recurrence` を送った呼び出しの400を `InputValidationError` にする。** Todoistの400は `Bad Request` しか返さず、§16 Q6のままだとAI Clientには `Todoist API error: HTTP 400: …Bad Request` しか届かず、書式の誤りだと判断しにくい。rev.2で `task_update` の `recurrence` は単独操作になったため、その呼び出しの400は実質的に規則の解釈失敗に限られる。`task_create` でも、title / Labelは事前にDomainで検証済み。**案**: `recurrence` を送った `addTask` / `updateTask` の400に限り `InputValidationError: Todoist could not parse recurrence "<rule>" (HTTP 400). Use an English rule such as "every monday".` にする（`cause` に元のErrorを保持）。それ以外の400は従来どおり `ProviderApiError`。
 - **提案B（P8 / P8b）: 繰り返し規則の復元に `starting <date>` を使う。** §7.4の復元（受理されない文字列で `task_update` した場合）は、現Planでは元の `string` を送るだけなので次回日付がずれる（P8: 10/26 → 11/02）。**案**: `restoreDueArgs` で、元の `lang` が `en`（または未設定）なら `"<string> starting <date の日付部分>"` を送り、次回日付まで完全に戻す。日本語など英語以外の規則は `starting` が400になるため、従来どおり元の `string` / `lang` を送り、次回日付が再計算され得ることをMessageで示す（§16 Q5の制約は英語以外の規則だけに縮小する）。なお、元の次回日付が過去（期限切れ）の場合に `starting <過去日>` がどう解釈されるかは未確認で、実装時のIntegration Testで確認する。
