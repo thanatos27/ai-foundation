@@ -1,11 +1,11 @@
 # Life Log MVP — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち。User承認まで本実装は開始しない）**
-- 作成: Coding Agent (Claude Code) / 2026-10-24
+- Status: **rev.2（Plan Review rev.1の指摘を反映。User承認まで本実装は開始しない）**
+- 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #20 レビュー反映）
 - 対象: [Issue #14 [MVP] Life Log：Markdownによる個人活動アーカイブ](https://github.com/thanatos27/ai-foundation/issues/14)（本文 + コメント「詳細設計 v0.1」「詳細設計 v0.2」。**v0.2を正**とし、v0.1のGoogle Drive直結案は採らない）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md), [Phase 4 Design Issue](../specs/phase-4-knowledge.md), [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Areas Implementation Plan](areas-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
-仕様に明記がなく本Planで決めた箇所は [§21 懸念点 / 未確定事項](#21-懸念点--未確定事項) にQとしてまとめている。
+仕様に明記がなく本Planで決めた箇所は [§21 懸念点 / 未確定事項](#21-懸念点--未確定事項) にQとしてまとめている。ChatGPTによるPlan Review（PR #20）でQ1〜Q10はすべて採用となった（一部は条件付き。§21に記載）。追記の指摘への対応は [§22 Review対応履歴](#22-review対応履歴) を参照。
 
 ---
 
@@ -43,7 +43,7 @@
 2. **保存先は既存Obsidian Vault**（Filesystem）。Google Drive API・OAuth・移行処理は実装しない（v0.2）。
 3. **境界処理は1箇所に保つ。** `FilesystemVaultStorage` が持つ「Linkを辿らない・Directory外に出ない・排他作成・追記のみ・絶対パスを漏らさない」処理を、Directory名とMessageを引数にとる内部クラスへ抽出し、KnowledgeとLife Logの両方がそれを使う。Life Log用にファイル操作を書き直さない（§4）。
 4. **Knowledgeの外部挙動は変えない。** `FilesystemVaultStorage` / `VaultStorage` の公開API・Error Message・`knowledge_*` の入出力を維持し、既存Knowledge Testを**無変更で**通す（後方互換の検証手段）。
-5. **Providerに依存しないID。** Life Log IDは `lifelog:<Life Log Directory内のファイル名>` とし、Vault内の位置（`AI Foundation/LifeLog/`）もProvider固有ID（Drive file ID）も含めない（§6、Q2）。
+5. **Providerに依存しないID。** Life Log IDは `lifelog:<Life Log Directory内のファイル名>` とし、Vault内の位置（`AI Foundation/LifeLog/`）もProvider固有ID（Drive file ID）も含めない（§6、Q2）。将来の移行でIDを維持できるかは、ファイル名規則を保ったまま移す移行規則に依存する（§13。現時点で完全な移行互換は保証しない）。
 6. **Storage境界をProvider差し替え点にする。** Life Log Connectorはファイル名・ID・本文の組み立てだけを持ち、ファイル操作は `LifeLogStorage` Interface越しに行う。将来のGoogle Drive版はこのInterfaceの別実装として追加できる（§13）。
 7. **黙って上書きしない。** 作成は `O_EXCL` の排他作成、追記は `O_APPEND` のみで、既存ファイルを書き換える（truncate / rename）コードパスを作らない。
 8. **自動作成・走査をしない。** Life Log Directoryは手動で作成する。ToolはVault全体を走査せず、Directoryも作らない（v0.2）。MVPに一覧・検索がないため `list` も呼ばない。
@@ -120,7 +120,8 @@ export class FilesystemVaultDirectory {
 ```
 
 - 現在の `knowledgeRoot` / `existingFile` / `walk` / `assertInside` / `fsError` / `isInside` / `errnoOf` / `isMissing` を**ロジックを変えずに**移動し、Messageの組み立てだけを `labels` 経由にする。
-- `read` はBufferを返し、decodeはAdapterが行う（KnowledgeはLenient、Life LogはStrict。Q5）。
+- `read` はBufferを返し、decodeはAdapterが行う（KnowledgeはLenient、Life LogはStrict。Q5）。**fatal decodeはLife Log Adapterだけ**で行い、共通コアはdecodeしない。
+- 共通コアの `read` は現行の `Promise.all([readFile(target, 'utf8'), stat(target)])` を `readFile(target)`（Buffer）に変えるだけで、`existingFile` による事前の境界確認・`isMissing` → NotFound・`fsError` の分岐は現行と同じ順序・同じ分類で保つ。
 - `vault_path` 未設定 / Vaultが読めない場合のMessage（`sources.knowledge.obsidian.vault_path …`）は両者で同じKeyを使うため共通のままにする（§8.2）。
 
 ### 4.3 Knowledge Adapter（`filesystem-storage.ts`）
@@ -134,6 +135,10 @@ export class FilesystemVaultStorage implements VaultStorage {
 
 - 公開API（Constructor Option、`VaultStorage` の5メソッド）と全Messageを**1文字も変えない**。`tests/connectors/obsidian/filesystem-storage.test.ts` / `connector.test.ts` / `tests/integration/obsidian.integration.test.ts` を無変更で通すことを、リファクタリングの完了条件にする（§15 手順2）。
 - `text.replace(/^\uFEFF/, '')` と `readFile(…, 'utf8')` 相当のLenient decode（不正なbyteはU+FFFD）は現行どおり。
+- Byte → 文字列の境界（Review指摘2）: Knowledge Adapterは `bytes.toString('utf8')`（`readFile(…, 'utf8')` と同じNode.jsのdecoder。不正なbyteはU+FFFDへ置換し、例外にしない）→ BOM除去の順で、現行と同じ文字列を返す。エラーメッセージも現行と同一。
+- これを次の2つで固定する。
+  - 既存Test（`filesystem-storage.test.ts` / `connector.test.ts` / `markdown.test.ts`）を**無変更で**成功させる（BOM除去・Messageを含む）。
+  - 既存TestにLenient decodeのケースがないため、**新規ファイル** `tests/connectors/obsidian/filesystem-storage-decoding.test.ts` を追加し、Knowledgeについて「BOM付きファイルはBOMなしで読める」「不正なUTF-8 byteを含むファイルはErrorにならずU+FFFDを含む文字列として読め、`knowledge_search` の対象になる」を固定する（既存Testファイルは変更しない）。
 
 ### 4.4 共通化しないもの（理由）
 
@@ -220,6 +225,21 @@ lifelog:<Life Log Directory内のファイル名>        例: lifelog:2026-10-03
 - `external_ref` はVault相対パス（`<directory>/<name>`）。Knowledgeの `external_ref` と同じ形で、絶対パスは含めない。
 - IDに年別Directoryを含める拡張（`lifelog:2026/2026-10-03-….md`）は将来の形式として予約し、MVPのparseでは拒否する。
 
+### 6.3 Obsidianで手動作成した記事（Review指摘3）
+
+**Life Logの記事 = 設定DirectoryのDirectory直下にある、ファイル名規則（§6.1の `parseLifeLogFileName` が成功する名前）に合う通常ファイル** と定義する。作成経路は問わない。
+
+| ファイル | `lifelog_get` / `lifelog_append` |
+|---|---|
+| `lifelog_create` で作成した記事 | 可 |
+| ユーザーがObsidianで手動作成した `2026-10-05-鎌倉.md`（設定Directory直下） | **可**（IDは `lifelog:2026-10-05-鎌倉.md`）。中身はFrontmatterの有無を問わずそのまま扱う |
+| 手動作成したが規則外の名前（`鎌倉旅行.md`、`2026-10-5-鎌倉.md`、`2026-02-30-x.md`、`2026-10-05-x.MD`） | 不可（IDとして表現できないため `InputValidationError`）。規則に合う名前へObsidianで変更すれば対象になる |
+| 規則に合うが、サブDirectoryや他のDirectoryにある | 不可（直下のみ） |
+| 手動作成のファイル名にLife Logの無害化で置換される文字（例 `#`）を含む | 規則（日付 + `-` + 1文字以上 + `.md`）と `isValidSegment` を満たせば可。無害化は**新規作成時のファイル名生成**にだけ適用し、既存ファイルの参照では行わない |
+
+- 同名判定（`lifelog_create` の拒否）も作成経路を問わない。手動作成した `2026-10-05-鎌倉.md` があれば、同じ日付・タイトルの `lifelog_create` は失敗する（排他作成のため）。
+- 将来の移行（§13）でも、このファイル名規則が **IDとして参照し続けられることの前提** になる。
+
 ---
 
 ## 7. Tool設計（`src/tools/lifelog.ts`）
@@ -243,7 +263,7 @@ export function registerLifeLogTools(server: McpServer, { config, connectors }: 
 Description（要旨）:
 
 - `lifelog_create`: 旅行・外出・イベントなど、**ある日の出来事**を自由形式のMarkdown記事として新規保存する（再利用する学び・考察は `knowledge_create`、予定は `schedule_create`）。ファイル名は `YYYY-MM-DD-<title>.md`。同日に別タイトルの記事は作れるが、同じ日付・タイトルの記事があれば上書きせず失敗するので、追記したいときは `lifelog_append`。contentはそのまま保存され、見出し・日付・Frontmatterは付け足さない。画像・動画は外部ストレージのURLを本文に書く。返るidで後から取得・追記する。
-- `lifelog_get`: idで記事の全文を取得する。**一覧・検索Toolはない**。idは `"lifelog:" + Life Logフォルダ内のファイル名`（例 `lifelog:2026-10-03-東京散策.md`）なので、ユーザーがObsidianで見たファイル名を伝えた場合はそれを使える。ファイル名を推測で作らない（Q9）。
+- `lifelog_get`: idで記事の全文を取得する。**一覧・検索Toolはない**。idは `"lifelog:" + Life Logフォルダ内のファイル名`（例 `lifelog:2026-10-03-東京散策.md`）なので、`lifelog_create` が返したid、またはユーザーがObsidianで見た**正確なファイル名**を伝えた場合はそれを使える。ファイル名を推測で作らない。idもファイル名も分からない記事はこのToolでは取得できないので、ユーザーにObsidianでファイル名を確認してもらう（Q9）。
 - `lifelog_append`: 既存記事の末尾へ段落として追記する。既存本文は変更しない。日時・見出しは付けない。呼び直すと再度追記される。
 
 ---
@@ -390,7 +410,7 @@ export interface ObsidianLifeLogConnectorOptions {
 | `append({ id, content })` | `name = parseLifeLogId(id)` → `file = storage.read(name)`（存在・UTF-8・境界の確認を兼ねる）→ `storage.append(name, appendText(file.text, content))` → `toLifeLog(name)` |
 | `toLifeLog(name)` | `{ id: formatLifeLogId(name), type: 'lifelog', ...parseLifeLogFileName(name), source: 'obsidian', external_ref: storage.refOf(name) }` |
 
-- 本文に見出し・日付・Frontmatterを付け足さない（v0.2「Markdown本文は呼出元LLMが整える」）。
+- 本文に見出し・日付・Frontmatterを付け足さない（v0.2「Markdown本文は呼出元LLMが整える」）。**例外**として、作成時は改行をLFへ正規化し末尾改行を1つ保証する。追記時は既存ファイルの改行コードへ揃え、段落区切りの改行と末尾改行を補う（`appendText`）。これ以外の加工はしない（Q4）。
 - `appendText` は既存ファイルの改行コード（CRLFがあればCRLF）を維持し、段落区切りの空行を必要な分だけ入れる（Knowledgeと同じ関数）。
 
 ### 10.3 同時実行・外部編集（v0.1で求められた競合方針）
@@ -399,12 +419,19 @@ export interface ObsidianLifeLogConnectorOptions {
 |---|---|---|
 | 同じ日付・タイトルの `lifelog_create` が同時に2件 | `O_CREAT \| O_EXCL` により**ちょうど1件**が成功し、他は `InputValidationError`（already exists）。後着が先着の内容を上書きすることはない | Automated Testで固定（§16.4） |
 | 書き込み途中で失敗 | 作成したファイルをunlinkし、半端な記事を残さない（既存処理） | 既存Test |
-| 同じ記事への `lifelog_append` が同時に2件 | 両方の内容が末尾に残る（`O_APPEND` はtruncateしない）。順序は保証しない。区切りの空行は各呼び出しの読み込み時点で決めるため、競合時に空行の数がずれることはある | Testで「両方の内容が残り、元の本文も残る」ことを固定 |
-| 読み込み後、追記前にObsidian等で編集された | 追記は末尾へのappendのみなので、外部の編集内容を消さない。区切りの空行だけが読み込み時点基準になり得る | 同上 |
+| 同じ記事への `lifelog_append` が同時に2件 | 各書き込みはファイル末尾から行われ（`O_APPEND`）、truncateしないため、**既存の本文は消えない**。2件の追記テキストがそれぞれ1つの塊として残ることは、§16.4のTest条件（同一プロセス・小さい追記テキスト）では確認するが、**任意サイズ・複数プロセスでの追記テキスト全体の不可分性は保証しない**（下記）。順序も保証しない。区切りの空行は各呼び出しの読み込み時点で決めるため、競合時に空行の数がずれることはある | §16.4（条件付きの検証） |
+| 読み込み後、追記前にObsidian等で編集された | 追記は末尾へのappendのみなので、外部の編集内容を消さない。区切りの空行だけが読み込み時点基準になり得る | §16.4 |
+| 追記の書き込み途中で失敗（ディスク容量不足・同期ソフトのロック等） | 作成時と異なりunlinkできない（既存本文があるため）。**末尾に追記テキストの一部だけが残ることがある**。Errorは `ProviderApiError` で返す。既存本文は変わらない | **MVP制約**としてREADMEに記載 |
 | 読み込み後、追記前に削除・改名された | `O_CREAT` なしで開くため再作成せず `NotFoundError` | 既存処理 + Test |
 | Obsidianが未保存の古い内容でファイル全体を保存し直す | AI Foundation側では検知・防止できない（Obsidianの保存はAI Foundationの外）。**MVP制約**としてREADMEに記載 | — |
 
-ロック・Version比較は導入しない。上書き系の書き込み（truncate / rename / writeFileでの置換）を一切行わないことで「黙って上書きしない」を構造的に満たす。
+**`O_APPEND` が保証すること・しないこと**（Review指摘1）:
+
+- 保証すること: 各書き込み（`write` システムコール）の開始位置がその時点のファイル末尾になること。AI Foundationは既存内容をtruncate / rename / 置換しないので、**AI Foundationの書き込みが既存の本文を消すことはない**。
+- 保証しないこと: 1回の `lifelog_append` の追記テキスト全体が、1回の書き込みとして不可分に入ること。Node.jsの `FileHandle.writeFile` は大きなデータを複数回の `write` に分けることがあり、その間に別プロセス（別のMCP Server instance、Obsidian、同期ソフト）の書き込みが入ると、2つの追記テキストが**交互に混ざる**可能性がある。また、ローカル以外のFilesystem（ネットワークドライブ等）では `O_APPEND` 自体の原子性が弱い場合がある。
+- 同時追記のAutomated Testは、この条件付きの性質（同一プロセス・小さいテキスト）の確認であり、一般的な原子性の証明ではない。
+
+ロック・Version比較は導入しない。上書き系の書き込み（truncate / rename / writeFileでの置換）を一切行わないことで「AI Foundationが黙って上書きしない」を構造的に満たす。
 
 ---
 
@@ -457,7 +484,9 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 | Connector | ファイル名・ID・本文組み立てはそのまま再利用 | ロジックを `LifeLogStorage` 越しに書き、`node:fs` を `FilesystemVaultDirectory` に閉じ込める |
 | Storage | `GoogleDriveLifeLogStorage implements LifeLogStorage`（folder_id直下を名前で解決）を追加 | Interfaceはファイル名単位・Directory直下のみ |
 | Config | `provider: google_drive` + `google_drive: { folder_id }` を追加 | Provider名の下に設定をまとめる（Q1） |
-| データ移行 | 同じファイル名でDriveフォルダへコピーすれば**IDは不変** | ファイル名がIDの全情報 |
+| データ移行 | ファイル名規則（§6.1）を保ったまま移す移行規則を別途定める | IDはファイル名だけから決まる |
+
+**IDの互換性について**: IDがファイル名だけから決まるため、同じファイル名・Directory直下という構成のまま移せば、同じIDで参照し続けられる**見込み**がある。ただし、移行先の命名制約（Driveは同名ファイルを複数持てる、など）や、同名ファイルの扱い・名前の対応付け（マッピング）を含む移行規則は移行時に設計する。現時点で完全な移行互換を保証するものではない（Q2）。前提になるのは、手動作成の記事を含め §6.3 のファイル名規則に合うことである。
 
 移行時に別途設計が必要な点（本MVPでは扱わない）: Drive APIには原子的な名前一意制約がないため `createExclusive` の競合方針、`drive.file` Scopeで手動配置ファイルを扱えない点（Issue #14 v0.1の論点）。KnowledgeのGoogle Drive化（IDが `obsidian:<vault path>` でVault位置に依存する）は本Issueの範囲外。
 
@@ -496,7 +525,8 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 | `tests/connectors/obsidian/lifelog-id.test.ts` | 新規 | ID・ファイル名 |
 | `tests/connectors/obsidian/filename.test.ts` | 変更（追加のみ） | `sanitizeFileTitle`。既存ケースは無変更 |
 | `tests/connectors/obsidian/text.test.ts` | 新規 | `markdown.test.ts` の `appendText` ケースはそのまま残し（re-export経由で通る）、`normalizeBody` を追加 |
-| `tests/connectors/obsidian/vault-directory.test.ts` | 新規 | 抽出したクラスをlabels付きで直接検証（labelsがMessageに使われること） |
+| `tests/connectors/obsidian/vault-directory.test.ts` | 新規 | 抽出したクラスをlabels付きで直接検証（labelsがMessageに使われること、`read` がdecodeせずBufferを返すこと） |
+| `tests/connectors/obsidian/filesystem-storage-decoding.test.ts` | 新規 | Knowledge storageのByte → 文字列境界（BOM除去・不正UTF-8のLenient decode）を固定（§4.3。既存Testファイルは変更しない） |
 | `tests/connectors/obsidian/filesystem-lifelog-storage.test.ts` | 新規 | temp Vaultで境界・Error |
 | `tests/connectors/obsidian/lifelog-connector.test.ts` | 新規 | temp Vaultで作成→取得→追記・競合・独立性 |
 | `tests/helpers/vault.ts` | 変更 | `LIFELOG_DIR = 'AI Foundation/LifeLog'` を作成対象に追加（既存の構成・関数は不変） |
@@ -549,7 +579,7 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 
 - `LifeLogCreateInputSchema`: 正常、`2026-02-29` / `2026-13-01` / `2026-1-1` / `2026/10/03` 拒否、`2028-02-29` 受理、空白のみのtitle・content拒否、未知Key拒否
 - `LifeLogDocumentSchema`: `content: ''` を許可
-- Config: `sources.lifelog` 省略で起動可、`provider` が `obsidian` 以外は拒否、`directory` の相対・`/`区切り検証（`VaultRelativeDirSchema` の既存ケースと同等）、未知Key拒否、`knowledge_dir` と同一 / 内側 / 外側（包含）/ 大文字小文字違いの同一を拒否、兄弟Directory（`AI Foundation/Knowledge` と `AI Foundation/LifeLog`）は受理、どちらか未設定なら判定しない
+- Config: `sources.lifelog` 省略で起動可、`provider` が `obsidian` 以外は拒否、`directory` の相対・`/`区切り検証（`VaultRelativeDirSchema` の既存ケースと同等）、未知Key拒否、`knowledge_dir` と同一 / 内側 / 外側（包含）/ 大文字小文字違いの同一を拒否、兄弟Directory（`AI Foundation/Knowledge` と `AI Foundation/LifeLog`）は受理、どちらか未設定なら判定しない。**`sources.lifelog` を含まない既存の設定（`tests/fixtures/config/*`、Repositoryの `config.yaml` からlifelogを除いたもの）は、現行と同じ結果（受理 / 同じError）になる**（Q7の条件）
 
 ### 16.3 純粋関数
 
@@ -567,7 +597,10 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 | 同名拒否 | 同じ日付・タイトルの2回目は `InputValidationError`、既存ファイルの内容が**バイト単位で不変** |
 | 無害化で衝突 | `東京:散策` と `東京 散策` → 同じファイル名になり2件目は拒否（上書きしない） |
 | 同時作成 | 同じ日付・タイトルで `Promise.allSettled` 10件 → fulfilled 1件・rejected 9件（すべてalready exists）、ファイルの内容は成功した1件のもの |
-| 同時追記 | 同じ記事へ `Promise.all` で2件 → 元の本文と両方の内容が含まれる |
+| 同時追記（条件付き） | **同一プロセス・数KB以下の追記テキスト**で、同じ記事へ `Promise.all` で2件 → 元の本文が先頭にそのまま残り、両方の追記テキストがそれぞれ連続した塊として含まれる。§10.3のとおり、任意サイズ・複数プロセスでの不可分性を示すTestではないことをTest名・コメントに明記する |
+| 追記の書き込み失敗 | `FilesystemVaultDirectory` の書き込みが失敗する状況（`append` の書き込みでErrorを投げるStub）で `ProviderApiError` になり、既存本文が変わらない（部分追記が残り得ることはREADMEの制約として扱い、Testでは既存本文の保持のみ確認） |
+| 手動作成の記事（§6.3） | Temp Vaultの `LifeLog` 直下に手で置いた `2026-10-05-鎌倉.md`（Frontmatterあり / なし）を `lifelog:2026-10-05-鎌倉.md` で取得・追記できる。規則外の名前（`鎌倉旅行.md`、`2026-10-5-鎌倉.md`）は `InputValidationError`。手動作成の記事と同じ日付・タイトルの `lifelog_create` は失敗し、手動の記事が不変 |
+| UTF-8の完全性 | 作成・追記したファイルを**Bufferで読み**、`TextDecoder({ fatal: true })` で例外なくdecodeでき、BOMを含まず、期待する文字列と一致する（日本語・絵文字・サロゲートペアを含む本文、CRLFファイルへの追記を含む） |
 | 外部編集との共存 | `read` 後に外部で末尾へ書き足した状態を再現（Storage Fakeで `read` と `append` の間にファイルを書き換える）→ 外部の書き足しが消えない |
 | 削除・改名後 | 取得・追記で `NotFoundError`、追記で**ファイルが再作成されない** |
 | 本文 | 作成時にFrontmatter・見出しを付けない（ファイル全体 = 正規化した `content`）、BOM付きファイルの取得でBOMを除去、Obsidianで追加されたFrontmatterは `content` にそのまま含まれる、非UTF-8 → `ProviderApiError` かつ追記もしない |
@@ -585,7 +618,7 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 
 ### 16.6 回帰
 
-- Knowledge: `tests/connectors/obsidian/*`（既存）、`tests/tools/knowledge.test.ts` を**無変更で**成功させる。特に `filesystem-storage.test.ts` が固定しているMessage（`"obsidian:<path>"`、`already exists.*knowledge_append`、`symbolic link or junction`、Configuration ErrorのMessage）が同一であること
+- Knowledge: `tests/connectors/obsidian/*`（既存）、`tests/tools/knowledge.test.ts` を**無変更で**成功させる。特に `filesystem-storage.test.ts` が固定しているMessage（`"obsidian:<path>"`、`already exists.*knowledge_append`、`symbolic link or junction`、Configuration ErrorのMessage）が同一であること。Byte → 文字列の境界は `filesystem-storage-decoding.test.ts`（新規）で補う（§4.3）
 - Area / Project / Collection / Task / Schedule: 既存Testを無変更で成功させる
 
 ---
@@ -605,6 +638,7 @@ MVPでは実装しないが、次の構成により移行を妨げない。
 ### 17.2 手動Verification（記録のみ）
 
 - Obsidianで作成された記事が表示され、Obsidianで編集した内容が `lifelog_get` に反映される
+- Obsidianで手動作成した規則どおりの名前の記事を、ファイル名から作ったIDで取得・追記できる（§6.3）
 - Obsidianで記事を開いたまま `lifelog_append` → Obsidian側に追記が反映される（§10.3の制約の確認）
 - Google Drive for desktopの同期フォルダ上のVaultで作成・追記できる（同期はAI Foundationの責務外）
 
@@ -617,9 +651,14 @@ MVPでは実装しないが、次の構成により移行を妨げない。
   1. Vault内に `AI Foundation/LifeLog` を手動で作成する（自動作成しない）。`knowledge_dir` の内側・外側（包含関係）には置けない
   2. `sources.lifelog.obsidian.directory` を設定する（`config.yaml` に既定値あり）。Vaultは `sources.knowledge.obsidian.vault_path` を使う
   3. ファイル名は `YYYY-MM-DD-<title>.md`。危険文字の置換はKnowledgeと同じ。同名は上書きせずError
-  4. 一覧・検索Toolはない。IDは `lifelog:<ファイル名>`
-  5. MVPの制約: 同時追記の順序は保証しない。Obsidianで開いたまま未保存の編集がある記事へ追記した場合、Obsidian側の保存で追記が失われることがあり得る（AI Foundationからは検知できない）。大文字小文字だけが異なるタイトルは、Windows / macOSでは同名扱いになる
-  6. 画像・動画は外部ストレージのURLを本文に書く。Project / Area / Knowledgeへの参照はIDやURLを任意に書いてよい（自動の紐付けはしない）
+  4. 一覧・検索Toolはない。IDは `lifelog:<ファイル名>`。`lifelog_create` が返したIDか、Obsidianで確認した**正確なファイル名**で取得・追記する。どちらも分からない記事はAI Foundationからは取得できない
+  5. Obsidianで手動作成した記事も、設定Directory直下で `YYYY-MM-DD-<タイトル>.md` の規則に合えば取得・追記できる（規則外の名前は対象外）。将来の移行でもこの規則が参照の前提になる
+  6. MVPの制約:
+     - 同時追記の順序は保証しない。複数プロセスから同時に大きな内容を追記した場合、追記内容が混ざることがあり得る（既存本文は消えない）
+     - 追記の書き込み途中で失敗した場合（ディスク容量不足・同期ソフトのロック等）、末尾に追記内容の一部だけが残ることがある。Obsidianで確認・修正する
+     - Obsidianで開いたまま未保存の編集がある記事へ追記した場合、Obsidian側の保存で追記が失われることがあり得る（AI Foundationからは検知できない）
+     - 大文字小文字だけが異なるタイトルは、Windows / macOSでは同名扱いになる
+  7. 画像・動画は外部ストレージのURLを本文に書く。Project / Area / Knowledgeへの参照はIDやURLを任意に書いてよい（自動の紐付けはしない）
 
 ---
 
@@ -654,51 +693,63 @@ Claude Codeから以下を依頼し、Tool選択と出力を記録する。
 | Knowledge全既存テスト・Area/Project等の回帰 | §16.6 |
 | README・全体仕様書の更新 | §14.3、§18 |
 | 一覧・検索・削除・タグ・自動Knowledge化・Google Drive移行はMVP外 | Toolを3件に限定（§7）、§13 |
+| 追記の競合保証の範囲が正確に定義されている（Review指摘1） | §10.3「`O_APPEND` が保証すること・しないこと」、§16.4（条件付きの同時追記・書き込み失敗）、§18 |
+| Knowledgeのdecode挙動が変わらず、Life Logだけ厳格・作成/追記後のUTF-8が完全（Review指摘2） | §4.2、§4.3、§16.4「UTF-8の完全性」、§16.6 |
+| Obsidianで手動作成した規則どおりの記事を取得・追記できる（Review指摘3） | §6.3、§16.4「手動作成の記事」、§17.2、§18 |
 
 ---
 
 ## 21. 懸念点 / 未確定事項
 
-### Q1. Configの形を `sources.lifelog.obsidian.directory` にする
+PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。各Qの末尾に決定を記す。
+
+### Q1. Configの形を `sources.lifelog.obsidian.directory` にする（採用）
 
 - 提案: v0.2の設定案（`provider` と `directory` を `sources.lifelog` 直下に置く）を、既存の `sources.knowledge.obsidian.*` / `sources.area.notion.*` に揃えてProvider名の下へ入れる。将来 `provider: google_drive` のとき `google_drive: { folder_id }` を並べられ、Provider固有の値が混ざらない。
 - 代替: v0.2の案どおり `sources.lifelog.directory`（Drive移行時は `directory` をobsidian専用Keyとして扱うか、Keyを移す）。
+- 決定（rev.2）: 提案どおり。Provider固有の設定を分離する。
 
-### Q2. IDを `lifelog:<ファイル名>`（Life Log Directory相対）にする
+### Q2. IDを `lifelog:<ファイル名>`（Life Log Directory相対）にする（採用）
 
-- 提案: v0.2の優先候補「`lifelog:<LifeLogルート以下の相対Markdownパス>`」を採用し、MVPでは直下のみなのでファイル名1つになる。Vault内の位置（`AI Foundation/LifeLog`）を含めないため、Directoryの移動・Google Driveへの移行でIDが変わらない。`external_ref` はVault相対パス（Knowledgeと同じ形）。
+- 提案: v0.2の優先候補「`lifelog:<LifeLogルート以下の相対Markdownパス>`」を採用し、MVPでは直下のみなのでファイル名1つになる。Vault内の位置（`AI Foundation/LifeLog`）を含めないため、Directoryの移動でIDが変わらず、Google Driveへの移行でもファイル名規則を保てばIDを維持しやすい。`external_ref` はVault相対パス（Knowledgeと同じ形）。
 - 代替: Knowledgeと同じVault相対パス（`lifelog:AI Foundation/LifeLog/2026-….md`）。Directory変更・移行でIDが変わる。
 - 帰結: Obsidianでファイル名を変更するとIDも変わる（Knowledgeと同じ）。
+- 決定（rev.2）: 提案どおり。直下1階層のみ許可する。移行でIDを維持するには同名ファイルの扱い・対応付けを含む移行規則が必要なため、**完全な移行互換を現時点で保証する表現は使わない**（§2 方針5、§13を修正）。
 
-### Q3. 返却する `title` はファイル名から得た値（無害化後）にする
+### Q3. 返却する `title` はファイル名から得た値（無害化後）にする（採用）
 
 - 背景: Frontmatterを使わないため、取得時のタイトルの情報源はファイル名だけになる。
 - 提案: `create` も `get` もファイル名から `title` を返し、同じ記事で両Toolの結果を一致させる（`東京:散策` で作成すると `title: "東京 散策"`）。
 - 代替: `create` だけ入力どおりのtitleを返す（同じ記事で値がずれる）。
+- 決定（rev.2）: 提案どおり。
 
-### Q4. 本文は加工せず保存し、取得はファイル全文を返す
+### Q4. 本文は加工せず保存し、取得はファイル全文を返す（採用）
 
 - 提案: 作成時に見出し（`# title`）・日付・Frontmatterを付け足さない（v0.2「呼出元LLMが整える」「Frontmatterなし」）。改行はLFへ正規化し末尾改行を保証する（Knowledgeと同じ）。取得はファイル全文（ユーザーがObsidianでFrontmatterを足した場合もそのまま）を `content` に返す。
 - 代替: 本文先頭に `# <title>` を自動挿入する（Obsidianでの見た目は良いが、LLMが本文に見出しを書くと重複する）。
+- 決定（rev.2）: 提案どおり。改行のLF正規化・末尾改行の追加（追記時は既存の改行コードへの統一と段落区切り）は**例外**として明示する（§10.2）。
 
-### Q5. 非UTF-8の記事はLife Logだけ厳格にErrorにする
+### Q5. 非UTF-8の記事はLife Logだけ厳格にErrorにする（採用）
 
 - 背景: 現行Knowledgeは `readFile(…, 'utf8')` で不正byteをU+FFFDへ置換して読む。v0.1/v0.2はLife Logの「UTF-8・破損ファイル」の検証を求めている。
 - 提案: Life Logは `TextDecoder({ fatal: true })` で読み、非UTF-8は `ProviderApiError`（取得も追記もしない）。Knowledgeの挙動は変えない（後方互換を優先。必要なら別Issue）。
 - 代替: Knowledgeと同じLenient decode（置換文字を含む本文を返し、追記もする）。
+- 決定（rev.2）: 提案どおり。共通コアはdecodeせず、Knowledgeの挙動が変わらないことをTestで固定する（§4.2、§4.3）。
 
-### Q6. 追記の競合はロックせず、append-onlyで「上書きしない」を保証する
+### Q6. 追記の競合はロックせず、append-onlyで「上書きしない」を保証する（採用）
 
 - 提案: §10.3のとおり。`O_APPEND` のみでtruncate / renameをしないので、AI Foundationの書き込みが既存内容を消すことはない。区切りの空行の数が競合時にずれ得ること、Obsidianが古い内容で保存し直す場合はAI Foundationから検知できないことはMVP制約としてREADMEに書く。
 - 代替: 読み込み時のmtime / sizeを追記直前に比較し、変化していたら `ProviderApiError` で中止する（区切りのずれは防げるが、Filesystem上で比較と追記を原子的にできないため完全ではなく、Obsidianの保存し直しも防げない）。
+- 決定（rev.2）: 提案どおり `O_APPEND` のみ。Obsidianの未保存編集による上書きを防げないことをREADMEに明記する。保証範囲は §10.3 で正確化した（追記テキスト全体の不可分性は保証しない、書き込み失敗時の部分追記）。
 
-### Q7. Life Log DirectoryとKnowledge Directoryの重なりを起動時に拒否する
+### Q7. Life Log DirectoryとKnowledge Directoryの重なりを起動時に拒否する（採用・条件付き）
 
 - 背景: `knowledge_search` はサブフォルダを再帰検索する。Life LogをKnowledge Directoryの内側に置くと、Life Log記事がKnowledgeとして検索・追記対象になり「独立した領域」（AC）に反する。逆（Knowledge DirectoryがLife Log Directoryの内側）は実害は小さいが、構成として紛らわしい。
 - 提案: 同一・包含関係を `ConfigError` にする（大文字小文字を無視。Windows / macOSのFilesystemに合わせる）。
 - 代替: 内側だけ拒否する / 判定しない（READMEの注意のみ）。
+- 決定（rev.2）: 提案どおり同一・包含を拒否する。ただし既存設定に影響を出さないよう、**`sources.lifelog`（または `directory`）が未設定のときは現行と同じ挙動**にする（判定しない。§8.1、§16.2）。
 
-### Q8. Instructions・仕様書への反映
+### Q8. Instructions・仕様書への反映（採用）
 
 - `src/instructions.ts` に以下を追記したい（Areas Q6と同じ扱い）。
 
@@ -710,21 +761,42 @@ Claude Codeから以下を依頼し、Tool選択と出力を記録する。
 
 - `docs/specs/lifelog.md` を新規作成し（Issue #14本文 + v0.2 + 本Planで確定したQ）、`docs/specs/mvp-v0.1.md` 末尾に追補節（§23）を追加する。既存節は書き換えない。
 - `AGENTS.md` のSource of Truth表に `LifeLog | Obsidian` を追加するか（Areasでは追加していない）。提案: 追加しない（Areasと揃え、MVP仕様の追補とREADMEで示す）。
+- 決定（rev.2）: `instructions.ts`、`docs/specs/lifelog.md`、MVP仕様の追補を更新する。`AGENTS.md` の更新は今回必須としない。
 
-### Q9. 一覧・検索なしでの記事の特定方法
+### Q9. 一覧・検索なしでの記事の特定方法（採用）
 
 - 背景: v0.2は3 Tool MVP（一覧・検索なし）。作成直後以外は、LLMがidを得る手段がない。
 - 提案: IDをファイル名から決まる形式にし（Q2）、Tool descriptionでその形式を明示する。ユーザーがObsidianで見たファイル名を伝えれば `lifelog_get` / `append` できる。存在しなければ `NotFoundError` なので、推測した名前で誤った記事を書き換えることはない（追記は存在する記事のみ）。
 - 代替: 形式をdescriptionに書かず「作成時のidのみを使う」と案内する。
+- 決定（rev.2）: 一覧・検索なしの3 Tool。`lifelog_create` が返したID、またはObsidianで確認した正確なファイル名で取得・追記する。**ユーザーにIDもファイル名も分からない場合は取得できない**という制約をTool description（§7）とREADME（§18）に明記する。
 
-### Q10. 大文字小文字・Unicode正規化の違いによる同名判定
+### Q10. 大文字小文字・Unicode正規化の違いによる同名判定（採用）
 
 - 事実: 同名判定はOSの排他作成に任せるため、Windows / macOS（大文字小文字を区別しない）では `Tokyo` と `tokyo` が同名としてErrorになり、Linuxでは別記事になる。macOSではファイル名がNFDで保存されることがある。
 - 提案: MVPではOSの挙動に従い、正規化・独自の重複検査をしない（READMEに記載）。
 - 代替: 作成前にDirectoryを列挙して正規化後の名前で重複を検査する（v0.2「Vaultを走査しない」には反しないがRequestが増え、列挙と作成の間の競合は残る）。
+- 決定（rev.2）: 提案どおりOSの同名判定に従う。独自の重複Indexは作らない。
 
 ### その他
 
 - Issue本文の保存例は `LifeLog/2026/…`（年別）だが、v0.2で「年別ディレクトリは作らない」と確定しているため直下に保存する。
 - 記事の削除・名前変更・タイトル変更はToolを提供しない。Obsidianで行う。
 - Life Logは `defaults.area`（work / personal）を持たない（v0.2のDomainにない）。
+
+---
+
+## 22. Review対応履歴
+
+### rev.2（PR #20 レビュー反映）
+
+判定: 設計方針は承認相当。Q1〜Q10はすべて採用（§21。Q2・Q4・Q6・Q7・Q9は決定に条件・補足あり）。
+
+| 指摘 | 対応 |
+|---|---|
+| Q2: 完全な移行互換を現時点で保証する表現を避ける | §2 方針5、§13（データ移行の行と「IDの互換性について」）、Q2を修正 |
+| Q4: LF正規化・末尾改行の追加を例外として明示 | §10.2、Q4 |
+| Q7: Life Log未設定時は現行と同じ挙動 | §16.2（既存設定が現行と同じ結果になるTest）、Q7 |
+| Q9: IDが不明な場合は取得不能という制約を明示 | §7（`lifelog_get` のdescription）、§18、Q9 |
+| 1. `O_APPEND` の競合保証を正確に。任意サイズ・複数プロセスでの全体原子性は保証しない。書き込み失敗時の部分追記 | §10.3 に「`O_APPEND` が保証すること・しないこと」と書き込み失敗の行を追加。§16.4 の同時追記Testを「同一プロセス・小さいテキストでの条件付き検証」と位置付け、書き込み失敗のTestを追加。§18 のMVP制約に追記 |
+| 2. 共通コアのBuffer化でKnowledgeのBOM除去・Lenient decode・Messageが変わらないことを既存Test無変更で固定。Life Logのみfatal decode。作成・追記後のUTF-8の完全性もテスト | §4.2（共通コアはdecodeしない、`read` の分岐は現行どおり）、§4.3（Knowledge Adapterのdecode手順。既存Test無変更 + 新規 `filesystem-storage-decoding.test.ts`）、§14.2、§16.4「UTF-8の完全性」、§16.6 |
+| 3. Obsidianで手動作成した規則どおりの記事も取得・追記可能と明示。移行時もファイル名規則が参照互換の前提 | §6.3 を新設。§13、§16.4「手動作成の記事」、§17.2、§18 に反映 |
