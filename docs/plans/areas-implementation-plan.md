@@ -705,10 +705,33 @@ PR #17 のPlan ReviewでQ1〜Q10はすべて **提案どおり採用**（rev.2�
 | 実データの確認 | `Areas` 直下の子ページ1件が一覧・取得できた。本文は空のため `content` は `''` |
 | ゴミ箱（実装前確認、Q7） | §21 Q7のとおり |
 
-### 23.2 未実施（PR後・Implementation Review前後に実施）
+### 23.2 手動Verification / LLM Client Verification（Implementation Review後に実施、2026-10-24）
 
-- §18.2 手動Verificationのうち、列・トグル・孫ページの除外と、ネストした目次・mention・非対応Blockを含む `content` の目視確認（目次を書いたAreaの用意が必要）
-- §19 LLM Client Verification（MCP Serverを本Branchのコードで再起動してから行う）
+#### 手動Verification（§18.2、実Notion API、Read-only）
+
+`Areas` 直下に子ページ2件（うち1件に目次を記述）を用意して確認した。
+
+| 確認 | 結果 |
+|---|---|
+| 一覧 | 直下の子ページ2件がタイトル順で出る |
+| 孫ページ（Areaの中の子ページ） | 一覧に出ず、`area_get` は `NotFoundError`（`parent.type = page_id` だが親が `Areas` ではない） |
+| 列（Column）の中の子ページ | `parent.type = block_id` になることを実APIで確認。一覧に出ず、`area_get` は `NotFoundError`。§9.3 の前提どおり（列はArea pageの中に作成して確認した。`Areas` 直下の列でも同じ判定になる） |
+| 見出しH1〜H3 | `#`〜`###`、見出しの前に空行 |
+| 4階層の箇条書き | 3階層まで出力し、4階層目の位置に `[nested blocks not retrieved: depth limit 3]` |
+| Page mention | `[タイトル](https://app.notion.com/p/…)` のリンク |
+| `obsidian:…` のテキスト | そのまま出力（後続の `knowledge_get` に使える） |
+| 子ページ | `- [タイトル](https://www.notion.so/…)` のリンクのみ。中身は取得しない |
+| 列 | 列自体は出力せず、中の子ページのリンクを順に出す |
+| 画像 / 表 | `[unsupported Notion block: image]`、`[unsupported Notion block: table; its nested blocks were not retrieved]` |
+| トグル | `- toggle` の下に中の箇条書きをindent |
+
+#### LLM Client Verification（§19、Claude Code、MCP Serverを本Branchの `dist` で再接続）
+
+| 依頼 | Tool |
+|---|---|
+| 食事管理のAreaを見せて | `area_list({ query: "食事" })` → `area_get` |
+| 食事管理の目次にあるKnowledgeを読んで | `area_get` の `content` にある `obsidian:…` を `knowledge_get` に渡して本文を取得（Tool descriptionの案内どおり） |
+| AI Foundationのプロジェクトを見せて | `area_list` ではなく `project_list({ query: "foundation" })`（Project / Areaの区別） |
 
 ### 23.3 Plan外の変更・Planからの細部の変更（Implementation Reviewで確認してほしい点）
 
