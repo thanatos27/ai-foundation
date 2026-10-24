@@ -22,7 +22,7 @@ describe.runIf(run)('Obsidian life log (real vault)', () => {
   // The describe body runs even when skipped: read the config only when enabled.
   const connector = new ObsidianLifeLogConnector({
     directory,
-    storage: new FilesystemLifeLogStorage({ vaultPath, directory }),
+    storage: new FilesystemLifeLogStorage({ vaultPath, directory, knowledgeDir }),
   });
   const abs = (path: string) => join(vaultPath ?? '', ...path.split('/'));
   /** Unique word in every article title of this run. */

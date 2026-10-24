@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { lstat } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FilesystemLifeLogStorage } from '../../../src/connectors/obsidian/filesystem-lifelog-storage.js';
 import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
@@ -13,6 +14,23 @@ import {
 } from '../../helpers/vault.js';
 
 const fileLinks = await canLinkFiles();
+const windows = process.platform === 'win32';
+
+/** Whether this file system resolves another spelling to the same directory (case, Windows 8.3 short name). */
+async function aliasWorks(alias: (vault: TestVault) => string): Promise<boolean> {
+  const probe = await createTestVault();
+  try {
+    return await lstat(probe.abs(alias(probe))).then(
+      () => true,
+      () => false,
+    );
+  } finally {
+    await probe.cleanup();
+  }
+}
+const SHORT_KNOWLEDGE = 'AI Foundation/KNOWLE~1';
+const shortNames = await aliasWorks(() => SHORT_KNOWLEDGE);
+const caseInsensitive = await aliasWorks(() => 'ai foundation/knowledge');
 const NAME = '2026-10-03-東京散策.md';
 const l = (name: string) => `${LIFELOG_DIR}/${name}`;
 
@@ -143,5 +161,60 @@ describe('boundary', () => {
     await expectError(storage.append(NAME, 'x'), InputValidationError);
     await expectError(storage.createExclusive(NAME, 'x'), InputValidationError);
     expect(await readFile(join(vault.outside, 'secret.md'), 'utf8')).toBe('外');
+  });
+});
+
+describe('apart from the knowledge directory (by real path)', () => {
+  const KNOWLEDGE_DIR = 'AI Foundation/Knowledge';
+  const aliased = (directory: string) =>
+    new FilesystemLifeLogStorage({ vaultPath: vault.vault, directory, knowledgeDir: KNOWLEDGE_DIR });
+
+  /** Every action is refused and nothing is written into the knowledge directory. */
+  async function expectRefused(storage: FilesystemLifeLogStorage): Promise<void> {
+    await vault.write(`${KNOWLEDGE_DIR}/${NAME}`, 'knowledge');
+    const before = (await readdir(vault.abs(KNOWLEDGE_DIR), { recursive: true })).sort();
+    const actions = [() => storage.createExclusive('2026-10-24-x.md', 'x'), () => storage.read(NAME), () => storage.append(NAME, 'x')];
+    for (const action of actions) {
+      const error = await expectError(action(), ConfigurationError);
+      expect(error.message).toContain('the knowledge directory "AI Foundation/Knowledge"');
+    }
+    expect((await readdir(vault.abs(KNOWLEDGE_DIR), { recursive: true })).sort()).toEqual(before);
+    expect(await vault.read(`${KNOWLEDGE_DIR}/${NAME}`)).toBe('knowledge');
+  }
+
+  it.skipIf(!shortNames)('refuses a Windows 8.3 short name of the knowledge directory', async () => {
+    await expectRefused(aliased(SHORT_KNOWLEDGE));
+  });
+
+  it.skipIf(!shortNames)('refuses a directory inside the knowledge directory reached by its short name', async () => {
+    await mkdir(vault.abs(`${KNOWLEDGE_DIR}/LifeLog`));
+    await expectRefused(aliased(`${SHORT_KNOWLEDGE}/LifeLog`));
+  });
+
+  it.skipIf(!caseInsensitive)('refuses another case of the knowledge directory', async () => {
+    await expectRefused(aliased('ai foundation/knowledge'));
+  });
+
+  it('refuses a directory that contains the knowledge directory', async () => {
+    await expectRefused(aliased('AI Foundation'));
+  });
+
+  it('works next to the knowledge directory, and while the knowledge directory is unset or missing', async () => {
+    await aliased(LIFELOG_DIR).createExclusive(NAME, 'a');
+    await new FilesystemLifeLogStorage({ vaultPath: vault.vault, directory: LIFELOG_DIR, knowledgeDir: undefined }).read(NAME);
+    await new FilesystemLifeLogStorage({ vaultPath: vault.vault, directory: LIFELOG_DIR, knowledgeDir: 'Missing' }).read(NAME);
+  });
+});
+
+describe.skipIf(!windows)('alternate data streams (Windows)', () => {
+  it('refuses a name with ":" instead of reading or writing a stream of another file', async () => {
+    await vault.write(l('2026-10-24-private.txt'), 'plain');
+    await writeFile(vault.abs(l('2026-10-24-private.txt:notes.md')), 'stream');
+    const stream = '2026-10-24-private.txt:notes.md';
+    expect((await expectError(storage.read(stream), InputValidationError)).message).toContain('alternate data stream');
+    await expectError(storage.append(stream, 'x'), InputValidationError);
+    await expectError(storage.createExclusive('2026-10-24-new.txt:notes.md', 'x'), InputValidationError);
+    expect(await readFile(vault.abs(l(stream)), 'utf8')).toBe('stream');
+    expect(await readdir(vault.abs(LIFELOG_DIR))).toEqual(['2026-10-24-private.txt']);
   });
 });

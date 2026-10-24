@@ -77,10 +77,11 @@ sources:
 - Vaultは `sources.knowledge.obsidian.vault_path` を使う。
 - Directoryは手動で作成する。AI Foundationは作成せず、Vault全体の走査もしない。
 - `directory` が `knowledge_dir` と同一・その内側・それを含む場合は起動時にConfiguration Error（大文字小文字を無視して比較）。`sources.lifelog` 未設定時は判定せず、既存設定の挙動は変わらない。
+- 文字列が異なっても同じフォルダを指す場合（Windowsの8.3短縮名など）に備え、Life Log / Knowledge Toolの呼び出し時にも両Directoryの実パスで同一・包含関係を確認し、該当すればConfiguration Errorにする。
 
 ## Access / Errors
 
-- 読み書きはLife Log Directory直下のファイルのみ。IDのパス区切り・`..`・絶対パス・Knowledge IDは拒否する。Vaultから辿る途中・Directoryの内側のSymbolic Link / Junctionは辿らない（Knowledgeと同じ境界処理を共有）。
+- 読み書きはLife Log Directory直下のファイルのみ。IDのパス区切り・`..`・絶対パス・Knowledge ID・`:`（Windowsの代替データストリーム構文）は拒否する。共通のFilesystem境界でも、Windowsでは `:` を含むパスをKnowledge / Life Logとも読み書きしない。Vaultから辿る途中・Directoryの内側のSymbolic Link / Junctionは辿らない（Knowledgeと同じ境界処理を共有）。
 - UTF-8でないファイルは `ProviderApiError`（取得も追記もしない）。Knowledgeの読み込み（不正なbyteを置換文字にする）は変更しない。
 - Error Messageに絶対パスを含めない。
 

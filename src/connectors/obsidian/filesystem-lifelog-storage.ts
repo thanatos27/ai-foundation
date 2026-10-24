@@ -8,6 +8,8 @@ export interface FilesystemLifeLogStorageOptions {
   vaultPath: string | undefined;
   /** `sources.lifelog.obsidian.directory`: vault-relative, `/`-separated. */
   directory: string | undefined;
+  /** `sources.knowledge.obsidian.knowledge_dir`: the directory must be apart from it (checked by real path). */
+  knowledgeDir?: string | undefined;
 }
 
 /**
@@ -40,6 +42,7 @@ export class FilesystemLifeLogStorage implements LifeLogStorage {
             { cause },
           ),
       },
+      apartFrom: [{ dir: options.knowledgeDir, dirName: 'knowledge directory' }],
     });
   }
 

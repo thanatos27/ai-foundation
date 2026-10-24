@@ -62,6 +62,8 @@ export function parseLifeLogId(id: string): string {
   if (name.includes('/') || name.includes('\\')) {
     throw invalid('must be a file name directly in the life log directory, without "/" or "\\"');
   }
+  // New names never contain ":", and on Windows it would name an alternate data stream of another file.
+  if (name.includes(':')) throw invalid('must not contain ":"');
   if (!parseLifeLogFileName(name)) throw invalid('must name a "YYYY-MM-DD-<title>.md" file with a real date');
   return name;
 }

@@ -167,7 +167,7 @@ VaultはGoogle Drive等の同期フォルダに置いてよい。AI Foundation�
 
 Life Logは、Knowledgeと同じObsidian Vaultの別Directoryに、出来事を1記事 = 1 Markdown file（UTF-8）として保存する。Credentialは不要。
 
-1. Vault内にLife Log Directory（`config.yaml` の既定は `AI Foundation/LifeLog`）を作成する。AI Foundationは自動作成しない。`knowledge_dir` と同じ場所・その内側・それを含む場所には置けない（起動時にConfiguration Error。Knowledgeの検索にLife Logが混ざらないようにするため）
+1. Vault内にLife Log Directory（`config.yaml` の既定は `AI Foundation/LifeLog`）を作成する。AI Foundationは自動作成しない。`knowledge_dir` と同じ場所・その内側・それを含む場所には置けない（Knowledgeの検索にLife Logが混ざらないようにするため）。設定の文字列は起動時に、実際のフォルダはTool呼び出し時に実パスで確認する（Windowsの8.3短縮名 `KNOWLE~1` や大文字小文字違いで同じフォルダを指す場合もConfiguration Error。Knowledge Toolも同様）
 2. Directoryを変える場合は `sources.lifelog.obsidian.directory`（Vault相対パス）を設定する。Vaultは `sources.knowledge.obsidian.vault_path` を使う（Knowledgeの設定が必要）
 
 - ファイル名は `YYYY-MM-DD-<タイトル>.md`。タイトルの使えない文字はKnowledgeと同じく空白に置き換える。同じ日付に別タイトルの記事は作れるが、同じ日付・タイトルの記事があれば上書きせずErrorになる
@@ -176,6 +176,7 @@ Life Logは、Knowledgeと同じObsidian Vaultの別Directoryに、出来事を1
 - Obsidianで手動作成した記事も、Life Log Directory直下で `YYYY-MM-DD-<タイトル>.md` の規則に合えば取得・追記できる（日付が実在しない・サブフォルダ内・規則外の名前は対象外）。将来の保存先の移行でも、この規則がIDで参照し続けるための前提になる
 - UTF-8でないファイル（Shift_JIS等）はErrorになり、追記もしない。ObsidianでUTF-8に直す
 - Symbolic Link / Junctionの扱いはKnowledgeと同じ（Vaultから辿る途中・Directoryの内側のLinkは辿らない）
+- IDのファイル名に `:` は使えない（Windowsでは `x.txt:notes.md` が別ファイルの代替データストリームを指すため。Knowledgeも、Windowsでは `:` を含むパスを読み書きしない）
 
 MVPの制約:
 

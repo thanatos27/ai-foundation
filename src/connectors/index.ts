@@ -21,16 +21,25 @@ function knowledgeConnector(config: Config): ObsidianKnowledgeConnector {
   const knowledgeDir = obsidian?.knowledge_dir;
   return new ObsidianKnowledgeConnector({
     knowledgeDir,
-    storage: new FilesystemVaultStorage({ vaultPath: obsidian?.vault_path, knowledgeDir }),
+    storage: new FilesystemVaultStorage({
+      vaultPath: obsidian?.vault_path,
+      knowledgeDir,
+      lifeLogDir: config.sources.lifelog?.obsidian?.directory,
+    }),
   });
 }
 
 /** The life log connector: articles in a directory of the knowledge vault (the file system only). */
 function lifeLogConnector(config: Config): ObsidianLifeLogConnector {
   const directory = config.sources.lifelog?.obsidian?.directory;
+  const obsidian = config.sources.knowledge.obsidian;
   return new ObsidianLifeLogConnector({
     directory,
-    storage: new FilesystemLifeLogStorage({ vaultPath: config.sources.knowledge.obsidian?.vault_path, directory }),
+    storage: new FilesystemLifeLogStorage({
+      vaultPath: obsidian?.vault_path,
+      directory,
+      knowledgeDir: obsidian?.knowledge_dir,
+    }),
   });
 }
 

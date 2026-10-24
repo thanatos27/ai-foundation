@@ -25,6 +25,12 @@ export interface FilesystemVaultDirectoryOptions {
   /** Vault-relative, `/`-separated: the only directory read and written. */
   dir: string | undefined;
   labels: VaultDirectoryLabels;
+  /**
+   * Other directories of the vault that `dir` must be apart from: neither the same, inside nor
+   * containing them. Compared by real path, so that aliases a config check cannot see (Windows 8.3
+   * short names such as `KNOWLE~1`, case differences) are caught too. Unset or missing ones are skipped.
+   */
+  apartFrom?: { dir: string | undefined; dirName: string }[];
 }
 
 const errnoOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | null)?.code;
@@ -35,6 +41,18 @@ function isInside(root: string, target: string): boolean {
   const rel = relative(root, target);
   return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
+
+/** Same, inside or containing, ignoring case like the config check (real paths already have the case on disk). */
+function overlaps(a: string, b: string): boolean {
+  const [x, y] = [a.toLowerCase(), b.toLowerCase()];
+  return x === y || isInside(x, y) || isInside(y, x);
+}
+
+/**
+ * `:` in a segment names an alternate data stream on Windows (`x.txt:notes.md` is a stream of
+ * `x.txt`, not a file in the directory), so it is never a plain file name there.
+ */
+const isStreamSyntax = (segment: string) => process.platform === 'win32' && segment.includes(':');
 
 /** Whether a directory entry name is a Markdown file name: `<name>.md` (lowercase extension, non-empty name). */
 function isMarkdownFileName(name: string): boolean {
@@ -107,6 +125,7 @@ export class FilesystemVaultDirectory {
   /** Creates the file as UTF-8; `labels.alreadyExists` when anything is already there. Never overwrites. */
   async createExclusive(segments: readonly string[], text: string): Promise<void> {
     const root = await this.root();
+    this.assertPlainNames(segments);
     const parent = await this.walk(root, segments.slice(0, -1), segments);
     const target = join(parent, segments.at(-1)!);
     const quoted = () => this.options.labels.quote(segments);
@@ -196,12 +215,26 @@ export class FilesystemVaultDirectory {
       throw notUsable('does not exist in the vault or cannot be read', error);
     }
     if (!isInside(vaultReal, root)) throw notUsable('is not inside the vault');
+
+    for (const other of this.options.apartFrom ?? []) {
+      if (!other.dir) continue;
+      let otherReal: string;
+      try {
+        otherReal = await realpath(join(vaultReal, ...other.dir.split('/')));
+      } catch {
+        continue; // missing: the tools of that directory report it
+      }
+      if (overlaps(root, otherReal)) {
+        throw notUsable(`is the same directory as, inside or contains the ${other.dirName} "${other.dir}"; use separate directories`);
+      }
+    }
     return root;
   }
 
   /** Real path of the regular file at `segments`, reached from the directory without links. */
   private async existingFile(segments: readonly string[]): Promise<string> {
     const root = await this.root();
+    this.assertPlainNames(segments);
     const parent = await this.walk(root, segments.slice(0, -1), segments);
     const target = join(parent, segments.at(-1)!);
     let info;
@@ -246,6 +279,14 @@ export class FilesystemVaultDirectory {
     }
     if (!isInside(root, real)) {
       throw new InputValidationError(`${this.options.labels.quote(segments)} is outside the ${this.options.labels.dirName}`);
+    }
+  }
+
+  private assertPlainNames(segments: readonly string[]): void {
+    if (segments.some(isStreamSyntax)) {
+      throw new InputValidationError(
+        `${this.options.labels.quote(segments)} is not a plain file name: ":" names an alternate data stream on Windows`,
+      );
     }
   }
 

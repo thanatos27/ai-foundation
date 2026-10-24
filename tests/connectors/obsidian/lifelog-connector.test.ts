@@ -233,6 +233,17 @@ describe('articles created by hand in Obsidian', () => {
   });
 });
 
+describe.skipIf(process.platform !== 'win32')('alternate data streams (Windows)', () => {
+  it('cannot get or append to a stream of another file named like an article', async () => {
+    await vault.write(l('2026-10-24-private.txt'), 'plain');
+    await writeFile(vault.abs(l('2026-10-24-private.txt:notes.md')), 'stream');
+    const id = 'lifelog:2026-10-24-private.txt:notes.md';
+    await expectError(connector.get(id), InputValidationError);
+    await expectError(connector.append({ id, content: 'x' }), InputValidationError);
+    expect(await readFile(vault.abs(l('2026-10-24-private.txt:notes.md')), 'utf8')).toBe('stream');
+  });
+});
+
 describe('text that is not UTF-8', () => {
   it('fails to get or append, and leaves the bytes as they were', async () => {
     const bytes = Buffer.from([0x93, 0x8c, 0x8b, 0x9e, 0x0a]); // Shift_JIS

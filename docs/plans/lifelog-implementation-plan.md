@@ -837,3 +837,20 @@ PR #20 のPlan Review（rev.1）でQ1〜Q10はすべて **採用**（rev.2）。
 | `tests/helpers/vault.ts` | 一時Vaultに `AI Foundation/LifeLog` も作るようにした（既存Testへの影響なし） |
 | e2e | Repositoryの `config.yaml`（`vault_path` なし）で `lifelog_create` が `vault_path is not set`、Knowledge IDの `lifelog_get` が `must start with "lifelog:"` になるCaseを追加 |
 
+### 23.3 Implementation Review（PR #21、Codex）
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] NTFSの8.3短縮名（`KNOWLE~1`）でKnowledge / Life Logのディレクトリ重複判定（Configの文字列比較）を回避でき、`lifelog_create` がKnowledge Directoryへ書き込めた | `FilesystemVaultDirectory` に `apartFrom` を追加し、Directoryの解決時（毎回のTool呼び出し）に相手Directoryの**実パス**（`realpath` は短縮名・大文字小文字を実際の名前へ解決する）と同一・包含関係を確認して `ConfigurationError` にした。Life Log Storageは `knowledge_dir`、Knowledge Storageは `sources.lifelog.obsidian.directory` を受け取り、**両方向**で確認する（短縮名でLife LogをKnowledgeの内側に置くと `knowledge_search` に混ざるため）。相手が未設定・不在なら判定しない。Configの文字列比較（起動時）はそのまま残す |
+| [P2] 記事IDにNTFSの代替データストリーム構文（`lifelog:2026-10-24-private.txt:notes.md`）を指定でき、`.txt` のストリームを取得・追記できた | `parseLifeLogId` で `:` を全OSで拒否（新規作成のファイル名に `:` は含まれない）。加えて、**Knowledgeにも同じ穴があった**（`obsidian:…/private.txt:notes.md`）ため、共通の `FilesystemVaultDirectory` でWindowsでは `:` を含むSegmentを `InputValidationError` にした（Knowledgeの変更はWindowsの `:` を含むパスのみ。macOS / Linuxの `:` を含むKnowledgeファイルの扱いは変えない） |
+
+回帰Test（11件）を追加し、修正前のソースでは11件すべてが失敗し、修正後は成功することを確認した。
+
+- `lifelog-id.test.ts`: `:` を含むID（ADS・`::$DATA`・通常名）の拒否
+- `filesystem-lifelog-storage.test.ts`: 8.3短縮名で同一 / 内側、大文字小文字違い、包含のDirectoryを拒否し、Knowledge Directoryが変わらない。隣接・未設定・不在なら動作する。ADSの読み書き・作成を拒否し、ストリームが変わらない（Windowsのみ）
+- `filesystem-storage.test.ts`（Knowledge）: 同じ確認を逆方向で行う。ADSの拒否（Windowsのみ）
+- `lifelog-connector.test.ts`: ADSのIDで `get` / `append` が入力Errorになりストリームが変わらない（Windowsのみ）
+- 8.3短縮名・大文字小文字のTestは、その別名が実際に使えるFilesystemでのみ実行する（この環境では実行された）
+
+修正後: `npm test` 53 files / 1246 passed / 5 skipped、`npm run build` 成功、実VaultのIntegration Test（Life Log 5件・Knowledge 5件）成功。
+
