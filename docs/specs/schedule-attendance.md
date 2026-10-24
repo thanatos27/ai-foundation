@@ -1,5 +1,7 @@
 # Google Calendar参加済みフラグ — Design
 
+> **廃止**: 本機能（`schedule_list.attended_only` と `#attended` タグの判定）は [Issue #12](https://github.com/thanatos27/ai-foundation/issues/12) で削除した。後継は [複数Calendar・期間イベント・説明欄 Design](schedule-calendars.md)。以下はIssue #15時点の記録で、現行の機能ではない。
+
 [Issue #15](https://github.com/thanatos27/ai-foundation/issues/15)（MVP詳細設計 v0.1）と、[Implementation Plan](../plans/schedule-attendance-implementation-plan.md) のPlan Review（PR #23）で確定した事項をまとめる。[MVP v0.1仕様](mvp-v0.1.md) は当時の仕様として維持し、本書をv0.1以降に追加された仕様とする。
 
 ## Goal

@@ -1,6 +1,6 @@
 # Google Calendar参加済みフラグ — Implementation Plan
 
-- Status: **rev.2（Plan Review完了・承認済み。実装済み: §18）**
+- Status: **rev.2（Plan Review完了・承認済み。実装済み: §18）** — 機能は [Issue #12](https://github.com/thanatos27/ai-foundation/issues/12) で削除済み（[後継 Design](../specs/schedule-calendars.md)）
 - 作成: Coding Agent (Claude Code) / 2026-10-24（rev.2: 2026-10-24 PR #23 レビュー反映・実装）
 - 対象: [Issue #15 Google Calendar参加済みフラグ](https://github.com/thanatos27/ai-foundation/issues/15)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)

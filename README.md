@@ -18,7 +18,7 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）、Google Calendar参加済みフラグ（[Issue #15](https://github.com/thanatos27/ai-foundation/issues/15)）、および繰り返しタスク（[Issue #11](https://github.com/thanatos27/ai-foundation/issues/11)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）、複数Calendar・期間イベント・説明欄（[Issue #12](https://github.com/thanatos27/ai-foundation/issues/12)）、および繰り返しタスク（[Issue #11](https://github.com/thanatos27/ai-foundation/issues/11)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -26,8 +26,9 @@ Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-f
 | `task_list` | Inbox内の未完了Taskを取得（status / area / due_before / due_after / tagsでFilter）。各Taskに繰り返し規則 `recurrence` が付く |
 | `task_update` | `todoist:<id>` を指定して部分更新。`recurrence` で繰り返し規則を変更、`recurrence: null` で規則と期限を解除 |
 | `task_complete` | `todoist:<id>` を指定して完了（繰り返しTaskは次回分へ進む） |
-| `schedule_create` | AI Foundation専用Calendarへ予定を作成（時刻予定 / 終日予定） |
-| `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得（`attended_only: true` で参加済みフラグ `#attended` の付いた予定だけ） |
+| `schedule_create` | 設定した書き込み先Calendar（別名 `calendar`、省略時は既定）へ予定・期間イベントを作成（時刻予定 / 終日予定、説明欄 `description`・場所 `location`） |
+| `schedule_list` | 期間に重なる予定を、閲覧可能な全Calendar、または `calendar` で指定した1つのCalendarから取得。説明欄は原文のまま返す |
+| `schedule_update` | 書き込み先Calendarの単発予定を `google_calendar:<calendar>:<event>` で部分更新（`description` / `location` は `null` で消去）。繰り返し予定・招待された予定は対象外 |
 | `collection_create` | Notionの専用Collectionへ本・ゲーム・映画等を作成（title / collection_type / status / metadata / tags / note） |
 | `collection_search` | 専用CollectionをTitle部分一致・collection_type・status・tags（AND）で検索 |
 | `collection_update` | `notion:<page-id>` を指定して部分更新（status / metadata（shallow merge）/ tags（置換）/ append_note（本文末尾へ追記）） |
@@ -83,7 +84,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し（繰り返しタスクのTestはそのRunで作成したTaskだけを操作する）、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google Calendar参加済みフラグのIntegration Testは読み取りのみで、Google Calendar UIで手動作成したFixtureのある期間を `AI_FOUNDATION_IT_ATTENDANCE_START=YYYY-MM-DD` / `AI_FOUNDATION_IT_ATTENDANCE_END=YYYY-MM-DD` で指定した場合だけFixtureを検証する（Fixtureの内容は [Implementation Plan §12.2](docs/plans/schedule-attendance-implementation-plan.md#122-手動fixturegoogle-calendar-uiで作成検証後にユーザーが削除)）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendars` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し（繰り返しタスクのTestはそのRunで作成したTaskだけを操作する）、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google CalendarのIntegration Testは `writable_calendars` の各Calendarへ予定を作成・更新し、終了時にそのRunで作成した予定だけを削除する（別名が2つ以上あれば、Calendarごとの絞り込みと分配も確認する）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -119,13 +120,16 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
 
 ### ローカル設定（`config.local.yaml`）
 
-予定の書き込み先Calendar ID（`sources.schedule.writable_calendar_id`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Areas親ページのID（`sources.area.notion.parent_page_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendars`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Areas親ページのID（`sources.area.notion.parent_page_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
 
 ```yaml
 sources:
   schedule:
     provider: google_calendar
-    writable_calendar_id: "xxxxxxxx@group.calendar.google.com"
+    default_calendar: personal
+    writable_calendars:
+      personal: "xxxxxxxx@group.calendar.google.com"   # 通常の予定
+      events: "yyyyyyyy@group.calendar.google.com"     # 期間イベント（任意）
   collection:
     provider: notion
     data_source_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -143,7 +147,15 @@ sources:
       parent_page_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-未設定でもServerは起動する。`writable_calendar_id` がなければ `schedule_create` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 Toolが、`sources.area` / `parent_page_id` がなければAreaの2 ToolがConfiguration Errorになる。`sources.area` 自体を省略したConfig（Areas以前に作ったもの）もそのまま起動できる。
+未設定でもServerは起動する。`writable_calendars` がなければ `schedule_create` / `schedule_update` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 Toolが、`sources.area` / `parent_page_id` がなければAreaの2 ToolがConfiguration Errorになる。`sources.area` 自体を省略したConfig（Areas以前に作ったもの）もそのまま起動できる。
+
+以前の `writable_calendar_id` は廃止した。残っていると起動時にConfig Errorになるため、次のように置き換える（別名は英小文字・数字・`_`・`-`）。
+
+```yaml
+    default_calendar: personal
+    writable_calendars:
+      personal: "<以前の writable_calendar_id の値>"
+```
 
 ### Obsidian
 
@@ -232,17 +244,23 @@ Areaのページには関連情報へのリンクを書く。AI Foundationで辿
 - `Configuration error: sources.area.notion.parent_page_id is not set`: `config.local.yaml` に `sources.area.notion.parent_page_id` を設定する
 - `Configuration error: Notion page … (sources.area.notion.parent_page_id) was not found, is in the trash or is not shared …`: ページIDの誤り、`Areas` がゴミ箱にある、またはIntegrationが `Areas` に追加されていない
 
-### 参加済みフラグ（Google Calendar）
+### Calendarの使い分け（Google Calendar）
 
-参加した予定は、Google Calendarで予定の説明欄に `#attended` と書いて記録する。`schedule_list` に `attended_only: true` を付けると、期間内の予定のうちフラグのある予定だけを返す（例: `{"start":"2026-09-01","end":"2026-09-30","attended_only":true}`）。Config・Credential・OAuth Scopeの追加や再認可は不要。
+書き込み先のCalendarを用途ごとに分け、`writable_calendars` に別名で設定する。AI Foundationは設定したCalendarにしか書き込まず、読み取り（`schedule_list`）は従来どおり閲覧可能な全Calendarが対象。
 
-- `#attended` は大文字小文字を区別し、独立した語として書く。文章の後に書く場合は前に空白か改行を入れる（`参加#attended`・`#attended2`・`#Attended` は対象外）。UIで太字にしても判定される
-- AI Foundationはフラグを書き込まない。フラグのない予定は「未確認」であり、不参加とは扱わない。RSVP（出欠の回答）は判定に使わない
-- 繰り返し予定は各回の説明欄で判定する。系列の説明欄に書くと全回が対象になるため、参加した回だけ記録する場合は「この予定のみ」を編集する
-- 他の参加者がいる予定の説明欄は他の参加者にも見える。編集権限のない招待予定にはフラグを付けられない
-- `attended_only` を省略、または `false` にした場合は従来どおり全予定を返す
+| Calendar（別名の例） | 登録するもの |
+|---|---|
+| 期間イベント用（`events`） | 気になるイベント・展示・祭り等の開催期間。行くかどうかは問わない。開催期間は日付だけの終日予定で、`end` は最終日（その日を含む） |
+| 通常（`personal`、既定） | 行くと決めた日時・参加予定 |
+| Todoist（Task） | チケット購入・予約などの行動と期限 |
 
-判定規則の詳細と既知の制約は [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md) を参照。
+- 期間イベントに実際に行くことになっても、開催情報は動かさず、訪問予定を通常Calendarへ別に登録する（自動連携はしない）
+- 通常Calendarの予定は「参加予定だった」ことを表すだけで、参加実績とは扱わない。急な不参加や参加結果は、必要なら説明欄に自由に書く
+- 説明欄（`description`）と場所（`location`）は原文のまま保存・取得する。Google Calendarで書式を付けた説明欄はHTMLで返る。公式サイトのURLは説明欄に書く
+- `schedule_update` は単発の予定だけを更新する。繰り返し予定、他人から招待された予定、書き込み先以外のCalendarの予定、Calendar間の移動、削除は対象外
+- 時刻を片方だけ変えると、もう片方は保持される（移動するときは `start` と `end` の両方を渡す）
+
+詳細は [複数Calendar・期間イベント Design](docs/specs/schedule-calendars.md) を参照。以前の参加済みフラグ（`#attended` / `attended_only`、Issue #15）はIssue #12で廃止した。
 
 ### 繰り返しタスク（Todoist）
 
@@ -278,9 +296,10 @@ Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app
 2. OAuth同意画面を設定する。公開ステータスが「テスト中」のままだとRefresh Tokenが7日で失効するため、継続利用する場合は「本番環境」へ変更する（未確認アプリの警告は出るが個人利用は可能）
 3. 認証情報で「OAuth クライアント ID」（種類: デスクトップアプリ）を作成し、`GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` に設定する
 4. `npm run auth:google` を実行し、表示されたURLをブラウザで開いて許可する。表示された `GOOGLE_OAUTH_REFRESH_TOKEN=...` を `.env` に追記する（ファイルへは自動で書き込まない）
-5. Google CalendarでAI Foundation専用のCalendarを作成し、「カレンダーの設定 → カレンダーの統合」にあるカレンダーIDを `config.local.yaml` の `writable_calendar_id` に設定する
+5. Google CalendarでAI Foundationが書き込むCalendar（通常の予定用、必要なら期間イベント用も）を作成し、各Calendarの「カレンダーの設定 → カレンダーの統合」にあるカレンダーIDを `config.local.yaml` の `writable_calendars` に別名で設定する（[ローカル設定](#ローカル設定configlocalyaml)）。IDは必ず設定画面から写し、`primary` やメールアドレスを推測して使わない（`primary` は起動時にConfig Errorになる）
+6. 設定後、別名が意図したCalendarを指していることを確認する。たとえば `schedule_create` で各別名に予定を1件作り、Google Calendarで意図したCalendarに表示されることを確かめてから削除する
 
-要求するScopeは `calendar.calendarlist.readonly` と `calendar.events`。`calendar.events` は技術的には全Calendarへ書き込めるが、AI Foundationは `writable_calendar_id` 以外へ書き込まない。
+要求するScopeは `calendar.calendarlist.readonly` と `calendar.events`。`calendar.events` は技術的には全Calendarへ書き込めるが、AI Foundationは `writable_calendars` 以外へ書き込まない。
 
 `invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する。
 
@@ -411,9 +430,11 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Areas MVP Implementation Plan](docs/plans/areas-implementation-plan.md)
 - [Life Log MVP Design](docs/specs/lifelog.md)
 - [Life Log MVP Implementation Plan](docs/plans/lifelog-implementation-plan.md)
-- [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md)
-- [Google Calendar参加済みフラグ Implementation Plan](docs/plans/schedule-attendance-implementation-plan.md)
+- [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md)（廃止）
+- [Google Calendar参加済みフラグ Implementation Plan](docs/plans/schedule-attendance-implementation-plan.md)（廃止）
 - [繰り返しタスク Design](docs/specs/task-recurrence.md)
 - [繰り返しタスク Implementation Plan](docs/plans/task-recurrence-implementation-plan.md)
+- [複数Calendar・期間イベント Design](docs/specs/schedule-calendars.md)
+- [複数Calendar・期間イベント Implementation Plan](docs/plans/schedule-calendars-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

@@ -15,6 +15,14 @@ function fakeResources(pages: { calendars?: unknown[][]; events?: unknown[][] } 
         requests.push({ method: 'events.insert', params });
         return { data: { id: 'evt1', ...(params.requestBody as object) } };
       },
+      get: async (params: Record<string, unknown>) => {
+        requests.push({ method: 'events.get', params });
+        return { data: { id: params.eventId } };
+      },
+      patch: async (params: Record<string, unknown>) => {
+        requests.push({ method: 'events.patch', params });
+        return { data: { id: params.eventId, ...(params.requestBody as object) } };
+      },
       list: async (params: Record<string, unknown>) => {
         requests.push({ method: 'events.list', params });
         return { data: page(pages.events, params) };
@@ -69,6 +77,26 @@ describe('calendarApiFrom', () => {
     await calendarApiFrom(resources).insertEvent('af@group.calendar.google.com', event);
     expect(requests).toEqual([
       { method: 'events.insert', params: { calendarId: 'af@group.calendar.google.com', requestBody: event } },
+    ]);
+  });
+
+  it('gets one event of the given calendar', async () => {
+    const { resources, requests } = fakeResources();
+    await calendarApiFrom(resources).getEvent('af@group.calendar.google.com', 'evt1');
+    expect(requests).toEqual([
+      { method: 'events.get', params: { calendarId: 'af@group.calendar.google.com', eventId: 'evt1' } },
+    ]);
+  });
+
+  it('patches only the given fields, keeping null to clear one', async () => {
+    const { resources, requests } = fakeResources();
+    const patch = { summary: 'b', description: null };
+    await calendarApiFrom(resources).patchEvent('af@group.calendar.google.com', 'evt1', patch);
+    expect(requests).toEqual([
+      {
+        method: 'events.patch',
+        params: { calendarId: 'af@group.calendar.google.com', eventId: 'evt1', requestBody: patch },
+      },
     ]);
   });
 });

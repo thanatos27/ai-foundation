@@ -8,7 +8,7 @@ export type GoogleCalendarListEntry = calendar_v3.Schema$CalendarListEntry;
 
 /**
  * OAuth scopes requested by `npm run auth:google`. `calendar.events` can write to every calendar;
- * the connector itself restricts writes to the configured calendar.
+ * the connector itself restricts writes to the configured calendars.
  */
 export const GOOGLE_CALENDAR_SCOPES = [
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
@@ -18,6 +18,10 @@ export const GOOGLE_CALENDAR_SCOPES = [
 /** The Calendar API calls the connector uses, with pagination done. Tests inject a fake. */
 export interface CalendarApi {
   insertEvent(calendarId: string, event: GoogleEvent): Promise<GoogleEvent>;
+  /** A deleted event may come back with `status: 'cancelled'` instead of a 404. */
+  getEvent(calendarId: string, eventId: string): Promise<GoogleEvent>;
+  /** Changes only the fields present in `patch` (events.patch); `null` clears a field. */
+  patchEvent(calendarId: string, eventId: string, patch: GoogleEvent): Promise<GoogleEvent>;
   /** Calendars the user can read event details of (free/busy-only calendars are excluded). */
   listCalendars(): Promise<GoogleCalendarListEntry[]>;
   /** Single (expanded) events overlapping [timeMin, timeMax), excluding deleted ones. */
@@ -30,6 +34,8 @@ export type CalendarApiFactory = (credentials: GoogleOAuthCredentials) => Calend
 export interface CalendarResources {
   events: {
     insert(params: calendar_v3.Params$Resource$Events$Insert): Promise<{ data: GoogleEvent }>;
+    get(params: calendar_v3.Params$Resource$Events$Get): Promise<{ data: GoogleEvent }>;
+    patch(params: calendar_v3.Params$Resource$Events$Patch): Promise<{ data: GoogleEvent }>;
     list(params: calendar_v3.Params$Resource$Events$List): Promise<{ data: calendar_v3.Schema$Events }>;
   };
   calendarList: {
@@ -48,6 +54,14 @@ export function calendarApiFrom(api: CalendarResources): CalendarApi {
   return {
     async insertEvent(calendarId, requestBody) {
       return (await api.events.insert({ calendarId, requestBody })).data;
+    },
+
+    async getEvent(calendarId, eventId) {
+      return (await api.events.get({ calendarId, eventId })).data;
+    },
+
+    async patchEvent(calendarId, eventId, requestBody) {
+      return (await api.events.patch({ calendarId, eventId, requestBody })).data;
     },
 
     async listCalendars() {
@@ -109,6 +123,8 @@ interface GoogleErrorShape {
 }
 
 const RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded']);
+/** 403 reasons meaning "this calendar or event may not be written", not "these credentials are wrong". */
+const WRITE_FORBIDDEN_REASONS = new Set(['forbidden', 'requiredAccessLevel', 'forbiddenForNonOrganizer']);
 
 function errorReasons(data: unknown): string[] {
   const errors = (data as { error?: { errors?: { reason?: string }[] } } | undefined)?.error?.errors ?? [];
@@ -117,12 +133,17 @@ function errorReasons(data: unknown): string[] {
 
 /**
  * Converts anything thrown by the Google client into a Foundation error.
- * `notFound` supplies the error for a 404 (otherwise a provider error); `context` prefixes the
+ * `notFound` supplies the error for a 404 or 410 (otherwise a provider error); `forbidden` the error for a
+ * 403 refusing a write to this calendar (otherwise a credential error); `context` prefixes the
  * provider error detail, e.g. which calendar failed.
  */
 export function toFoundationError(
   error: unknown,
-  { notFound, context }: { notFound?: () => FoundationError; context?: string } = {},
+  {
+    notFound,
+    forbidden,
+    context,
+  }: { notFound?: () => FoundationError; forbidden?: () => FoundationError; context?: string } = {},
 ): FoundationError {
   if (error instanceof FoundationError) return error;
   const e = (error ?? {}) as GoogleErrorShape;
@@ -138,10 +159,13 @@ export function toFoundationError(
     );
   }
   if (status === 401) return new CredentialError(`Google rejected the credentials (HTTP 401): ${message}`, options);
+  if (status === 403 && forbidden && errorReasons(data).some((reason) => WRITE_FORBIDDEN_REASONS.has(reason))) {
+    return forbidden();
+  }
   if (status === 403 && !errorReasons(data).some((reason) => RATE_LIMIT_REASONS.has(reason))) {
     return new CredentialError(`Google denied access (HTTP 403): ${message}`, options);
   }
-  if (status === 404 && notFound) return notFound();
+  if ((status === 404 || status === 410) && notFound) return notFound();
   const detail = status ? `HTTP ${status}: ${message}` : message;
   return new ProviderApiError('Google Calendar', context ? `${context}: ${detail}` : detail, options);
 }

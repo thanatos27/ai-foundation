@@ -802,3 +802,61 @@ ChatGPTのPlan Review rev.1は「修正推奨（P2 1件、P3 1件）」。
 ### rev.2 承認（PR #27 Plan Review rev.2）
 
 ChatGPTのPlan Review rev.2で承認（P2 / P3 解消）。軽微な整合確認として、§13.5「時刻予定の `start` / `end` 両方」の期待値を §8.6「両方・同じ種類」の定義（`{ dateTime }`、`date` Keyなし）に揃えた。
+
+---
+
+## 20. 実装で確定した事項
+
+Branch `feat/schedule-calendars`（Base: `main` の `766115a`、PR #27 Merge）。
+
+### 20.1 実装前Probe（2026-10-25、実Google Calendar）
+
+ScratchpadのScript（Repositoryにcommitしない）で、AI Foundation Calendarに `[af-probe …]` 付きの一時Eventを10件作成して確認し、すべて削除した（残存0件を確認）。既存の予定は読み取りのみ。**結果はすべてPlanの前提どおりで、Planの修正は不要だった。**
+
+| # | 結果 | Planへの反映 |
+|---|---|---|
+| P1 | `patch({ description: null, location: null })` で両Fieldが消える（`get` でKeyなし）。空文字のpatchも同じく消える | `null` を送る（§8.6のまま） |
+| P2 | 系列は `recurrence` を持ち `recurringEventId` なし。展開された回は `<base>_20261204T000000Z`（終日は `<base>_20261203`）で `recurringEventId` と `originalStartTime` を持つ。「この予定のみ」編集した回も同じ。削除した単発Eventの `get` は404ではなく `status: 'cancelled'` | §8.6の判定のまま（`originalStartTime` の追加判定は不要）。`cancelled` は `NotFoundError` |
+| P3 | `timeZone` 付きの時刻予定を `{ date, dateTime: null }` で終日へ切り替えられる（`timeZone` は自動で外れる）。逆の切替も可（`timeZone` はCalendarの既定値が入る） | `timeZone: null` は送らない |
+| P4 | `start` / `end` の `dateTime` だけをpatchしても `timeZone: 'Asia/Tokyo'` は保持される | §8.6のまま |
+| P5 | 改行・`\r\n`・HTML・Entity・前後の空白を含む説明欄、場所が作成・patchとも完全一致で返る | 変換しない（Testの期待値は原文） |
+| P6 | 読み取り専用Calendar（祝日）への `insert` は `403 requiredAccessLevel`（"You need to have writer access to this calendar."） | `forbidden` の判定reasonに含める |
+| P7 | 前後1年の全Calendarの100件すべてのEvent IDが `^[A-Za-z0-9_]+$` に一致 | 正規表現のまま |
+| P8 | 作成したEventは `organizer.self: true`、`organizer.email` がCalendar ID。書き込み先Calendarの既存予定12件も同様で、招待された予定は0件。全Calendarの `eventType` は `default` 84件・`birthday` 16件 | §8.6のまま。招待予定の拒否はAutomated Testで担保 |
+| P9 | 時刻予定（`timeZone` の有無とも）・終日予定とも、`start` だけ / `end` だけのpatchで反対側と `timeZone` が完全に不変。逆転する片側patchは `400 timeRangeEmpty` | §8.6の片側patchを採用。400は `ProviderApiError` |
+
+### 20.2 書き込み先Calendarの実体確認（§6.4、2026-10-25）
+
+| 別名 | `summary` | `accessRole` |
+|---|---|---|
+| `personal`（default） | AI Foundation | owner |
+| `events` | Event Catalog | owner |
+
+2つのIDは異なる。Integration Test（§14.1「書き込み先の分配」）で、各別名へ作成した予定が設定したCalendarにだけ存在すること（他方の `events.get` が404）も確認した。Calendar IDは記録しない。手元の `config.local.yaml` は利用者の承認のもとで新形式へ移行済み。
+
+### 20.3 Verification結果（2026-10-25）
+
+| 項目 | 結果 |
+|---|---|
+| `npm run typecheck` / `npm run build` | 成功 |
+| `npm test` | 54 files / 1497 passed / 5 skipped（skipは既存のもの） |
+| Integration Test（`tests/integration/google-calendar.integration.test.ts`、実Google Calendar） | 10 passed。終了後、両Calendarに `[af-it` / `[af-probe` の予定が残っていないことを確認 |
+| `git diff main -- docs/specs/mvp-v0.1.md` | 差分なし |
+
+### 20.4 手動Verification（§14.2）
+
+| # | 結果 |
+|---|---|
+| M0 | §20.2 |
+| M1 | 旧 `writable_calendar_id` を含むConfigの読み込みが `sources.schedule.writable_calendar_id: was replaced by writable_calendars and default_calendar; e.g. …` で失敗することを確認 |
+| M2 / M3 / M5 / M6 | MCP Serverは経由せず、Integration Test（実Google Calendar、本BranchのConnector）で同じ操作を確認: 既定Calendarへの作成と `calendar` の別名、`events` への3日間の終日予定（Google側のendが+1日）、`description: null` で生のAPIから値が消えること、繰り返しの系列・回と設定外Calendarの予定の更新拒否 |
+| M4 | 未実施（Google Calendar UIで説明欄に書式を付ける操作が必要）。HTMLの原文保持はProbe P5とIntegration Testで確認済み |
+| M7 | `attended_only` の拒否をDomain / Tool Test（MCP経由の `Input validation error`）で確認 |
+| M8 | OAuth同意画面・`.env` は変更なし。既存のRefresh TokenでProbe・Integration Testを実行でき、再認可は不要だった |
+
+### 20.5 Planからの細部の変更・Plan外の変更（Implementation Reviewで確認してほしい点）
+
+- `toFoundationError` の `notFound` を404に加えて410でも使うようにした（§8.7の「404/410 は NotFoundError」を実装するため。既存の呼び出し元は `create` だけで、挙動への影響はない）。
+- `tests/helpers/mcp.ts` の `connectClient` に任意の `config` 引数を追加した（別名一覧がTool descriptionに出ることのTestのため）。
+- `FakeCalendarApi.listEvents` が `range` に重なるEventだけを返すようにした（§13.5「期間重複」をConnectorと `toTimeRange` の組み合わせで確認するため。開始のないEventはそのまま返す）。
+- `schedule_list` のTool descriptionにも書き込み先の別名一覧を載せた（`calendar` に渡せる値を示すため）。

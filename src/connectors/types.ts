@@ -23,6 +23,7 @@ import type {
   Schedule,
   ScheduleCreateInput,
   ScheduleListFilter,
+  ScheduleUpdateInput,
   Task,
   TaskCreateInput,
   TaskListFilter,
@@ -49,10 +50,12 @@ export interface TaskConnector {
 
 /** Source of Truth: Google Calendar. */
 export interface ScheduleConnector {
-  /** Creates the event on the configured writable calendar only. */
+  /** Creates the event on a configured writable calendar only (the default one, or the given alias). */
   create(input: ScheduleCreateInput): Promise<Schedule>;
-  /** Events overlapping the period on every calendar the user can read. */
+  /** Events overlapping the period on every calendar the user can read, or on the given one. */
   list(filter: ScheduleListFilter): Promise<Schedule[]>;
+  /** Changes the given fields of a single (non-recurring) event on a configured writable calendar. */
+  update(input: ScheduleUpdateInput): Promise<Schedule>;
 }
 
 /** Source of Truth: Notion. Reads and writes only the configured collection data source. */
