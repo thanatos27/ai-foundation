@@ -64,6 +64,9 @@ const TOOL_NAMES = [
   'knowledge_create',
   'knowledge_get',
   'knowledge_search',
+  'lifelog_append',
+  'lifelog_create',
+  'lifelog_get',
   'project_get',
   'project_list',
   'schedule_create',
@@ -89,7 +92,7 @@ async function runExpectingFailure(args: string[], env = childEnv()) {
 }
 
 describe('stdio server (e2e)', { timeout: 30_000 }, () => {
-  it('starts with the repository config.yaml and lists the task, schedule, collection, knowledge, project and area tools', async () => {
+  it('starts with the repository config.yaml and lists the task, schedule, collection, knowledge, project, area and life log tools', async () => {
     expect(toolNames(await listToolsOverStdio())).toEqual(TOOL_NAMES);
   });
 
@@ -125,6 +128,21 @@ describe('stdio server (e2e)', { timeout: 30_000 }, () => {
     );
     expect(invalid.isError).toBe(true);
     expect(JSON.stringify(invalid.content)).toContain('Invalid input: id must be \\"notion:<page-id>\\" as returned by area_list');
+  });
+
+  it('reports a missing vault path on use, after validating the life log id', async () => {
+    const [create, invalid] = await withStdioClient((client) =>
+      Promise.all([
+        client.callTool({ name: 'lifelog_create', arguments: { date: '2026-10-03', title: '東京散策', content: '浅草' } }),
+        client.callTool({ name: 'lifelog_get', arguments: { id: 'obsidian:AI Foundation/Knowledge/x.md' } }),
+      ]),
+    );
+    expect(create.isError).toBe(true);
+    expect(JSON.stringify(create.content)).toContain(
+      'Configuration error: sources.knowledge.obsidian.vault_path is not set',
+    );
+    expect(invalid.isError).toBe(true);
+    expect(JSON.stringify(invalid.content)).toContain('must start with \\"lifelog:\\"');
   });
 
   it('reports a missing collection data source on use', async () => {

@@ -1,4 +1,4 @@
-import { readdir, writeFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FilesystemVaultStorage } from '../../../src/connectors/obsidian/filesystem-storage.js';
@@ -253,5 +253,42 @@ describe('append', () => {
     await linkFile(join(vault.outside, 'secret.md'), vault.abs(p('link.md')));
     await expectError(storage.append(p('link.md'), 'x'), InputValidationError);
     expect(await vault.read('../outside/secret.md')).toBe('secret');
+  });
+});
+
+describe('apart from the life log directory (by real path)', () => {
+  it('refuses a knowledge_dir that is the life log directory under another spelling', async () => {
+    // knowledge_dir "AI Foundation/Knowledge", life log dir given as its 8.3 short name or another case.
+    const aliases = [];
+    for (const alias of ['AI Foundation/KNOWLE~1', 'ai foundation/knowledge']) {
+      if (await lstat(vault.abs(alias)).then(() => true, () => false)) aliases.push(alias);
+    }
+    for (const lifeLogDir of [...aliases, 'AI Foundation/Knowledge/LifeLog', 'AI Foundation']) {
+      await vault.write(`${KNOWLEDGE_DIR}/LifeLog/x.md`, 'x');
+      const storage = new FilesystemVaultStorage({ vaultPath: vault.vault, knowledgeDir: KNOWLEDGE_DIR, lifeLogDir });
+      const error = await expectError(storage.list(), ConfigurationError);
+      expect(error.message).toContain('life log directory');
+      await expectError(storage.createExclusive(p('new.md'), 'x'), ConfigurationError);
+    }
+  });
+
+  it('works next to the life log directory, and while it is unset', async () => {
+    await vault.write(p('a.md'), 'a');
+    for (const lifeLogDir of ['AI Foundation/LifeLog', undefined]) {
+      const storage = new FilesystemVaultStorage({ vaultPath: vault.vault, knowledgeDir: KNOWLEDGE_DIR, lifeLogDir });
+      expect((await storage.list()).map(({ path }) => path)).toEqual([p('a.md')]);
+    }
+  });
+});
+
+describe.skipIf(process.platform !== 'win32')('alternate data streams (Windows)', () => {
+  it('refuses a path with ":" instead of reading or writing a stream of another file', async () => {
+    await vault.write(p('private.txt'), 'plain');
+    await writeFile(vault.abs(p('private.txt:notes.md')), 'stream');
+    const error = await expectError(storage.read(p('private.txt:notes.md')), InputValidationError);
+    expect(error.message).toContain('alternate data stream');
+    await expectError(storage.append(p('private.txt:notes.md'), 'x'), InputValidationError);
+    await expectError(storage.createExclusive(p('new.txt:notes.md'), 'x'), InputValidationError);
+    expect(await readFile(vault.abs(p('private.txt:notes.md')), 'utf8')).toBe('stream');
   });
 });

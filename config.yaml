@@ -54,3 +54,12 @@ sources:
     # This repository is public: do not set it here. Set it in config.local.yaml.
     # notion:
     #   parent_page_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+  lifelog:
+    # Occasional life events (trips, outings, events) as free-form Markdown articles,
+    # one file per article: <directory>/YYYY-MM-DD-<title>.md (see README "Life Log").
+    # The vault is sources.knowledge.obsidian.vault_path. Create the directory yourself;
+    # it must not be the same as, inside or contain knowledge_dir.
+    provider: obsidian
+    obsidian:
+      directory: "AI Foundation/LifeLog"

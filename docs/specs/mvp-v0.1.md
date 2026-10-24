@@ -1314,3 +1314,61 @@ Areaには作成・更新・削除Toolを追加しない。Google DriveをArea P
 - 詳細な操作・設定例: [README](../../README.md#areas)
 
 既存のProject / Collection Toolの入出力契約は維持し、公開Tool数は**15 → 17**になった。
+
+---
+
+## 23. MVP v0.1以降の拡張 — Life Log（2026-10-24実装）
+
+> この節はMVP v0.1策定後に実装した機能の追補であり、上記の「5種類のEntity」「MVP対象外」などは**当時のv0.1のスコープ**を示している。最新のLife Logの詳細な契約は[Life Log MVP仕様](lifelog.md)、実装・検証記録は[Life Log Implementation Plan](../plans/lifelog-implementation-plan.md)を正とする。
+
+### 23.1 Entityの追加
+
+**Life Log**は、旅行・外出・イベントなど不定期な出来事を、非公開の簡易ブログのように自由形式のMarkdown記事として蓄積する個人活動アーカイブ。体系化された知識（Knowledge）とは別のEntity・Tool・保存Directoryとし、KnowledgeのFrontmatter・タグ規約を適用しない。
+
+```yaml
+id: "lifelog:<file name>"        # 例: lifelog:2026-10-03-東京散策.md
+type: lifelog
+date: "YYYY-MM-DD"
+title: string                    # ファイル名から復元した値
+source: obsidian
+external_ref: "<vault-relative path>"
+```
+
+### 23.2 Source of Truth / 保存構成
+
+Life LogのSoTは**Obsidian Vault**（Knowledgeと同じVault、Filesystem経由）。Google Drive API連携は実装していない（将来のWeb対応でKnowledgeと合わせて移行を検討する）。
+
+```text
+Obsidian Vault/
+  AI Foundation/
+    Knowledge/   # 既存、変更しない
+    LifeLog/     # 1記事 = 1ファイル: YYYY-MM-DD-<タイトル>.md
+```
+
+```yaml
+sources:
+  lifelog:
+    provider: obsidian
+    obsidian:
+      directory: "AI Foundation/LifeLog"
+```
+
+`sources.lifelog` はOptionalで、未設定でもServerと既存Toolは動作し、Life Log ToolだけがConfiguration Errorを返す。Vaultは `sources.knowledge.obsidian.vault_path` を使う。Life Log Directoryは手動で作成し、`knowledge_dir` と同一・包含関係にある設定は起動時に拒否する。
+
+### 23.3 MCP Tool
+
+| Tool | Input | Output | 制約 |
+|---|---|---|---|
+| `lifelog_create` | `{ date, title, content }` | `{ lifelog }` | 新規作成のみ。同じ日付・タイトルの記事があれば上書きせず失敗（原子的な排他作成） |
+| `lifelog_get` | `{ id: "lifelog:<file name>" }` | `{ lifelog, content }` | Directory直下で `YYYY-MM-DD-<タイトル>.md` に合う通常ファイルのみ |
+| `lifelog_append` | `{ id, content }` | `{ lifelog }` | 末尾への追記のみ。既存の本文は変更しない |
+
+一覧・検索・削除・名前変更・タグ・自動Knowledge化はMVP対象外。記事はcreateが返したID、またはObsidianで確認したファイル名から作ったIDで参照する。
+
+### 23.4 完了状況と参照先
+
+- 設計: [Issue #14](https://github.com/thanatos27/ai-foundation/issues/14) / [PR #20](https://github.com/thanatos27/ai-foundation/pull/20)
+- 実装: Branch `feat/lifelog`
+- 詳細な操作・設定例: [README](../../README.md#life-log)
+
+既存のKnowledge Toolの入出力契約は維持し、公開Tool数は**17 → 20**になった。

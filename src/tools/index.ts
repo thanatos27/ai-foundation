@@ -4,6 +4,7 @@ import type { Connectors } from '../connectors/types.js';
 import { registerAreaTools } from './area.js';
 import { registerCollectionTools } from './collection.js';
 import { registerKnowledgeTools } from './knowledge.js';
+import { registerLifeLogTools } from './lifelog.js';
 import { registerProjectTools } from './project.js';
 import { registerScheduleTools } from './schedule.js';
 import { registerTaskTools } from './task.js';
@@ -28,4 +29,5 @@ export function registerTools(server: McpServer, context: ToolContext): void {
   registerKnowledgeTools(server, context);
   registerProjectTools(server, context);
   registerAreaTools(server, context);
+  registerLifeLogTools(server, context);
 }

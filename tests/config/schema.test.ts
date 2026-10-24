@@ -242,6 +242,64 @@ describe('ConfigSchema', () => {
       ]);
     });
   });
+
+  describe('sources.lifelog', () => {
+    const KNOWLEDGE_DIR = 'AI Foundation/Knowledge';
+    const withLifeLog = (lifelog: unknown, knowledgeDir: string | null = KNOWLEDGE_DIR) => {
+      const config = validConfig();
+      const obsidian = { storage: 'filesystem', ...(knowledgeDir === null ? {} : { knowledge_dir: knowledgeDir }) };
+      return { ...config, sources: { ...config.sources, knowledge: { ...config.sources.knowledge, obsidian }, lifelog } };
+    };
+    const lifelogDir = (directory: string) => ({ provider: 'obsidian', obsidian: { directory } });
+
+    it('is optional, so configs written before life logs still load', () => {
+      expect(ConfigSchema.safeParse(validConfig()).success).toBe(true);
+      const { lifelog: _lifelog, ...sources } = withLifeLog(undefined).sources;
+      expect(ConfigSchema.safeParse({ ...validConfig(), sources }).success).toBe(true);
+    });
+
+    it('accepts the provider alone and a directory next to knowledge_dir', () => {
+      expect(ConfigSchema.safeParse(withLifeLog({ provider: 'obsidian' })).success).toBe(true);
+      expect(ConfigSchema.safeParse(withLifeLog({ provider: 'obsidian', obsidian: {} })).success).toBe(true);
+      const parsed = ConfigSchema.parse(withLifeLog(lifelogDir('AI Foundation/LifeLog')));
+      expect(parsed.sources.lifelog).toEqual({ provider: 'obsidian', obsidian: { directory: 'AI Foundation/LifeLog' } });
+    });
+
+    it.each(['', '.', '..', '../outside', '/abs', 'C:/abs', 'a\b', 'a//b', 'a/'])(
+      'rejects a directory outside the vault or not in vault-relative form: %j',
+      (directory) => {
+        expect(issuePaths(withLifeLog(lifelogDir(directory)))).toContain('sources.lifelog.obsidian.directory');
+      },
+    );
+
+    it.each([
+      ['the same as', KNOWLEDGE_DIR],
+      ['inside', `${KNOWLEDGE_DIR}/LifeLog`],
+      ['containing', 'AI Foundation'],
+      ['the same (ignoring case) as', 'ai foundation/KNOWLEDGE'],
+      ['inside (ignoring case)', 'AI FOUNDATION/knowledge/日記'],
+    ])('rejects a directory %s knowledge_dir', (_label, directory) => {
+      expect(issuePaths(withLifeLog(lifelogDir(directory)))).toEqual(['sources.lifelog.obsidian.directory']);
+    });
+
+    it('accepts directories that only share a name prefix with knowledge_dir', () => {
+      expect(ConfigSchema.safeParse(withLifeLog(lifelogDir('AI Foundation/KnowledgeLog'))).success).toBe(true);
+      expect(ConfigSchema.safeParse(withLifeLog(lifelogDir('AI'))).success).toBe(true);
+    });
+
+    it('does not compare when either directory is unset', () => {
+      expect(ConfigSchema.safeParse(withLifeLog(lifelogDir(KNOWLEDGE_DIR), null)).success).toBe(true);
+      expect(ConfigSchema.safeParse(withLifeLog({ provider: 'obsidian' }, KNOWLEDGE_DIR)).success).toBe(true);
+    });
+
+    it('rejects another provider and unknown keys (no article list, no vault path of its own)', () => {
+      expect(issuePaths(withLifeLog({ provider: 'google_drive' }))).toEqual(['sources.lifelog.provider']);
+      expect(issuePaths(withLifeLog({ provider: 'obsidian', obsidian: { directory: 'L', vault_path: '/v' } }))).toEqual([
+        'sources.lifelog.obsidian',
+      ]);
+      expect(issuePaths(withLifeLog({ provider: 'obsidian', articles: ['x.md'] }))).toEqual(['sources.lifelog']);
+    });
+  });
 });
 
 const PARENT_ID = '1f2e3d4c5b6a47988796a5b4c3d2e1f0';

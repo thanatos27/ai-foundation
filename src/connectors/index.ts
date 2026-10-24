@@ -8,7 +8,9 @@ import { NotionAreaConnector } from './notion/area-connector.js';
 import { lazyNotionClient } from './notion/client.js';
 import { NotionCollectionConnector } from './notion/connector.js';
 import { ObsidianKnowledgeConnector } from './obsidian/connector.js';
+import { FilesystemLifeLogStorage } from './obsidian/filesystem-lifelog-storage.js';
 import { FilesystemVaultStorage } from './obsidian/filesystem-storage.js';
+import { ObsidianLifeLogConnector } from './obsidian/lifelog-connector.js';
 import { lazyTodoistClient } from './todoist/client.js';
 import { TodoistTaskConnector } from './todoist/connector.js';
 import type { Connectors } from './types.js';
@@ -19,7 +21,25 @@ function knowledgeConnector(config: Config): ObsidianKnowledgeConnector {
   const knowledgeDir = obsidian?.knowledge_dir;
   return new ObsidianKnowledgeConnector({
     knowledgeDir,
-    storage: new FilesystemVaultStorage({ vaultPath: obsidian?.vault_path, knowledgeDir }),
+    storage: new FilesystemVaultStorage({
+      vaultPath: obsidian?.vault_path,
+      knowledgeDir,
+      lifeLogDir: config.sources.lifelog?.obsidian?.directory,
+    }),
+  });
+}
+
+/** The life log connector: articles in a directory of the knowledge vault (the file system only). */
+function lifeLogConnector(config: Config): ObsidianLifeLogConnector {
+  const directory = config.sources.lifelog?.obsidian?.directory;
+  const obsidian = config.sources.knowledge.obsidian;
+  return new ObsidianLifeLogConnector({
+    directory,
+    storage: new FilesystemLifeLogStorage({
+      vaultPath: obsidian?.vault_path,
+      directory,
+      knowledgeDir: obsidian?.knowledge_dir,
+    }),
   });
 }
 
@@ -45,5 +65,6 @@ export function createConnectors(config: Config, credentials: CredentialProvider
     knowledge: knowledgeConnector(config),
     project: new GitHubProjectConnector({ client: lazyGitHubClient(credentials) }),
     area: new NotionAreaConnector({ client: notion, parentPageId: config.sources.area?.notion?.parent_page_id }),
+    lifelog: lifeLogConnector(config),
   };
 }

@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 export const KNOWLEDGE_DIR = 'AI Foundation/Knowledge';
+export const LIFELOG_DIR = 'AI Foundation/LifeLog';
 
 /**
  * A throwaway vault in the OS temp directory (never the user's vault), with a sibling `outside`
  * directory for boundary tests:
  *
  *   <base>/vault/AI Foundation/Knowledge/
+ *   <base>/vault/AI Foundation/LifeLog/
  *   <base>/outside/
  */
 export interface TestVault {
@@ -30,6 +32,7 @@ export async function createTestVault(): Promise<TestVault> {
   const vault = join(base, 'vault');
   const outside = join(base, 'outside');
   await mkdir(join(vault, ...KNOWLEDGE_DIR.split('/')), { recursive: true });
+  await mkdir(join(vault, ...LIFELOG_DIR.split('/')), { recursive: true });
   await mkdir(outside, { recursive: true });
   const abs = (path: string) => join(vault, ...path.split('/'));
   return {

@@ -1,6 +1,6 @@
 # AI Foundation
 
-各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / Project / AreaをAIから統一的に操作するMCPベースの個人AI基盤。
+各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / Project / Area / Life LogをAIから統一的に操作するMCPベースの個人AI基盤。
 
 ## Source of Truth
 
@@ -12,12 +12,13 @@
 | Knowledge | Obsidian / Google Drive |
 | Project | GitHub / Google Drive |
 | Area（PARAのAreas） | Notion |
+| Life Log | Obsidian |
 
 AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface、SoTルール、Connector、静的設定を提供する。Routingと複数Toolの組み合わせはAI Clientが判断する。
 
 ## Current Phase
 
-Phase 5 — Project、および Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、および Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -38,6 +39,9 @@ Phase 5 — Project、および Areas MVP（[Issue #13](https://github.com/thana
 | `project_get` | `github:<owner>/<repository>` を指定してProjectとGitHub固有Details（description / owner / default_branch / visibility / archived / fork / updated_at）を取得（Read-only） |
 | `area_list` | Notionの `Areas` 親ページ直下の子ページをArea（継続的に管理する領域）として一覧（query: タイトルの部分一致、大文字小文字を区別しない）。タイトル順。Read-only |
 | `area_get` | `notion:<page-id>` を指定してAreaと目次本文（Markdown相当のテキスト）を取得。リンク先・子ページの中身は取得しない（Read-only） |
+| `lifelog_create` | Obsidian VaultのLife Log Directory直下へ、日付・タイトル・本文から記事（`YYYY-MM-DD-<タイトル>.md`）を新規作成。既存ファイルは上書きしない |
+| `lifelog_get` | `lifelog:<ファイル名>` を指定して記事と本文全文を取得 |
+| `lifelog_append` | `lifelog:<ファイル名>` を指定して記事末尾へ段落として追記 |
 
 Taskの `status`（`next` / `waiting` / `someday`）と `area`（`work` / `personal`）は、`af-` で始まるTodoist Label（`af-next`, `af-area-work` 等）で表現する。`af-` で始まるLabelはAI Foundation用に予約しており、`tags` には含まれない。
 
@@ -48,6 +52,8 @@ Knowledgeは1件 = 1 Markdown file（UTF-8）で、`title` / `description` / `ar
 Projectは1 GitHub Repository = 1 Projectで、IDは `github:<owner>/<repository>`。Project一覧はConfigに書かず、Tool呼び出しのたびにGitHub APIから取得する（Cacheなし）。public / private / internal、archived、fork、Organization所有のRepositoryも区別せず含む。RepositoryをGitHub上でrename・移管すると、旧IDの `project_get` は現在のIDで結果を返す。README・ファイル・Issue・Pull Requestは取得しない。
 
 Area（PARAのAreas: 食事・資産・運動・家事など、完了を目指さず継続的に管理する領域）は、Notionの `Areas` 親ページ直下の子ページ1つ = 1 Areaで、IDは `notion:<page-id>`。Areaのページは関連情報へのリンクを集めた目次として使い、AI Foundationは目次を返すだけでリンク先を巡回しない。完了を目指す一時的な活動はProject。Task / Knowledgeの `area`（`work` / `personal`）とは別の概念。詳細は [Areas](#areas)。
+
+Life Log（旅行・外出・イベントなど、不定期な出来事の記録）は、Obsidian VaultのLife Log Directory直下の自由形式のMarkdown 1ファイル = 1記事で、IDは `lifelog:<ファイル名>`（`lifelog:2026-10-03-東京散策.md`）。Knowledgeとは別のDirectory・別のToolで、Frontmatter・タグは使わない。一覧・検索Toolはない。詳細は [Life Log](#life-log)。
 
 ## Getting Started
 
@@ -77,7 +83,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledgeのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir`）で実行する。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -156,6 +162,28 @@ KnowledgeはObsidian VaultのMarkdownとしてFilesystem経由で読み書きす
 - `vault_path` 自体は同期フォルダへのSymbolic Link / Junctionでもよいが、Vaultから `knowledge_dir` までと `knowledge_dir` の内側のSymbolic Link / Junctionは辿らない（Configuration ErrorまたはInput Validation Error）
 
 VaultはGoogle Drive等の同期フォルダに置いてよい。AI Foundationは同期を管理せず、手元のFilesystemに見えている状態だけを扱う。同期の競合で作られたファイル（`CAP定理 (1).md` 等）も通常のKnowledgeとして検索される。Google Drive for desktopを「ストリーミング」で使うと検索のたびにファイルの読み込みが発生して遅くなるため、Vaultのフォルダは「ミラーリング」（またはオフラインで使用可能）を推奨する。
+
+### Life Log
+
+Life Logは、Knowledgeと同じObsidian Vaultの別Directoryに、出来事を1記事 = 1 Markdown file（UTF-8）として保存する。Credentialは不要。
+
+1. Vault内にLife Log Directory（`config.yaml` の既定は `AI Foundation/LifeLog`）を作成する。AI Foundationは自動作成しない。`knowledge_dir` と同じ場所・その内側・それを含む場所には置けない（Knowledgeの検索にLife Logが混ざらないようにするため）。設定の文字列は起動時に、実際のフォルダはTool呼び出し時に実パスで確認する（Windowsの8.3短縮名 `KNOWLE~1` や大文字小文字違いで同じフォルダを指す場合もConfiguration Error。Knowledge Toolも同様）
+2. Directoryを変える場合は `sources.lifelog.obsidian.directory`（Vault相対パス）を設定する。Vaultは `sources.knowledge.obsidian.vault_path` を使う（Knowledgeの設定が必要）
+
+- ファイル名は `YYYY-MM-DD-<タイトル>.md`。タイトルの使えない文字はKnowledgeと同じく空白に置き換える。同じ日付に別タイトルの記事は作れるが、同じ日付・タイトルの記事があれば上書きせずErrorになる
+- 本文は渡されたとおりに保存する（改行をLFにそろえ、末尾に改行を付けるだけ）。Frontmatter・見出し・日付は付け足さない。画像・動画は外部ストレージのURLを本文に書く。Project / Area / Knowledgeへの参照も、IDやURLを任意に書いてよい（自動の紐付けはしない）
+- 一覧・検索Toolはない。`lifelog_create` が返したID、またはObsidianで確認した**正確なファイル名**から作ったID（`lifelog:` + ファイル名）で取得・追記する。どちらも分からない記事はAI Foundationからは取得できない
+- Obsidianで手動作成した記事も、Life Log Directory直下で `YYYY-MM-DD-<タイトル>.md` の規則に合えば取得・追記できる（日付が実在しない・サブフォルダ内・規則外の名前は対象外）。将来の保存先の移行でも、この規則がIDで参照し続けるための前提になる
+- UTF-8でないファイル（Shift_JIS等）はErrorになり、追記もしない。ObsidianでUTF-8に直す
+- Symbolic Link / Junctionの扱いはKnowledgeと同じ（Vaultから辿る途中・Directoryの内側のLinkは辿らない）
+- IDのファイル名に `:` は使えない（Windowsでは `x.txt:notes.md` が別ファイルの代替データストリームを指すため。Knowledgeも、Windowsでは `:` を含むパスを読み書きしない）
+
+MVPの制約:
+
+- 同時に追記した場合の順序は保証しない。複数のプロセスから同時に大きな内容を追記した場合、追記内容が混ざることがあり得る（既存の本文は消えない）
+- 追記の書き込み途中で失敗した場合（ディスク容量不足・同期ソフトのロック等）、末尾に追記内容の一部だけが残ることがある。Obsidianで確認して直す
+- Obsidianで記事を開いたまま未保存の編集がある状態で追記すると、Obsidian側の保存で追記が失われることがあり得る（AI Foundationからは検知できない）
+- 大文字小文字だけが異なるタイトル（`Tokyo` と `tokyo`）は、Windows / macOSでは同名として扱われる
 
 ### Areas
 
@@ -318,7 +346,7 @@ src/
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
 ├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/, github/）
-├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts, area.ts）
+├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts, area.ts, lifelog.ts）
 ├─ shared/       Timezone計算などの共通処理
 ├─ errors.ts     Tool呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
@@ -356,5 +384,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Phase 5 Implementation Plan](docs/plans/phase-5-implementation-plan.md)
 - [Areas MVP Design](docs/specs/areas.md)
 - [Areas MVP Implementation Plan](docs/plans/areas-implementation-plan.md)
+- [Life Log MVP Design](docs/specs/lifelog.md)
+- [Life Log MVP Implementation Plan](docs/plans/lifelog-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

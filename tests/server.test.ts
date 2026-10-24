@@ -48,7 +48,7 @@ describe('createServer', () => {
     expect(client.getInstructions()).toBe(INSTRUCTIONS);
   });
 
-  it('lists the task, schedule, collection, knowledge, project and area tools', async () => {
+  it('lists the task, schedule, collection, knowledge, project, area and life log tools', async () => {
     const client = await connect(createServer(context));
     expect(client.getServerCapabilities()?.tools).toBeDefined();
     const { tools } = await client.listTools();
@@ -62,6 +62,9 @@ describe('createServer', () => {
       'knowledge_create',
       'knowledge_get',
       'knowledge_search',
+      'lifelog_append',
+      'lifelog_create',
+      'lifelog_get',
       'project_get',
       'project_list',
       'schedule_create',
