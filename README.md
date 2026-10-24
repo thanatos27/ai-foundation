@@ -18,7 +18,7 @@ AI Foundation自身は独自DBを持たず、共通Data Model、Tool Interface�
 
 ## Current Phase
 
-Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、および Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
+Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-foundation/issues/13)）、Life Log MVP（[Issue #14](https://github.com/thanatos27/ai-foundation/issues/14)）、および Google Calendar参加済みフラグ（[Issue #15](https://github.com/thanatos27/ai-foundation/issues/15)）。Todoist・Google Calendar・Notion・Obsidian Vault・GitHubへ実際に接続し、以下のToolを公開している。
 
 | Tool | 内容 |
 |---|---|
@@ -27,7 +27,7 @@ Phase 5 — Project、Areas MVP（[Issue #13](https://github.com/thanatos27/ai-f
 | `task_update` | `todoist:<id>` を指定して部分更新 |
 | `task_complete` | `todoist:<id>` を指定して完了 |
 | `schedule_create` | AI Foundation専用Calendarへ予定を作成（時刻予定 / 終日予定） |
-| `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得 |
+| `schedule_list` | 期間を指定し、閲覧可能な全Calendarから予定を取得（`attended_only: true` で参加済みフラグ `#attended` の付いた予定だけ） |
 | `collection_create` | Notionの専用Collectionへ本・ゲーム・映画等を作成（title / collection_type / status / metadata / tags / note） |
 | `collection_search` | 専用CollectionをTitle部分一致・collection_type・status・tags（AND）で検索 |
 | `collection_update` | `notion:<page-id>` を指定して部分更新（status / metadata（shallow merge）/ tags（置換）/ append_note（本文末尾へ追記）） |
@@ -83,7 +83,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendar_id` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google Calendar参加済みフラグのIntegration Testは読み取りのみで、Google Calendar UIで手動作成したFixtureの日付を `AI_FOUNDATION_IT_ATTENDANCE_DATE=YYYY-MM-DD` で指定した場合だけFixtureを検証する（Fixtureの内容は [Implementation Plan §12.2](docs/plans/schedule-attendance-implementation-plan.md#122-手動fixturegoogle-calendar-uiで作成検証後にユーザーが削除)）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -231,6 +231,18 @@ Areaのページには関連情報へのリンクを書く。AI Foundationで辿
 
 - `Configuration error: sources.area.notion.parent_page_id is not set`: `config.local.yaml` に `sources.area.notion.parent_page_id` を設定する
 - `Configuration error: Notion page … (sources.area.notion.parent_page_id) was not found, is in the trash or is not shared …`: ページIDの誤り、`Areas` がゴミ箱にある、またはIntegrationが `Areas` に追加されていない
+
+### 参加済みフラグ（Google Calendar）
+
+参加した予定は、Google Calendarで予定の説明欄に `#attended` と書いて記録する。`schedule_list` に `attended_only: true` を付けると、期間内の予定のうちフラグのある予定だけを返す（例: `{"start":"2026-09-01","end":"2026-09-30","attended_only":true}`）。Config・Credential・OAuth Scopeの追加や再認可は不要。
+
+- `#attended` は大文字小文字を区別し、独立した語として書く。文章の後に書く場合は前に空白か改行を入れる（`参加#attended`・`#attended2`・`#Attended` は対象外）。UIで太字にしても判定される
+- AI Foundationはフラグを書き込まない。フラグのない予定は「未確認」であり、不参加とは扱わない。RSVP（出欠の回答）は判定に使わない
+- 繰り返し予定は各回の説明欄で判定する。系列の説明欄に書くと全回が対象になるため、参加した回だけ記録する場合は「この予定のみ」を編集する
+- 他の参加者がいる予定の説明欄は他の参加者にも見える。編集権限のない招待予定にはフラグを付けられない
+- `attended_only` を省略、または `false` にした場合は従来どおり全予定を返す
+
+判定規則の詳細と既知の制約は [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md) を参照。
 
 ## Credentials
 
@@ -386,5 +398,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [Areas MVP Implementation Plan](docs/plans/areas-implementation-plan.md)
 - [Life Log MVP Design](docs/specs/lifelog.md)
 - [Life Log MVP Implementation Plan](docs/plans/lifelog-implementation-plan.md)
+- [Google Calendar参加済みフラグ Design](docs/specs/schedule-attendance.md)
+- [Google Calendar参加済みフラグ Implementation Plan](docs/plans/schedule-attendance-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)
