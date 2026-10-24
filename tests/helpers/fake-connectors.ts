@@ -2,6 +2,7 @@ import type {
   AreaConnector,
   CollectionConnector,
   KnowledgeConnector,
+  LifeLogConnector,
   ProjectConnector,
   ScheduleConnector,
   TaskConnector,
@@ -12,6 +13,8 @@ import {
   type CollectionItem,
   type Knowledge,
   type KnowledgeSearchResult,
+  type LifeLog,
+  type LifeLogDocument,
   mergeMetadata,
   type ProjectGetResult,
   type ProjectResult,
@@ -266,4 +269,42 @@ export class FakeAreaConnector implements AreaConnector {
       content: this.content,
     };
   }
+}
+
+/** In-memory life log connector that records the domain input of every call. */
+export class FakeLifeLogConnector implements LifeLogConnector {
+  readonly calls: { method: keyof LifeLogConnector; arg: unknown }[] = [];
+  failWith: Error | undefined;
+  content = '';
+
+  private record(method: keyof LifeLogConnector, arg: unknown): void {
+    this.calls.push({ method, arg });
+    if (this.failWith) throw this.failWith;
+  }
+
+  async create(input: Parameters<LifeLogConnector['create']>[0]): Promise<LifeLog> {
+    this.record('create', input);
+    return lifelog(`${input.date}-${input.title}.md`);
+  }
+
+  async get(id: string): Promise<LifeLogDocument> {
+    this.record('get', id);
+    return { lifelog: lifelog(id.slice('lifelog:'.length)), content: this.content };
+  }
+
+  async append(input: Parameters<LifeLogConnector['append']>[0]): Promise<LifeLog> {
+    this.record('append', input);
+    return lifelog(input.id.slice('lifelog:'.length));
+  }
+}
+
+function lifelog(name: string): LifeLog {
+  return {
+    id: `lifelog:${name}`,
+    type: 'lifelog',
+    date: name.slice(0, 10),
+    title: name.slice(11, -'.md'.length),
+    source: 'obsidian',
+    external_ref: `AI Foundation/LifeLog/${name}`,
+  };
 }

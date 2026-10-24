@@ -25,6 +25,10 @@ Area:
 Ongoing areas of responsibility (e.g. meals, assets, exercise), each a table of contents linking to related information.
 Source of Truth: Notion.
 
+Life Log:
+Occasional personal events such as trips, outings and events, kept as free-form Markdown articles.
+Source of Truth: Obsidian.
+
 Use the provided tools to read and modify these sources.
 
 Do not create duplicate authoritative information across multiple sources.`;
