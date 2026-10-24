@@ -1,7 +1,7 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.1（Plan Review待ち・未承認。本実装は未着手）**
-- 作成: Coding Agent (Claude Code) / 2026-10-25
+- Status: **rev.2（PR #25 Plan Review rev.1反映・再レビュー待ち。本実装は未着手）**
+- 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
 
@@ -39,9 +39,10 @@
 2. **Todoistを正本にし、次回期限の計算・自然言語の解釈はTodoistに任せる。** AI Foundationは `recurrence` 文字列を `dueString` として渡し、結果の `due.isRecurring` / `due.string` を読むだけで、曜日・日付を再計算しない。
 3. **繰り返し設定を意図せず失わせる操作は、Providerへ書き込む前に拒否する。** 繰り返しTaskへの `due` 変更（`null` 含む）は `updateTask` を呼ぶ前に `InputValidationError`。他Fieldと同時に指定されていても全体を拒否し、部分的にも更新しない。
 4. **繰り返しの解除は `recurrence: null` だけで行う。** 解除は期限も一緒に消える（Todoistでは繰り返し規則は `due` の一部のため）。「規則だけ外して次回の日付を残す」はMVPで扱わない（§16 Q2）。
-5. **Todoistが繰り返しとして受理したかを書き込み後に必ず検証する。** `recurrence` を送った結果 `due.isRecurring !== true` なら、期限を書き込み前の状態へ戻してからErrorを返す（§7.4）。
-6. **`recurrence` を含まない操作は従来と同一の呼び出しにする。** title / status / area / tagsだけの更新で `due` 系の引数を送らない（Todoist側で繰り返しが保持される）。titleだけの更新で `getTask` を呼ばない既存の最適化も維持する。
-7. **Provider固有の処理はConnectorに閉じる。** Domain / Toolは「`recurrence` はTodoistの繰り返し規則（英語の自然言語）」とだけ知り、`dueString` / `dueLang` / `isRecurring` はTodoist Connectorの責務とする（AGENTS.md Layer責務）。
+5. **Todoistが繰り返しとして受理したかを書き込み後に必ず検証する。** `recurrence` を送った結果 `due.isRecurring !== true` なら、`create` は作成したTaskを削除し（§7.2）、`update` は期限を書き込み前の状態へ戻して（§7.4）からErrorを返す。**Errorを返すときは書き込み前の状態に戻すことを原則とし**、戻せなかった場合だけ、残った状態・Task ID・復旧方法を `ProviderApiError` で明示する。
+6. **`recurrence` の変更・解除は単独の操作にする（rev.2）。** `task_update` で `recurrence`（文字列・`null`）を title / status / area / tags と同時に指定することをDomainで拒否し、受理検証の失敗時に「他Fieldだけ更新済み」という部分更新が起きないようにする。
+7. **`recurrence` を含まない操作は従来と同一の呼び出しにする。** title / status / area / tagsだけの更新で `due` 系の引数を送らない（Todoist側で繰り返しが保持される）。titleだけの更新で `getTask` を呼ばない既存の最適化も維持する。
+8. **Provider固有の処理はConnectorに閉じる。** Domain / Toolは「`recurrence` はTodoistの繰り返し規則（英語の自然言語）」とだけ知り、`dueString` / `dueLang` / `isRecurring` はTodoist Connectorの責務とする（AGENTS.md Layer責務）。
 
 ---
 
@@ -49,14 +50,15 @@
 
 | 対象 | 変更 | 理由 |
 |---|---|---|
-| `src/domain/task.ts` | `TaskSchema.recurrence`、`TaskCreateInputSchema.recurrence`（非空文字列）、`TaskUpdateInputSchema.recurrence`（非空文字列｜`null`）、`due` との同時指定を拒否する `refine` | v0.1 §Domain / Input |
+| `src/domain/task.ts` | `TaskSchema.recurrence`、`TaskCreateInputSchema.recurrence`（非空文字列）、`TaskUpdateInputSchema.recurrence`（非空文字列｜`null`）、`due` との同時指定を拒否する `refine`、更新時に `recurrence` と title / status / area / tags の同時指定を拒否する `refine`（rev.2） | v0.1 §Domain / Input、Plan Review rev.1 |
+| `src/connectors/todoist/client.ts` | `TodoistClient` のPickに `deleteTask` を追加（rev.2） | `create` の受理検証失敗時のロールバック（§7.2） |
 | `src/connectors/todoist/mapping.ts` | `recurrenceOf(due)`、`recurrenceArgs(rule)`、`restoreDueArgs(due, tz)`、`toTask` に `recurrence` を追加。`dueOf` / `dueArgs` / `CLEAR_DUE` は**変更しない** | v0.1 §Implementerへの注意 |
 | `src/connectors/todoist/connector.ts` | `create`: `recurrence` → `dueString` + 受理検証。`update`: `getTask` が必要な条件に `due` / `recurrence` を追加、繰り返しTaskへの `due` 変更を事前拒否、`recurrence` の受理検証と期限の復元。`complete`: **変更しない**（`toTask` 経由で `recurrence` が付く） | v0.1 §Implementerへの注意 |
 | `src/tools/task.ts` | 4 Toolの説明を更新（書式・例・解除・Due保護・完了時の挙動） | v0.1 §Implementerへの注意 |
 | `README.md` | Tool表、「繰り返しタスク」節、Documentation一覧 | AC9 |
 | `docs/specs/task-recurrence.md`（新規） | v0.1と本Planで確定した規則を個別仕様として記録 | AC9 |
 
-**変更しないもの**: `docs/specs/mvp-v0.1.md`（固定済み）、`src/connectors/todoist/client.ts`（`TodoistClient` のPickは既存メソッドで足りる。`toFoundationError` も変更しない）、`src/connectors/todoist/filter.ts` / `TaskListFilterSchema`（`task_list` に新しいFilterを足さない）、`src/connectors/types.ts`（型は推論で追従）、`src/instructions.ts`（§16 Q9）、`src/config/**`・`config.yaml`、`src/credentials/**`、`.env.example`、他Entityの実装、`tests/server.test.ts` / `tests/e2e/stdio.test.ts`（Tool名・件数は不変）。
+**変更しないもの**: `docs/specs/mvp-v0.1.md`（固定済み）、`src/connectors/todoist/client.ts` の `toFoundationError` / `lazyTodoistClient`（Pickへの `deleteTask` 追加のみ）、`src/connectors/todoist/filter.ts` / `TaskListFilterSchema`（`task_list` に新しいFilterを足さない）、`src/connectors/types.ts`（型は推論で追従）、`src/instructions.ts`（§16 Q9）、`src/config/**`・`config.yaml`、`src/credentials/**`、`.env.example`、他Entityの実装、`tests/server.test.ts` / `tests/e2e/stdio.test.ts`（Tool名・件数は不変）。
 
 ---
 
@@ -103,12 +105,17 @@ UpdateTaskArgs = { content?; labels?; dueString?: string | 'no date' | null; due
 - `due_*` を1つも送らなければTodoistは期限を変えない。title / labelsだけの更新では繰り返しが保持される（Phase 2で `complete` 経由は確認済み。Labels / content更新での保持は §5 P7で確認する）。
 - `dueDate` / `dueDatetime` で更新すると繰り返し規則が失われる（現行Tool説明の記載。§5 P7で再確認）。これが §7.3 の事前拒否の根拠。
 
-### 4.4 完了（`closeTask(id)`）
+### 4.4 削除（`deleteTask(id)`、rev.2で使用開始）
+
+- `deleteTask(id: string, requestId?: string): Promise<boolean>`。`DELETE /tasks/{id}` を送り、TaskをTodoistから削除する（Todoistのタスクにゴミ箱はなく、元に戻せない）。既存Integration Testの後始末で使用実績あり。
+- Connectorでは **同じ `create` 呼び出しで `addTask` が返したidに対してだけ** 呼ぶ（§7.2）。Toolとしては公開せず、既存Taskの削除経路は作らない。
+
+### 4.5 完了（`closeTask(id)`）
 
 - 繰り返しTaskは完了扱いにならず次回分へ進む（`checked: false` のまま `due.date` が進む）。Phase 2 Integration Testで `every day` について確認済み。`complete` の既存ロジック（close後の `getTask`）で次回期限と `recurrence` の両方が返る。
 - 完了日基準（`every!`）の次回日付・規則文字列の保持は §5 P9で確認する。
 
-### 4.5 言語・Time Zone
+### 4.6 言語・Time Zone
 
 - `dueLang` はTodoist APIで「`due_string` が英語でない場合に指定する2文字の言語コード」。**本Issueでは `recurrence` を英語のTodoist構文に限定し、常に `dueLang: 'en'` を送る**（§16 Q3）。日本語の依頼（「毎週月曜」）はAI Clientが英語（`every monday`）に直してから渡す。Tool説明にそう書く。
 - Todoistは `dueString` を**Todoistアカウントのtimezone設定**（`getUser().tzInfo`）で解釈する。AI Foundationの `defaults.timezone`（`Asia/Tokyo`）はSDKへ送れる値ではなく、出力時にfloatingな時刻を解釈するためだけに使う（既存 `dueOf`）。両者が一致していることを §5 P1で確認し、不一致の場合の影響はREADME / 仕様書の制約として記載する（Configは追加しない）。
@@ -134,6 +141,7 @@ UpdateTaskArgs = { content?; labels?; dueString?: string | 'no date' | null; due
 | P7 | 繰り返しTaskに `updateTask` で (a) `content` のみ (b) `labels` のみ (c) `dueDate` (d) `dueDatetime` | (a)(b)で `due` が完全に不変（`string` / `date` / `isRecurring`）、(c)(d)で `isRecurring: false` になるか | (a)(b)保持・(c)(d)解除が前提。(c)(d)で保持されるなら事前拒否は不要になるが、v0.1どおり拒否は維持する（安全側） |
 | P8 | 繰り返しTaskに `updateTask({ dueString: 'every day', dueLang: 'en' })`、続けて元の `string` / `lang` で `updateTask` | 規則変更で次回日付がどう再計算されるか、元の規則で戻したときの次回日付 | 規則変更・復元とも「今日以降の最初の該当日」に再計算される前提（§7.4 / §16 Q5の注意書き） |
 | P9 | `every! 3 days` のTaskを `closeTask` → `getTask` | 完了日から3日後へ進み、`string` が不変か | `complete` の既存ロジックを変えない前提 |
+| P10 | `addTask({ dueString: 'tomorrow', dueLang: 'en' })` の直後に `deleteTask` → `getTask` | 作成直後のTaskを削除でき、以後 `getTask` が404になるか（§7.2のロールバック経路） | 404になる前提。削除後も取得できる等の想定外があればロールバック方式を見直す（Plan修正） |
 
 Probe結果がPlanの前提と異なり設計判断が変わる場合（P5 / P7の想定外など）は、実装前にPlanを修正してReviewを受け直す。
 
@@ -163,24 +171,31 @@ const TASK_UPDATE_FIELDS = ['title', 'status', 'due', 'recurrence', 'area', 'tag
 
 TaskUpdateInputSchema = z.strictObject({
   …既存,
-  /** Sets or changes the rule; null removes the rule together with the due. */
+  /** Sets or changes the rule; null removes the rule together with the due. Must be the only change. */
   recurrence: RecurrenceSchema.nullable().optional(),
 })
   .refine(既存の「いずれか必須」)
-  .refine((input) => input.due === undefined || input.recurrence === undefined, {
-    message: 'due and recurrence cannot be specified together',
-    path: ['recurrence'],
-  });
+  .refine(
+    (input) => input.recurrence === undefined || TASK_UPDATE_FIELDS.every((f) => f === 'recurrence' || input[f] === undefined),
+    {
+      message: 'recurrence must be updated on its own; change title / status / due / area / tags in a separate task_update',
+      path: ['recurrence'],
+    },
+  );
 ```
+
+`due` との同時指定もこの `refine` で拒否される（rev.1の「`due` と `recurrence` の同時指定を拒否」を包含する）。
 
 | 項目 | 決定 |
 |---|---|
 | `TaskSchema.recurrence` | `optional` にする。Connectorは常に `string｜null` を返すが、`FakeTaskConnector` 等の既存の `Task` 生成箇所を壊さないため（`project_ref` と同じ扱い） |
 | 作成時の `due: null` + `recurrence` | **受理**する。作成時の `due: null` は省略と同じ意味のため（§16 Q2） |
-| 更新時の `due: null` + `recurrence` | **拒否**する。更新では `due: null` が「期限を消す」操作を意味するため、`recurrence: null` と意味が重なる |
+| 更新時の `recurrence` + 他Field | **すべて拒否**する（rev.2）。`due`（`null` 含む）に加え、title / status / area / tags との同時指定も拒否し、`recurrence` の変更・解除は単独の `task_update` に限る。受理検証の失敗時に他Fieldだけが更新済みになる部分更新を、構造的に起こさないため（§16 Q11） |
+| 作成時の `recurrence` + title / status / area / tags | 受理する。作成は1回の `addTask` で行い、失敗時はTaskごと削除するため部分状態が残らない（§7.2） |
 | 作成時の `recurrence: null` | 拒否（v0.1「非空文字列のみ」）。作成で解除する対象はない |
 | 文字列の検証 | 空・空白のみ・非文字列を拒否。**繰り返し構文かどうかはDomainで判定しない**（Todoistが正。受理検証はConnector §7.4） |
 | `TASK_UPDATE_FIELDS` | `recurrence` を追加。`recurrence: null` 単独でも「いずれか必須」を満たす（`!== undefined` 判定のまま） |
+| 非繰り返しTaskの `due` + 他Field | 従来どおり受理（`recurrence` を含まない更新は変更しない） |
 
 `refine` を追加しても `strictObject` の `additionalProperties: false` と `inputSchema.properties` はMCPのJSON Schemaに残る（既存の `TaskUpdateInputSchema` と同じ構成）。
 
@@ -227,15 +242,18 @@ toTask(...) → { …既存, recurrence: recurrenceOf(task.due) }
 addTask({ content, labels, ...(recurrence ? recurrenceArgs(recurrence) : due != null ? dueArgs(due) : {}) })
   ↓
 recurrence 指定 かつ created.due?.isRecurring !== true
-  → updateTask(created.id, CLEAR_DUE) で期限を外す（best-effort）
-  → InputValidationError（作成済みTaskのidを含む）
+  → deleteTask(created.id) で作成したTaskを削除（ロールバック。rev.2）
+     成功 → InputValidationError（何も作成されていない）
+     失敗 → ProviderApiError（Taskが残ったこと・id・復旧方法）
 それ以外 → toTask(created)
 ```
 
-- 受理されなかった場合もTaskは作成済みで、**Connectorは削除しない**（Connectorは削除操作を持たない既存方針）。誤った単発の期限（例: `tomorrow` → 明日）が残らないよう期限だけ外し、Messageで状態を伝える:
-  - 期限の除去に成功: `Invalid input: Todoist did not read recurrence "<rule>" as a recurring rule. Task todoist:<id> was created without a due; set a valid rule with task_update (recurrence) instead of creating it again.`
-  - 期限の除去に失敗: `ProviderApiError`（`… task todoist:<id> was created with the one-off due <due>, and removing it failed: <message>`）。状態が想定外のため `complete` の再取得失敗と同じ扱いにする。
-- `recurrence` を含まない `create` は呼び出し引数・応答とも従来と同一（`recurrence: null` が出力に増えるだけ）。
+- **受理されなかった場合は、作成したTaskを削除してErrorを返す**（Plan Review rev.1）。Errorが返ったのにTaskが残り、AI Clientの再試行でInboxに重複Taskができることを防ぐ。
+  - 削除に成功: `Invalid input: Todoist did not read recurrence "<rule>" as a recurring rule (it was read as <due summary>), so no task was created. Use a rule such as "every monday" or "every! 3 days".`
+  - 削除に失敗: `ProviderApiError`: `Todoist API error: recurrence "<rule>" was not read as a recurring rule and task todoist:<id> was created with <due summary>, but deleting it failed: <message>. The task still exists: fix it with task_update (recurrence) or delete it in Todoist; do not call task_create again.` 状態が想定外のため `complete` の再取得失敗と同じく `ProviderApiError` にする。
+- 削除の範囲: Connectorが削除するのは **同じ `create` 呼び出しの `addTask` が返したid** だけ。`update` / `complete` / Toolからの削除経路は作らない（既存Taskを削除する操作は引き続き存在しない）。
+- 原子性の限界: `addTask` と `deleteTask` は別リクエストで、Todoist APIにTransactionはない。`addTask` 〜 `deleteTask` の間にTodoist側で他Clientから同期・表示され得ること、`deleteTask` が失敗し得ることは防げない。後者の場合だけ上記の `ProviderApiError` でTaskの残存を明示する。README / 仕様書の既知の制約にも記載する。
+- `recurrence` を含まない `create` は呼び出し引数・応答とも従来と同一（`recurrence: null` が出力に増えるだけ）。`deleteTask` は呼ばない。
 
 ### 7.3 `update`（Due保護）
 
@@ -248,12 +266,11 @@ current = needsCurrent ? getTask : undefined        // 404 → NotFoundError（�
 if (due !== undefined && current.due?.isRecurring)  // ★ 書き込み前に拒否
   throw InputValidationError(...)
 
-updated = updateTask(todoistId, {
-  content?, labels?,                                 // 既存
-  ...due === null ? CLEAR_DUE : due ? dueArgs(due)   // 既存
-   : recurrence === null ? CLEAR_DUE
-   : recurrence ? recurrenceArgs(recurrence) : {},
-})
+updated = updateTask(todoistId,
+  recurrence !== undefined                           // Domainにより他Fieldは来ない（§6）
+    ? (recurrence === null ? CLEAR_DUE : recurrenceArgs(recurrence))
+    : { content?, labels?, ...due === null ? CLEAR_DUE : due ? dueArgs(due) : {} },   // 既存
+)
 
 if (typeof recurrence === 'string' && updated.due?.isRecurring !== true)
   → §7.4 復元 + Error
@@ -265,16 +282,16 @@ return toTask(updated)
 - 非繰り返しTask・期限なしTaskへの `due` 更新は従来どおり。ただし `getTask` が1回増える（事前判定のため。§16 Q7）。
 - title / status / area / tagsだけの更新は `due` 系の引数を送らない（従来どおり）。titleだけなら `getTask` も呼ばない。
 - `recurrence: null` は対象が繰り返しでも非繰り返しでも `CLEAR_DUE` を送る（非繰り返しTaskでは明示的な期限解除。v0.1）。
-- `recurrence` と title / Labelの同時指定は1回の `updateTask` にまとめる（Todoist側で1リクエスト＝原子的）。
+- `recurrence` の更新では `updateTask` に `dueString`（＋`dueLang`）だけを送る。title / Labelとの同時指定はDomainで拒否済みのため、Connectorでは組み合わせを扱わない（rev.2）。
 - `getTask` と `updateTask` の間に外部で繰り返しが設定される競合は防がない（v0.1 §未確定「完全な排他制御なし」）。
 
 ### 7.4 受理検証と期限の復元（`update`）
 
 `recurrence` に文字列を送ったのに応答の `due.isRecurring !== true` の場合（`tomorrow`、`no date`、日本語＋`dueLang: 'en'` 等。§5 P5 / P6）:
 
-1. `updateTask(todoistId, restoreDueArgs(current.due, timeZone))` で**期限だけ**書き込み前に戻す。同じ呼び出しで変えたtitle / Labelは戻さない。
-2. 復元に成功: `InputValidationError`: `Todoist did not read recurrence "<rule>" as a recurring rule; the previous due of task todoist:<id> was restored (<previous summary>). Other requested fields were applied.`（他Fieldを指定していないときは最後の文を付けない）。前の期限が繰り返しだった場合は「次回日付はTodoistが再計算する」旨を加える（§16 Q5）。
-3. 復元に失敗: `ProviderApiError`: `… recurrence "<rule>" was not read as recurring, and restoring the previous due (<summary>) failed: <message>`。
+1. `updateTask(todoistId, restoreDueArgs(current.due, timeZone))` で期限を書き込み前に戻す。`recurrence` は単独の更新に限られる（§6）ため、変わったのは期限だけで、これを戻せば他Fieldを含めて書き込み前の状態になる。
+2. 復元に成功: `InputValidationError`: `Todoist did not read recurrence "<rule>" as a recurring rule; task todoist:<id> was left as before (<previous summary>).` 前の期限が繰り返しだった場合は「次回日付はTodoistが再計算した可能性がある」旨を加える（§16 Q5）。
+3. 復元に失敗: `ProviderApiError`: `… recurrence "<rule>" was not read as recurring and task todoist:<id> now has <current due summary>; restoring the previous due (<summary>) failed: <message>`。現在の状態と元の期限をMessageに含め、AI Clientが `task_update` で直せるようにする。
 
 - 「前の期限」は §7.3 で読んだ `current.due`。`recurrence` 指定時は必ず `getTask` 済みなので追加の読み取りは不要。
 - Todoistが `dueString` を400で拒否した場合は書き込みが起きていないので復元しない（既存どおり `ProviderApiError`。§16 Q6）。
@@ -293,9 +310,9 @@ return toTask(updated)
 | Tool | 追加・変更する説明（英語、要旨） |
 |---|---|
 | 共通（`recurrence` 文） | `recurrence is a Todoist recurring rule written in English, e.g. "every day", "every monday", "every weekday at 9am", "every month on the 25th". Use "every!" (e.g. "every! 3 days") to count the next due from the completion date instead of the schedule. Translate the user's words (e.g. 毎週月曜 → "every monday"); Todoist computes the dues, so do not compute dates yourself.` |
-| `task_create` | 共通文＋`Do not pass due together with recurrence. If Todoist does not read the rule as recurring, the task is still created without a due and an error tells you its id: fix it with task_update instead of creating it again.` |
+| `task_create` | 共通文＋`Do not pass due together with recurrence. If Todoist does not read the rule as recurring, no task is created and an error is returned.`（rev.2） |
 | `task_list` | `Each task has recurrence (the rule, or null) and due (the next occurrence for a recurring task).` |
-| `task_update` | 共通文＋`recurrence changes the rule (Todoist recomputes the next due from today); recurrence: null removes the rule together with the due. The due of a recurring task cannot be changed or cleared with due — that request is rejected without changing anything, because it would remove the recurrence. Postponing a single occurrence is not supported. title / status / area / tags changes keep the recurrence.` 既存の「Changing the due of a recurring task removes its recurrence.」は削除 |
+| `task_update` | 共通文＋`recurrence changes the rule (Todoist recomputes the next due from today); recurrence: null removes the rule together with the due. recurrence must be the only field in its task_update; change title / status / area / tags in a separate call. If Todoist does not read the rule as recurring, the task is left as before and an error is returned. The due of a recurring task cannot be changed or cleared with due — that request is rejected without changing anything, because it would remove the recurrence. Postponing a single occurrence is not supported. title / status / area / tags changes keep the recurrence.` 既存の「Changing the due of a recurring task removes its recurrence.」は削除 |
 | `task_complete` | `A recurring task moves to its next occurrence and is returned still open with the new due and the same recurrence.` |
 
 `annotations` は変更しない（`task_update` は既に `destructiveHint: true`）。
@@ -309,6 +326,7 @@ return toTask(updated)
 | File | 変更 |
 |---|---|
 | `src/domain/task.ts` | §6 |
+| `src/connectors/todoist/client.ts` | `TodoistClient` のPickに `deleteTask` を追加（§4.4） |
 | `src/connectors/todoist/mapping.ts` | §7.1 |
 | `src/connectors/todoist/connector.ts` | §7.2〜§7.4 |
 | `src/tools/task.ts` | §8 |
@@ -319,7 +337,7 @@ return toTask(updated)
 |---|---|
 | `tests/domain/task.test.ts` | §11.2 |
 | `tests/connectors/todoist/mapping.test.ts` | §11.3 |
-| `tests/connectors/todoist/fake-api.ts` | `dueString` の解釈（§11.4冒頭） |
+| `tests/connectors/todoist/fake-api.ts` | `dueString` の解釈、`deleteTask`（§11.4冒頭） |
 | `tests/connectors/todoist/connector.test.ts` | §11.4 |
 | `tests/helpers/fake-connectors.ts` | `FakeTaskConnector.create` が `recurrence: input.recurrence ?? null` を返す |
 | `tests/tools/task.test.ts` | §11.5 |
@@ -342,7 +360,7 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 1. §5のProbeを実施し、結果を本Planに記録する（Planの前提が変わる場合はReviewへ戻す）。
 2. Domain（§6）とDomain Testを追加する。
 3. Mapping（§7.1）とMapping Testを追加する。
-4. `FakeTodoistApi` の `dueString` 対応を入れ、**既存のConnector Testが無変更で成功する**ことを確認する。
+4. `TodoistClient` に `deleteTask` を追加し、`FakeTodoistApi` の `dueString` / `deleteTask` 対応を入れ、**既存のConnector Testが無変更で成功する**ことを確認する。
 5. Connector（§7.2〜§7.4）とConnector Testを追加する。
 6. Tool説明（§8）とTool Testを更新する。
 7. `npm run typecheck`・`npm run build`・`npm test` を全件成功させる。
@@ -372,6 +390,8 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | create `{ title, recurrence: 'every day', due: '2026-11-01' }` | 拒否（path `recurrence`） |
 | update `{ id, recurrence: 'every day' }` / `{ id, recurrence: null }` | 受理（「いずれか必須」を満たす） |
 | update `{ id, recurrence: 'every day', due: '2026-11-01' }` / `{ id, recurrence: null, due: null }` / `{ id, recurrence: 'x', due: null }` | 拒否 |
+| update `recurrence`（`'every day'` / `null`）＋ `title` / `status` / `area`（`null` 含む）/ `tags`（`[]` 含む）の各1つ | 拒否（path `recurrence`、Messageに「on its own」。rev.2） |
+| update `{ id, due: '2026-11-01', title: 'a', status: 'next' }` | 受理（`recurrence` を含まない組み合わせは従来どおり） |
 | update `recurrence: ''` / `'  '` / `true` | 拒否 |
 | update `{ id }` | 拒否（Messageに `recurrence` を含む） |
 
@@ -394,28 +414,28 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | `every` / `every!` で始まる | `{ isRecurring: true, string, date: FAKE_TODAY(固定), datetime: null, timezone: null, lang: dueLang }` |
 | それ以外 | `{ isRecurring: false, string, date: FAKE_TODAY, … }` |
 
-`failures.updateTask` 等の既存の失敗注入はそのまま使う（2回目の呼び出しだけ失敗させるTestは既存 `failReadBack` と同じ手法で包む）。
+`deleteTask` はMapからTaskを除き、存在しなければ404を投げる（`calls` に記録、`failures.deleteTask` で失敗注入可）。`failures.updateTask` 等の既存の失敗注入はそのまま使う（2回目の呼び出しだけ失敗させるTestは既存 `failReadBack` と同じ手法で包む）。
 
 | 区分 | ケース | 期待 |
 |---|---|---|
 | create | `recurrence: 'every monday'` | `addTask` 引数が `{ content, labels, dueString: 'every monday', dueLang: 'en' }`（`dueDate` / `dueDatetime` なし）。返り値 `recurrence: 'every monday'`、`due` は次回日付（AC1） |
-| create | `recurrence: 'tomorrow'`（Fakeで非繰り返し） | `updateTask(id, { dueString: null })` が1回、`InputValidationError`（Messageに `todoist:<id>` と「without a due」）。FakeのTaskは期限なしで残る |
-| create | 上記で期限除去が失敗 | `ProviderApiError`（idと残った期限を含む） |
-| create | `addTask` が400 | `ProviderApiError`、`updateTask` 呼び出しなし |
-| create | `recurrence` なし | 引数は従来どおり、返り値 `recurrence: null` |
+| create ロールバック | `recurrence: 'tomorrow'`（Fakeで非繰り返し） | `deleteTask(<addTaskが返したid>)` が1回、`InputValidationError`（Messageに「no task was created」、Task IDを含まない）。Fake内のTask数が呼び出し前と同じ、`updateTask` 呼び出しなし |
+| create ロールバック | 上記で `deleteTask` が失敗 | `ProviderApiError`（Messageに `todoist:<id>`・残った期限の要約・「do not call task_create again」）、FakeにTaskが残る |
+| create ロールバック | `recurrence: 'tomorrow'` ＋ status / area / tags | Labels付きで作成されたTaskも削除され、Task数が変わらない |
+| create | `addTask` が400 | `ProviderApiError`、`deleteTask` / `updateTask` 呼び出しなし |
+| create | `recurrence` なし | 引数は従来どおり、返り値 `recurrence: null`、`deleteTask` 呼び出しなし |
 | update 保持 | 繰り返しTaskの title のみ | `getTask` 呼び出しなし、`updateTask` 引数 `{ content }` のみ、`recurrence` 保持（AC3） |
 | update 保持 | 繰り返しTaskの status / area / tags | `updateTask` 引数のキーが `labels`（＋`content`）のみで `due*` を含まない、`recurrence` 保持（AC3） |
 | update 変更 | `recurrence: 'every day'` | `getTask` 1回、`updateTask` 引数 `{ dueString: 'every day', dueLang: 'en' }`、返り値の `recurrence` が新規則（AC4） |
-| update 変更 | `recurrence` ＋ title ＋ status | `updateTask` 1回にまとまる |
 | update 解除 | 繰り返しTaskに `recurrence: null` | `{ dueString: null }`、返り値 `due: null` / `recurrence: null`（AC4） |
 | update 解除 | 非繰り返しTaskに `recurrence: null` | `{ dueString: null }`（明示的な期限解除） |
 | update 拒否 | 繰り返しTaskに `due: '2026-11-01'` / `due: '…T09:00:00+09:00'` / `due: null` | `InputValidationError`（Messageに現在の規則・`recurrence: null` の案内）、`updateTask` 呼び出し0回、FakeのTaskが変更前と `toEqual`（AC5） |
 | update 拒否 | 繰り返しTaskに `due` ＋ title ＋ tags | 同上（Labelもtitleも変わらない） |
 | update 従来 | 非繰り返しTask・期限なしTaskに `due` / `due: null` | 従来どおりの `updateTask` 引数（`getTask` が1回先行する）（AC6） |
-| update 受理検証 | 繰り返しTaskに `recurrence: 'tomorrow'` | 2回目の `updateTask` が `{ dueString: <元の規則>, dueLang: <元のlang ?? 'en'> }`、`InputValidationError`（「restored」）、FakeのTaskは繰り返しに戻る |
-| update 受理検証 | 日付期限 / 日時期限 / 期限なしのTaskに `recurrence: 'tomorrow'` | 復元引数がそれぞれ `{ dueDate }` / `{ dueDatetime }` / `{ dueString: null }` |
-| update 受理検証 | `recurrence: 'tomorrow'` ＋ title | Messageに「Other requested fields were applied」、titleは変更後のまま |
-| update 受理検証 | 復元の `updateTask` が失敗 | `ProviderApiError`（元の期限の要約を含む） |
+| update 受理検証 | 繰り返しTaskに `recurrence: 'tomorrow'` | 2回目の `updateTask` が `{ dueString: <元の規則>, dueLang: <元のlang ?? 'en'> }`、`InputValidationError`（「left as before」）、FakeのTaskは `content` / `labels` / `due.string` / `due.isRecurring` が呼び出し前と同じ |
+| update 受理検証 | 日付期限 / 日時期限 / 期限なしのTaskに `recurrence: 'tomorrow'` | 復元引数がそれぞれ `{ dueDate }` / `{ dueDatetime }` / `{ dueString: null }`、FakeのTaskが呼び出し前と `toEqual` |
+| update 受理検証 | 復元の `updateTask` が失敗 | `ProviderApiError`（現在の期限と元の期限の要約を含む） |
+| update 組み合わせ | Connectorへ `recurrence` ＋ title を直接渡す（Domainを経由しない呼び出し） | Connectorは型上この入力を受け取らない前提のため、Testは書かない（Domain / Tool Testで拒否を確認する。§11.2 / §11.5） |
 | update 不存在 | `recurrence` / `due` 指定で `getTask` が404 | `NotFoundError`、`updateTask` 呼び出しなし |
 | complete | 繰り返しTask | 未完了・次回日付・`recurrence` が完了前と同じ（AC7） |
 | complete | 非繰り返しTask | `status: 'done'`、`recurrence: null`（AC7） |
@@ -426,7 +446,7 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 |---|---|
 | `listTools` | `task_create` / `task_update` の `inputSchema.properties` に `recurrence` がある。`task_update` の `recurrence` は `null` を許す型。説明に `every!` / `recurrence: null` を含み、`task_update` に「removes its recurrence」の旧文言がない |
 | create / update に `recurrence` を指定 | Connectorへ値がそのまま渡る（`null` 含む） |
-| 不正Input（既存の `it.each` に追加） | create `{ title, recurrence: '' }`／create `{ title, recurrence: 'every day', due: '2026-11-01' }`／update `{ id, recurrence: 'every day', due: null }`／update `{ id, recurrence: 1 }` → `Input validation error`、Connector呼び出しなし（AC6） |
+| 不正Input（既存の `it.each` に追加） | create `{ title, recurrence: '' }`／create `{ title, recurrence: 'every day', due: '2026-11-01' }`／update `{ id, recurrence: 'every day', due: null }`／update `{ id, recurrence: 1 }`／update `{ id, recurrence: 'every day', title: 'a' }`／update `{ id, recurrence: null, tags: [] }` → `Input validation error`、Connector呼び出しなし（AC6） |
 
 ### 11.6 回帰
 
@@ -443,7 +463,7 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 実行条件: `AI_FOUNDATION_INTEGRATION=1` と `TODOIST_API_TOKEN`（既存Todoist Integration Testと同じ）。
 
 - **既存実データを操作しない（AC8）**: Connectorの `create` で `runLabel` 付きのTaskを作り、そのidだけを `update` / `complete` する。期待値の確認は `raw.getTask(<作成したid>)` で行い、`list` の結果は作成したidの有無だけを見る。`afterAll` で作成したTaskだけを `raw.deleteTask`（既存Integration Testと同じ）。
-- 受理されなかった `create`（I8）はErrorのMessageからidを取り出して削除対象に加える。
+- 受理されなかった `create`（I8）は、Connectorが削除済みのためidを持たない。Titleに専用の接頭辞を付け、`raw.getTasks({ projectId: inbox })` に同じTitleのTaskがないことで確認する。万一残っていた場合（削除失敗の `ProviderApiError`）はMessageのidを削除対象に加える。
 - Todoistが返す `string` が入力と同一とは限らない（§5 P2）ため、規則の確認は「`isRecurring: true` かつ `recurrence === raw.due.string`」で行い、入力との文字列一致はProbe結果で同一と確認できた場合だけ加える。
 
 | # | 操作 | 確認 |
@@ -455,8 +475,9 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | I5 | I1を `complete` | 未完了、`due` が完了前より後、`recurrence` が完了前と同じ（AC7） |
 | I6 | I1に `update({ recurrence: null })` | `raw.due === null`、`recurrence: null`（AC4） |
 | I7 | `create({ recurrence: 'every! 3 days' })` → `complete` | 受理され、完了後も `recurrence` 維持・未完了（完了日基準） |
-| I8 | `create({ recurrence: 'tomorrow' })` | `InputValidationError`、作成されたTaskの `raw.due === null` |
-| I9 | `create({ recurrence: 'every day' })` に `update({ recurrence: 'tomorrow' })` | Error、`raw.due.isRecurring === true` に戻っている |
+| I8 | `create({ title: <専用Title>, recurrence: 'tomorrow' })` | `InputValidationError`、Inboxに同じTitleのTaskがない（ロールバック） |
+| I9 | `create({ recurrence: 'every day' })` に `update({ recurrence: 'tomorrow' })` | `InputValidationError`、`raw.getTask` の `content` / `labels` / `due.string` / `due.isRecurring` が直前と同じ |
+| I11 | I1に `update({ recurrence: 'every day', title })` | `Invalid input`（Domain）、Todoistへの書き込みなし（`raw.getTask` が直前と `toEqual`） |
 | I10 | `create({ due: <日付> })` に `update({ due: <別の日付> })` | 従来どおり更新される（非繰り返しのdue更新の回帰。AC6） |
 
 - 実行（このファイルだけ）: `AI_FOUNDATION_INTEGRATION=1 npx vitest run --config vitest.integration.config.ts tests/integration/todoist-recurrence.integration.test.ts`
@@ -472,7 +493,8 @@ User承認後、`main` から `feat/task-recurrence` を作成して実装する
 | M2 | Todoist UIで既存の繰り返しTaskを1件作成（日本語UIで「毎日」等）→ `task_list` | `recurrence` にTodoistが保持する文字列（日本語のまま）が返る |
 | M3 | M2のTaskに `task_update({ title })` → UI | 繰り返し表示が変わらない |
 | M4 | M2のTaskに `task_update({ due })` | `Invalid input: … recurs …`、UIで変化なし |
-| M5 | `task_update({ recurrence: 'every day', due: '2026-11-01' })` | `Input validation error` |
+| M5 | `task_update({ recurrence: 'every day', due: '2026-11-01' })`、`task_update({ recurrence: 'every day', title })` | `Input validation error` |
+| M6 | `task_create({ title, recurrence: 'tomorrow' })` → Todoist UI | Error、Inboxにそのタスクがない |
 
 ---
 
@@ -487,6 +509,7 @@ Claude CodeからMCP Server（本Branchの `dist`）へ再接続し、自然文�
 | L3 | 「ゴミ出しの次回を来週水曜にずらして」 | `due` で更新しようとして拒否された場合、1回分の延期は未対応であることを伝え、勝手に `recurrence: null` で解除しない |
 | L4 | 「ゴミ出しの繰り返しをやめて」 | `recurrence: null`（期限も消えることを伝える） |
 | L5 | 「ゴミ出しを完了にして」 | `task_complete`。次回分の日付と繰り返しが続くことを答える |
+| L6 | 「ゴミ出しを『資源ごみ出し』に改名して、毎週木曜に変えて」 | `task_update` を2回（title、`recurrence: 'every thursday'`）に分けて呼ぶ。同時指定で拒否された場合も分けて再試行できる |
 
 ---
 
@@ -495,7 +518,7 @@ Claude CodeからMCP Server（本Branchの `dist`）へ再接続し、自然文�
 ### 14.1 `README.md`
 
 - Tool表: `task_create`（`recurrence` を追加）、`task_update`（`recurrence` で規則の変更・解除）。
-- 「繰り返しタスク」節（Task節の下）: 書式（英語のTodoist構文、`every!` の意味、例）、`recurrence` と `due` の関係（規則と次回期限）、`recurrence: null` で期限ごと解除、繰り返しTaskへの `due` 変更は拒否、1回分の延期は未対応、受理されない文字列の扱い、Todoistアカウントのtimezoneで解釈される（§5 P1の結果に応じて）。
+- 「繰り返しタスク」節（Task節の下）: 書式（英語のTodoist構文、`every!` の意味、例）、`recurrence` と `due` の関係（規則と次回期限）、`recurrence: null` で期限ごと解除、繰り返しTaskへの `due` 変更は拒否、1回分の延期は未対応、`recurrence` の更新は単独の `task_update` で行う、受理されない文字列の扱い（作成時はTaskを削除して何も作らない／更新時は元に戻す。削除・復元に失敗した場合だけ状態がErrorで示され、外部APIのため完全な原子性はない）、Todoistアカウントのtimezoneで解釈される（§5 P1の結果に応じて）。
 - Integration Testの説明に `todoist-recurrence.integration.test.ts` を追記。Documentation一覧に個別仕様を追加。
 
 ### 14.2 `docs/specs/task-recurrence.md`（新規）
@@ -513,11 +536,11 @@ Issue #11 v0.1と本Planで確定した事項を、`docs/specs/schedule-attendan
 | AC3 | title / status / area / tags の更新で `due` 系の引数を送らず、Todoist上の規則・次回日付が変わらない | §11.4 update保持、§12.1 I2、§12.2 M3 |
 | AC4 | `recurrence: '<規則>'` で規則が変わり、`recurrence: null` で規則と期限が消える | §11.4 update変更 / 解除、§12.1 I4 / I6 |
 | AC5 | 繰り返しTaskへの `due`（`null` 含む・他Fieldとの同時指定含む）は `updateTask` を呼ぶ前に `InputValidationError` になり、Todoist上の状態が変わらない | §11.4 update拒否、§12.1 I3、§12.2 M4 |
-| AC6 | `due` / `recurrence` の同時指定、空・空白・非文字列の `recurrence` を拒否。非繰り返しTaskの `due` 更新は従来どおり | §11.2、§11.5、§11.4 update従来、§12.1 I10 |
+| AC6 | `due` / `recurrence` の同時指定、空・空白・非文字列の `recurrence` を拒否。更新では `recurrence` と title / status / area / tags の同時指定も拒否（rev.2）。非繰り返しTaskの `due` 更新は従来どおり | §11.2、§11.5、§11.4 update従来、§12.1 I10 / I11 |
 | AC7 | `task_complete` で繰り返しTaskは次回期限へ進み `recurrence` を維持、非繰り返しTaskは `done` | §11.4 complete、§12.1 I5 / I7 |
 | AC8 | Fake SDK / Tool / Mapping / Domain Test・既存Task系回帰が成功し、実Todoistで作成→取得→変更→解除→完了を、作成したTaskだけを対象に検証する | §11、§12.1 |
 | AC9 | READMEと `docs/specs/task-recurrence.md` を更新し、`docs/specs/mvp-v0.1.md` に差分がない | §14、`git diff main -- docs/specs/mvp-v0.1.md` が空 |
-| （追加） | Todoistが繰り返しとして受理しなかった `recurrence` は、期限を元に戻したうえでErrorになる | §7.2 / §7.4、§11.4 受理検証、§12.1 I8 / I9 |
+| （追加） | Todoistが繰り返しとして受理しなかった `recurrence` は、`create` では作成したTaskを削除、`update` では期限を元に戻したうえでErrorになり、Error時に部分的な状態を残さない。戻せなかった場合だけ残った状態・id・復旧方法を `ProviderApiError` で示す | §7.2 / §7.4、§11.4 ロールバック / 受理検証、§12.1 I8 / I9、§12.2 M6 |
 
 ---
 
@@ -535,9 +558,11 @@ v0.1は「`due` だけで更新する場合、対象が繰り返しタスクな�
 
 `dueLang` を送らない場合、Todoistの解釈言語がアカウント設定・自動判定に依存し得る。英語に固定すると、(1) 同じ入力が常に同じ解釈になる、(2) Tool説明の例と一致する、(3) LLMは日本語の依頼を英語のTodoist構文へ安定して変換できる。日本語のまま渡された場合は §7.4の受理検証で検出される（§5 P5で確認）。Todoist UIで日本語で作られた既存の規則は、取得時にそのままの文字列（`lang: 'ja'`）で返し、復元時もその `lang` を使う。
 
-### Q4. 受理されなかった `recurrence` の扱い（作成済みTaskは削除しない）
+### Q4. 受理されなかった `recurrence` の扱い（rev.2: `create` は作成したTaskを削除する）
 
-書き込み前に「繰り返し構文か」を判定するParse専用APIはなく、Domainで英語の構文を正規表現で判定すると有効な規則を誤って拒否する恐れがある。そのため**Todoistの応答で判定し、期限だけ書き込み前の状態に戻す**。`create` では一時Taskを作って試す・失敗時に削除する案もあるが、Connectorに削除操作を持ち込むことになるため採らない。作成済みのTaskはMessageでidを示し、`task_create` の再試行による重複を避けるよう案内する。
+書き込み前に「繰り返し構文か」を判定するParse専用APIはなく、Domainで英語の構文を正規表現で判定すると有効な規則を誤って拒否する恐れがある。そのため**Todoistの応答で判定し、書き込み前の状態へ戻してからErrorを返す**。
+
+rev.1では、Connectorに削除操作を持ち込まないため `create` 失敗時もTaskを残す（期限だけ外す）としていたが、Plan Review rev.1の指摘（Errorを返したのにTaskが残り、再試行で重複する）を受け、**同じ呼び出しで作成したTaskに限って `deleteTask` でロールバックする**方針に変更した。既存Taskを削除する経路・Toolは作らない。削除が失敗した場合だけ、Taskが残ったこと・id・復旧方法（`task_update` で規則を直す／Todoistで削除する）・`task_create` を再試行しないことを `ProviderApiError` で明示する。外部APIに完全な原子性はないため、この限界をREADME / 仕様書の既知の制約に記載する。
 
 ### Q5. 復元は「同じ規則・同じ日時」に戻すが、次回日付は再計算され得る
 
@@ -563,8 +588,25 @@ Entity定義（Task = Todoist）は変わらず、繰り返しの書式・制約
 
 `recurrence` を変更すると、Todoistは新しい規則で次回日付を計算し直す（今日以降の最初の該当日）。特定の日から始めたい場合は `every monday starting 2026-11-02` のようなTodoist構文で指定できる（§5 P3で受理を確認し、Tool説明・READMEの例に含めるか決める）。
 
+### Q11. `recurrence` の更新は単独の操作に限る（rev.2）
+
+Plan Review rev.1の指摘（受理検証の失敗時に期限だけ戻り、同時に指定したtitle / Labelは更新済みのまま残る部分更新）を受け、他Fieldも復元する方式ではなく**同時指定そのものをDomainで拒否**する方式を採る。他Fieldの復元は、title / Labelの復元にも失敗し得るため失敗パターンが増え、Error Messageも複雑になる。単独操作に限れば、受理検証の失敗時に戻す対象は期限だけになり、復元の成否で状態が一意に決まる。AI Clientは2回の `task_update` に分ければよく、Tool説明とValidation Messageで案内する（§13 L6で確認）。`create` は1回の `addTask` で作成し失敗時はTaskごと削除するため、`recurrence` と他Fieldの同時指定を許す。
+
 ### その他（MVP外）
 
 - **次回1回分のみの延期**（v0.1でMVP対象外）: 繰り返しを保持したまま次回日付だけ動かすAPI方式が確認できるまで扱わない。Todoist UIでの操作を案内する。
 - Todoistの `deadline`、Sub-task、Inbox以外のProjectの繰り返しTaskは対象外（既存Task Toolの範囲のまま）。
 - `recurrence` の構造化（頻度・曜日等のField化）や独自のRecurrence Engine / Scheduler / DBは実装しない。
+
+---
+
+## 17. Review対応履歴
+
+### rev.2（PR #25 Plan Review rev.1反映）
+
+ChatGPTのPlan Review rev.1は「修正推奨 2件」。Q1 / Q2 / Q3 / Q7、Time ZoneのProbe、`task_complete` の維持、`mvp-v0.1.md` 不変は問題なしと判断された。
+
+| 指摘 | 対応 |
+|---|---|
+| [P2] §7.2: `task_create` がErrorを返してもTaskが残り、再試行で重複する | 作成したTaskを `deleteTask` で削除するロールバックに変更（§7.2）。`TodoistClient` のPickに `deleteTask` だけを追加（§3 / §4.4）。削除対象は同じ呼び出しで `addTask` が返したidに限定し、Toolとしては公開しない。削除失敗時だけ残存・id・復旧方法・再試行禁止を `ProviderApiError` で明示し、原子性の限界を明記（§7.2、§16 Q4）。Probe P10、Fake `deleteTask`、§11.4 / §12.1 I8 / §12.2 M6を追加・更新 |
+| [P2] §7.4: `task_update` がErrorでもtitle / labelsが更新済みになる | 更新時に `recurrence`（文字列・`null`）と title / status / area / tags の同時指定をDomainの `refine` で拒否（§2-6、§6、§16 Q11）。§7.3 / §7.4から組み合わせの扱いと「Other requested fields were applied」を削除し、受理検証失敗時は書き込み前の状態に戻る形に整理。Tool説明（§8）、Domain / Tool / Connector / Integration Test（§11.2 / §11.4 / §11.5 / §12.1 I9 / I11）、手動Verification M5、LLM Client Verification L6、AC6を更新 |
