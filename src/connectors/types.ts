@@ -13,6 +13,10 @@ import type {
   KnowledgeDocument,
   KnowledgeSearchFilter,
   KnowledgeSearchResult,
+  LifeLog,
+  LifeLogAppendInput,
+  LifeLogCreateInput,
+  LifeLogDocument,
   ProjectGetResult,
   ProjectListFilter,
   ProjectResult,
@@ -101,6 +105,19 @@ export interface AreaConnector {
   get(id: string): Promise<AreaGetResult>;
 }
 
+/**
+ * Source of Truth: Obsidian. Reads and writes only the Markdown files directly in the configured
+ * life log directory. Articles are never listed, renamed or deleted.
+ */
+export interface LifeLogConnector {
+  /** Creates a new article named after its date and title. Never overwrites an existing file. */
+  create(input: LifeLogCreateInput): Promise<LifeLog>;
+  /** The article with this exact id and its full Markdown text. */
+  get(id: string): Promise<LifeLogDocument>;
+  /** Appends `content` as a new paragraph at the end without changing the existing text. */
+  append(input: LifeLogAppendInput): Promise<LifeLog>;
+}
+
 /** Connectors available to tools. A missing entry means the provider is not wired. */
 export interface Connectors {
   task?: TaskConnector;
@@ -109,4 +126,5 @@ export interface Connectors {
   knowledge?: KnowledgeConnector;
   project?: ProjectConnector;
   area?: AreaConnector;
+  lifelog?: LifeLogConnector;
 }
