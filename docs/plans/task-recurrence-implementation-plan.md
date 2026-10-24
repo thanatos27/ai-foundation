@@ -1,6 +1,6 @@
 # 繰り返しタスク — Implementation Plan
 
-- Status: **rev.2（PR #25 Plan Review rev.1反映・再レビュー待ち。本実装は未着手）**
+- Status: **rev.2（PR #25 Plan Review rev.1反映・User承認済み。実装前Probe実施済み: §18。本実装は未着手）**
 - 作成: Coding Agent (Claude Code) / 2026-10-25（rev.2: 2026-10-25 PR #25 レビュー反映。§17）
 - 対象: [Issue #11 繰り返しタスクの作成・変更・取得に対応する](https://github.com/thanatos27/ai-foundation/issues/11)（コメント「MVP詳細設計 v0.1」を正とする）
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（**変更しない**）, [Phase 2 Design Issue](../specs/phase-2-task-schedule.md), [Phase 2 Implementation Plan](phase-2-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -610,3 +610,39 @@ ChatGPTのPlan Review rev.1は「修正推奨 2件」。Q1 / Q2 / Q3 / Q7、Time
 |---|---|
 | [P2] §7.2: `task_create` がErrorを返してもTaskが残り、再試行で重複する | 作成したTaskを `deleteTask` で削除するロールバックに変更（§7.2）。`TodoistClient` のPickに `deleteTask` だけを追加（§3 / §4.4）。削除対象は同じ呼び出しで `addTask` が返したidに限定し、Toolとしては公開しない。削除失敗時だけ残存・id・復旧方法・再試行禁止を `ProviderApiError` で明示し、原子性の限界を明記（§7.2、§16 Q4）。Probe P10、Fake `deleteTask`、§11.4 / §12.1 I8 / §12.2 M6を追加・更新 |
 | [P2] §7.4: `task_update` がErrorでもtitle / labelsが更新済みになる | 更新時に `recurrence`（文字列・`null`）と title / status / area / tags の同時指定をDomainの `refine` で拒否（§2-6、§6、§16 Q11）。§7.3 / §7.4から組み合わせの扱いと「Other requested fields were applied」を削除し、受理検証失敗時は書き込み前の状態に戻る形に整理。Tool説明（§8）、Domain / Tool / Connector / Integration Test（§11.2 / §11.4 / §11.5 / §12.1 I9 / I11）、手動Verification M5、LLM Client Verification L6、AC6を更新 |
+
+---
+
+## 18. 実装前Probe結果（2026-10-25、実Todoist）
+
+§5の方式で実施した（Scratchpadの使い捨てScriptから `TodoistApi` を直接使用。Repositoryにはcommitしない）。Scriptが作成した `[af-probe <timestamp>]` 付きTaskだけを操作し、終了時に全件削除した（本体25件＋P10の1件＋追加確認P8bの4件、残存0件）。既存Taskは読み取り・更新していない（`getUser` のみ）。
+
+### 18.1 結果
+
+| # | 結果 | Planの前提との差 |
+|---|---|---|
+| P1 | `lang: 'ja'`、`tzInfo.timezone: 'Asia/Tokyo'`（`+09:00`）。`defaults.timezone` と一致 | 前提どおり。README / 仕様書には「Todoistアカウントのtimezoneで解釈される」とだけ書く |
+| P2 | `every monday` は `dueLang: 'en'` あり / なしとも `isRecurring: true`、`string: 'every monday'`、`date: '2026-10-26'`（次の月曜）、`lang: 'en'`。`Every Monday` は大文字のまま保持 | 前提どおり |
+| P3 | すべて受理。**時刻付きでも応答に `datetime` Fieldはなく、`date` にfloatingな日時が入る**（`every day at 9am` → `date: '2026-10-25T09:00:00'`、`timezone: null`）。`every month on the 25th` は `string: 'every 25th'` に**正規化**、`every monday starting 2026-11-02` は `string: 'every monday'`・`date: '2026-11-02'`（`starting` は `string` に残らない） | 既存 `dueOf` は `datetime ?? date` のため変更不要。Fake / Mapping Testの時刻付きの `due` はこの形（`date` に日時、`datetime` なし）で書く。`string` は入力と一致しない場合があるため、Testで入力との一致を検証しない（§12.1の方針どおり） |
+| P4 | `every! 3 days` は受理・保持。`after 3 days` は `string: 'every! 3 days'` に正規化。`every 3 days` も受理 | 前提どおり。Tool説明の例は `every! 3 days` を使う |
+| P5 | **`毎週月曜` は `dueLang` なし / `'ja'` / `'en'` のいずれでも `isRecurring: true`・`string: '毎週月曜'`・`lang: 'ja'` で受理された**（Todoistが言語を自動判定し、`dueLang: 'en'` でも日本語が通る） | §16 Q3の「日本語は §7.4で検出される」は誤り。ただし正しく繰り返しとして登録されるため安全上の問題はない。§18.2 の扱い |
+| P6 | `tomorrow` → `isRecurring: false`・`string: '26 Oct'`、`2026-12-01` → `isRecurring: false`（**200で誤受理**）。`no date` → `due: null`。`every blah` / `blah blah` → **HTTP 400、Messageは `Bad Request` のみ**（どの値が悪いかは返らない） | 受理検証（§7.2 / §7.4）が必要なことを確認。400のMessageが情報を持たない点は §18.2 の提案A |
+| P7 | 繰り返しTaskに (a) `content` のみ (b) `labels` のみ → `due` 完全に不変。(c) `dueDate` → `isRecurring: false`、(d) `dueDatetime` → `isRecurring: false`（`timezone: 'Asia/Tokyo'`）、`dueString: null` → `due: null` | 前提どおり。§7.3の事前拒否が必要 |
+| P8 | `every monday`（次回10/26）を `every day` に変更 → 次回10/27。元の `string` / `lang` で戻すと **次回11/02**（元の10/26に戻らない）。繰り返しTaskに `tomorrow` → `isRecurring: false`（規則が消える）。日本語規則（`毎日`, `lang: 'ja'`）も元の `string` / `lang` で繰り返しに戻せた | Q5の「次回日付は再計算され得る」を実測で確認。§18.2 の提案B |
+| P8b（追加） | 規則変更で時刻は引き継がれる（`every day at 9am` → `every day` で次回 `T09:00:00`）。復元時に `"<string> starting <date の日付部分>"` を送ると、英語の規則は次回日付・時刻・`string` まで**完全に一致して戻った**（日付のみ / 時刻付き / 未来の開始日の3ケース）。日本語の規則（`毎週月曜 starting 2026-10-26`, `dueLang: 'ja'`）は **HTTP 400** | §18.2 の提案B |
+| P9 | `every! 3 days`（10/25）を `closeTask` → 未完了・`date: '2026-10-28'`・`string` 不変。`every 3 days` も10/28 | 前提どおり。`complete` は変更しない |
+| P10 | 作成直後のTaskを `deleteTask` → `true`、以後 `getTask` は404。**同じidを再度 `deleteTask` しても `true`**（冪等） | 前提どおり。§7.2のロールバックはこの経路で成立する |
+
+### 18.2 Planへの影響と、実装前に判断が必要な点
+
+設計を変えずに反映するもの（実装時に対応し、Implementation Reviewで確認を受ける）:
+
+- **時刻付きの `due` の形（P3）**: Fakeの `dueFromArgs` とMapping Testは `date` に日時を入れ、`datetime` を持たない形を使う。`dueOf` は変更しない。
+- **`string` の正規化（P2〜P4）**: `recurrence` は入力ではなくTodoistが保持する `string` を返す（設計どおり）。Integration Testは入力との一致を検証しない。
+- **日本語の規則（P5）**: `dueLang: 'en'` は引き続き送る（英語の結果は変わらず、日本語の入力も阻害しない）。Tool説明は英語での指定を推奨したまま、「Todoistが解釈できれば日本語でも受理され、日本語のまま返る」とREADME / 仕様書に書く。§16 Q3の根拠のうち「日本語は §7.4で検出」を「日本語もTodoistが繰り返しとして受理する」に改める。
+- **規則変更で時刻が引き継がれる（P8b）**: Tool説明・READMEの「規則の変更で次回日付が再計算される」に「時刻を変えるときは規則に含める（例: `every day at 7am`）」を加える。
+
+User判断が必要なもの（承認済みPlanからの変更になるため）:
+
+- **提案A（P6）: `recurrence` を送った呼び出しの400を `InputValidationError` にする。** Todoistの400は `Bad Request` しか返さず、§16 Q6のままだとAI Clientには `Todoist API error: HTTP 400: …Bad Request` しか届かず、書式の誤りだと判断しにくい。rev.2で `task_update` の `recurrence` は単独操作になったため、その呼び出しの400は実質的に規則の解釈失敗に限られる。`task_create` でも、title / Labelは事前にDomainで検証済み。**案**: `recurrence` を送った `addTask` / `updateTask` の400に限り `InputValidationError: Todoist could not parse recurrence "<rule>" (HTTP 400). Use an English rule such as "every monday".` にする（`cause` に元のErrorを保持）。それ以外の400は従来どおり `ProviderApiError`。
+- **提案B（P8 / P8b）: 繰り返し規則の復元に `starting <date>` を使う。** §7.4の復元（受理されない文字列で `task_update` した場合）は、現Planでは元の `string` を送るだけなので次回日付がずれる（P8: 10/26 → 11/02）。**案**: `restoreDueArgs` で、元の `lang` が `en`（または未設定）なら `"<string> starting <date の日付部分>"` を送り、次回日付まで完全に戻す。日本語など英語以外の規則は `starting` が400になるため、従来どおり元の `string` / `lang` を送り、次回日付が再計算され得ることをMessageで示す（§16 Q5の制約は英語以外の規則だけに縮小する）。なお、元の次回日付が過去（期限切れ）の場合に `starting <過去日>` がどう解釈されるかは未確認で、実装時のIntegration Testで確認する。
