@@ -1,6 +1,12 @@
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
-import { AreaResourceSourceSchema, AreaSchema, KnowledgeSourceSchema, ProjectSourceSchema } from '../domain/index.js';
+import {
+  AreaResourceSourceSchema,
+  AreaSchema,
+  KnowledgeSourceSchema,
+  LifeLogSourceSchema,
+  ProjectSourceSchema,
+} from '../domain/index.js';
 
 function isValidTimeZone(timeZone: string): boolean {
   try {
@@ -32,12 +38,21 @@ const NotionPageIdSchema = z
   });
 
 /**
+ * Whether two vault directories are the same or one contains the other. Compared case-insensitively,
+ * as the file systems of Windows and macOS do.
+ */
+function dirsOverlap(a: string, b: string): boolean {
+  const [shorter, longer] = [a, b].map((dir) => dir.toLowerCase().split('/')).sort((x, y) => x.length - y.length);
+  return shorter!.every((segment, index) => longer![index] === segment);
+}
+
+/**
  * Static Foundation configuration (spec §13).
  *
  * Every object is strict: unknown keys are rejected so that dynamic data
  * (project lists, IDs) and credentials cannot be added to config.yaml.
  */
-export const ConfigSchema = z.strictObject({
+const ConfigObjectSchema = z.strictObject({
   version: z.literal('0.1'),
   defaults: z.strictObject({
     area: AreaSchema,
@@ -106,7 +121,37 @@ export const ConfigSchema = z.strictObject({
           .optional(),
       })
       .optional(),
+    /**
+     * Life log articles in a directory of the knowledge vault (sources.knowledge.obsidian.vault_path).
+     * Optional so that existing local configs keep working; the lifelog tools return a configuration
+     * error without it.
+     */
+    lifelog: z
+      .strictObject({
+        provider: LifeLogSourceSchema,
+        obsidian: z
+          .strictObject({
+            /** The only directory the lifelog tools read and write, relative to the vault. */
+            directory: VaultRelativeDirSchema.optional(),
+          })
+          .optional(),
+      })
+      .optional(),
   }),
 });
+
+/** The configuration, with the checks that span several sources. */
+export const ConfigSchema = ConfigObjectSchema.refine(
+  (config) => {
+    // knowledge_search reads knowledge_dir recursively: life logs inside it would become knowledge.
+    const lifelogDir = config.sources.lifelog?.obsidian?.directory;
+    const knowledgeDir = config.sources.knowledge.obsidian?.knowledge_dir;
+    return !lifelogDir || !knowledgeDir || !dirsOverlap(lifelogDir, knowledgeDir);
+  },
+  {
+    message: 'must not be the same as, inside or contain sources.knowledge.obsidian.knowledge_dir',
+    path: ['sources', 'lifelog', 'obsidian', 'directory'],
+  },
+);
 
 export type Config = z.infer<typeof ConfigSchema>;
