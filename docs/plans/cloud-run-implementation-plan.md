@@ -1,6 +1,5 @@
 # クラウド配置（Cloud Run・コンテナ・Config／Secret・更新手順） — Implementation Plan
 
-- Status: **承認済み・Repository変更は実装済み（§18）。実配置（§9・§14）は未実施**
 - 作成: 2026-11-15
 - 対象: [Issue #39](https://github.com/thanatos27/ai-foundation/issues/39)
 - 参照: [REST API](../specs/rest-api.md), [Google Drive保存](../specs/google-drive-storage.md), [REST API Implementation Plan](rest-api-implementation-plan.md), [Google Drive保存 Implementation Plan](google-drive-storage-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
