@@ -35,15 +35,15 @@ import { HTTP_ERROR_CODES } from './errors.js';
 
 // ---- Components -----------------------------------------------------------------------------
 
-const Task = TaskSchema.openapi('Task');
-const Schedule = ScheduleSchema.openapi('Schedule');
-const CollectionItem = CollectionItemSchema.openapi('CollectionItem');
-const Knowledge = KnowledgeSchema.openapi('Knowledge');
-const KnowledgeSearchResult = KnowledgeSearchResultSchema.openapi('KnowledgeSearchResult');
-const Project = ProjectResultSchema.openapi('Project');
-const GitHubProjectDetails = GitHubProjectDetailsSchema.openapi('GitHubProjectDetails');
-const Area = AreaResourceSchema.openapi('Area');
-const LifeLog = LifeLogSchema.openapi('LifeLog');
+const Task = TaskSchema.meta({ id: 'Task' });
+const Schedule = ScheduleSchema.meta({ id: 'Schedule' });
+const CollectionItem = CollectionItemSchema.meta({ id: 'CollectionItem' });
+const Knowledge = KnowledgeSchema.meta({ id: 'Knowledge' });
+const KnowledgeSearchResult = KnowledgeSearchResultSchema.meta({ id: 'KnowledgeSearchResult' });
+const Project = ProjectResultSchema.meta({ id: 'Project' });
+const GitHubProjectDetails = GitHubProjectDetailsSchema.meta({ id: 'GitHubProjectDetails' });
+const Area = AreaResourceSchema.meta({ id: 'Area' });
+const LifeLog = LifeLogSchema.meta({ id: 'LifeLog' });
 
 export const ErrorResponseSchema = z
   .object({
