@@ -655,3 +655,31 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は次のとおりとす�
 | 共有ドライブ | Vaultはマイドライブ。Q5の前提どおり |
 | 新規作成 | 作成後の取り消しは行わない（Step 3cで全要求の取り消しが多く、取り消しは他のClientの編集も移動し得る）。Process内の直列化＋作成前・作成後の重複検出とし、名前の一意性は保証しない。書き込むServerは1 Processとする（§10.2、AC-D05） |
 | Storage interface | §8のとおり `append(compose)` に変更する。Drive側の版情報（etag・`headRevisionId`）はStorage内部に閉じる |
+
+---
+
+## 18. 実装で確定した事項
+
+### 18.1 Verification結果（2026-11-14、ローカルWindows・Node 24.20.0、ブランチ `feat/google-drive-storage` の `d894d88`）
+
+| 確認 | 結果 |
+|---|---|
+| `npm run typecheck` | 成功 |
+| `npm run build` | 成功 |
+| `npm test` | 71 files、1898 passed、5 skipped |
+| Calendarの既存テスト | Google共通Error分類の切り出し後も無変更で成功 |
+| Filesystem保存の既存テスト | `append(compose)` への変更後も成功（外部編集を挟むテストは、`compose` の中で外部編集を行う形に変更） |
+| Integration Test（`obsidian-drive.integration.test.ts`） | 未実施（`GOOGLE_DRIVE_IT_VAULT_FOLDER_ID` の検証用Vaultが必要） |
+
+### 18.2 Planからの細部の変更・Plan外の変更
+
+| 項目 | 内容 | 理由 |
+|---|---|---|
+| 検索時の本文の読み方 | `VaultStorage.list()` の各項目に任意の `read()` を持たせ、Drive保存では一覧で見つけたファイルをその検索の中だけFile IDで読む（§9.1 Step 5）。呼び出しをまたいで保持しない | ファイルごとにVaultルートから解決し直すと、1件あたり7回前後の要求になり、数百件のVaultで検索が数十秒かかる。一覧後に移動・削除されたファイルは、Filesystemと同じく404で除外される（ゴミ箱へ移されただけのファイルは、Driveが同じIDで返すため、その検索では読まれ得る） |
+| `VaultStorage.append` / `LifeLogStorage.append` の戻り値 | 読み取ったファイルを返す（§8） | Connectorが `compose` の外で読み取り内容を使えるようにするため |
+| `DriveRevision` | `mimeType` を含める | 追記で既存ファイルのMIME type（Drive for desktopの `text/plain` 等）を変えないため、v2 `files.get` の同じ応答から取得する |
+| `DriveApi` | `trash` を持たない | AI FoundationはDrive上のファイルを削除・ゴミ箱へ移動しない（§10.2）ため |
+| 共通化 | エラーのラベル（`labels.ts`）とデコード（`decode.ts`）をFilesystem・Driveで共有 | 同じID・メッセージ・デコード規則にするため |
+| Rate Limitの理由 | Google共通は既存の3件のまま。Driveは `dailyLimitExceeded`・`sharingRateLimitExceeded` を加える | Calendarの分類を変えないため |
+| `invalid_grant` の案内 | Calendarは従来どおり `npm run auth:google`、Driveは `npm run auth:google -- --drive` | Calendarの挙動・メッセージを変えないため |
+| 作成後確認の失敗 | 作成後の一覧が失敗した場合は、作成済みであることを示す `ProviderApiError` | 作成は成功しているため、結果不明とは区別する |
