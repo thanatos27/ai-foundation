@@ -195,7 +195,9 @@ export function revisionVersions(revision, project, projectNumber) {
   const container = revision.spec?.containers?.[0];
   const credentialVersions = Object.fromEntries(Object.entries(CREDENTIALS).map(([name, variable]) =>
     [name, container?.env?.find(e => e.name === variable)?.valueFrom?.secretKeyRef?.key ?? null]));
-  const volume = revision.spec?.volumes?.find(v => v.secret &&
+  // A revision may keep unmounted volumes from earlier updates. Record only the one mounted at the Config path.
+  const mount = container?.volumeMounts?.find(m => m.mountPath === '/etc/ai-foundation');
+  const volume = mount && revision.spec?.volumes?.find(v => v.name === mount.name && v.secret &&
     resolveSecretName(revision, v.secret.secretName, project, projectNumber) === 'ai-foundation-config');
   const configVersion = volume?.secret?.items?.find(i => i.path === 'config.yaml')?.key ?? null;
   return { configVersion, credentialVersions };

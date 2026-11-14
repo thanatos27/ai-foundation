@@ -55,7 +55,8 @@ async function fixture(t, opts = {}) {
         r.spec.containers[0].env[0].valueFrom.secretKeyRef.name = 'lookup-api-key';
         r.metadata.annotations = { 'run.googleapis.com/secrets': 'lookup-api-key:projects/123456789/secrets/ai-foundation-api-key,lookup-config:projects/123456789/secrets/ai-foundation-config' };
         if (opts.namespace) r.metadata.namespace = '123456789';
-        r.spec.volumes = [{ secret: { secretName: 'lookup-config', items: [{ key: '1', path: 'config.yaml' }] } }];
+        r.spec.volumes = [{ name: 'config', secret: { secretName: 'lookup-config', items: [{ key: '1', path: 'config.yaml' }] } }];
+        r.spec.containers[0].volumeMounts = [{ name: 'config', mountPath: '/etc/ai-foundation' }];
       }
       if (opts.qualifiedDigest) r.status.imageDigest = `asia-northeast1-docker.pkg.dev/private-project/repo/app@${digest}`;
       return ok(r);
@@ -216,11 +217,23 @@ test('traffic switch error does not run smoke or automatically retry', async t =
 });
 test('rollback records actual target versions, not current deployment configuration', () => {
   const r = revision(old);
-  r.spec.volumes = [{ secret: { secretName: 'ai-foundation-config', items: [{ key: '1', path: 'config.yaml' }] } }];
+  r.spec.volumes = [{ name: 'config', secret: { secretName: 'ai-foundation-config', items: [{ key: '1', path: 'config.yaml' }] } }];
+  r.spec.containers[0].volumeMounts = [{ name: 'config', mountPath: '/etc/ai-foundation' }];
   const refs = revisionVersions(r);
   assert.equal(refs.configVersion, '1');
   assert.equal(refs.credentialVersions['api-key'], '1');
   assert.equal(refs.credentialVersions['github-token'], null);
+});
+test('rollback records the mounted Config version when an earlier volume is left unmounted', () => {
+  // Cloud Run keeps the previous Config volume after `--update-secrets` swaps the mounted one.
+  const r = revision(old);
+  r.spec.volumes = [
+    { name: 'config-old', secret: { secretName: 'ai-foundation-config', items: [{ key: '1', path: 'config.yaml' }] } },
+    { name: 'config-new', secret: { secretName: 'ai-foundation-config', items: [{ key: '2', path: 'config.yaml' }] } }];
+  r.spec.containers[0].volumeMounts = [{ name: 'config-new', mountPath: '/etc/ai-foundation' }];
+  assert.equal(revisionVersions(r).configVersion, '2');
+  delete r.spec.containers[0].volumeMounts;
+  assert.equal(revisionVersions(r).configVersion, null);
 });
 test('post-switch smoke failure records failure without automatic rollback or leaked response', async t => {
   const f = await fixture(t, { fetchError: true });
