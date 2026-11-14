@@ -1,0 +1,17 @@
+{
+  "project": "replace-with-your-project",
+  "region": "asia-northeast1",
+  "service": "ai-foundation",
+  "repository": "ai-foundation",
+  "image": "ai-foundation",
+  "configVersion": "2",
+  "credentialVersions": {
+    "api-key": "1",
+    "todoist-api-token": "1",
+    "google-oauth-client-id": "1",
+    "google-oauth-client-secret": "1",
+    "google-oauth-refresh-token": "1",
+    "notion-api-token": "1",
+    "github-token": "1"
+  }
+}

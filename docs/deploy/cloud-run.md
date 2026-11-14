@@ -1,5 +1,52 @@
 # Cloud Run配置手順
 
+## 自動デプロイ（既存サービスの更新）
+
+Node.js 24以降で、PowerShell／Git Bashから同じnpmコマンドを使う。初回インフラ作成・初回サービス配置は下記の手動手順で行う。自動化は既存のCloud Runサービスを対象とし、Secretの登録やversion追加は行わない。
+
+最初の1回だけ、個人用設定を作る。既存の `deploy.cloud.local.json` は上書きしない。
+
+```powershell
+if (!(Test-Path deploy.cloud.local.json)) {
+    Copy-Item deploy.cloud.example.json deploy.cloud.local.json
+}
+code deploy.cloud.local.json
+```
+
+`project` を対象のProject IDへ、Secret versionを現在の番号へ変更する。今回配置済みの構成はConfig 2・他7 Secretは1。ファイルはGit対象外。設定内のProjectを各gcloud操作へ明示するため、gcloudの既定Projectに依存しない。
+
+```sh
+npm run cloud:status
+npm run cloud:deploy -- --writes-paused
+npm run cloud:rollback -- --revision <revision名> --writes-paused
+npm run test:cloud
+```
+
+- `status`: 現在100%を受けるrevision、イメージ、リソース、Secret参照番号を表示する。認証情報の実値は取得しない。
+- `deploy`: Git作業ツリーの確認 → npm ci／typecheck／build／通常テスト／自動化テスト → Docker --pullビルド → 同じイメージIDのコンテナテスト → push → digest自動取得 → --no-trafficで新revision準備 → 100%切り替え → 読み取りsmoke。
+- `rollback`: 戻し先が同じサービスのReadyなrevisionであることを確認し、100%切り替えてsmokeする。SoTの書き込みは巻き戻さない。
+- `--config <path>` で別の配置設定を指定できる。Secret versionに `latest` は指定できない。
+- `--writes-paused` は「クライアントの書き込みを止め、直前の応答を受け取り、同じVaultに書くローカルMCP／HTTPを停止した」ことの申告。サービス側のメンテナンスモードではない。
+- 追跡ファイルの変更と未追跡ファイルがあれば配置を止める。個人用設定・Credential・.deployは.gitignoreで除外する。スクリプトは自動pullやブランチ切り替えをしない。
+- デプロイとロールバックの同時実行をローカルロックで拒否する。別PC・別の手動操作は防げない。切り替え直前にもtrafficを再確認するが、分散排他や原子的な比較更新ではない。
+- 失敗した段階で停止する。新revisionの準備に失敗したらtrafficを切り替えない。切り替え後のsmoke失敗では非0終了し、復旧コマンドを表示する。無条件の自動ロールバック・SoT書き込み・自動再送はしない。
+- `.deploy/*.json` に段階・新旧revision・digest・Secret version・結果を記録する。Secret値は保存しない。`.public.md` はProject ID・URLを含まない共有用要約。個人用ファイルと.deployはGit対象外。公開要約のdigestはsha256値だけに正規化し、レジストリURIのProject IDを含めない。別の--configを使った実行では復旧案内にも指定を残す。シェル構文・空白・Windows区切りを含むパスは直接展開せず、private journalのconfigPathを各シェルに合わせて引用する案内にする。
+- 中断時はjournalと実際のtrafficを確認してから、新しい実行または明示的なrollbackを行う。自動再開はない。ロックが残った場合も実行中のプロセスがないことを確認してから手動で外す。
+
+### 実行者の追加権限とWindows
+
+smokeでは戻し先／配置先revisionが参照するAPIキーのSecret versionを、gcloudでメモリにだけ取得する。したがって配置実行者にもAPIキーSecretへの `roles/secretmanager.secretAccessor` が必要。Secret管理権限だけでは読み取りできない場合がある。APIキーがローテーションされた旧revisionでも、対象のキーで検証する。Secretの無効化・破棄済み、または取得権限なしの場合はtraffic切り替え前に止まる。同一ProjectのSecret aliasはProject ID／番号を照合し、実Secret名へ解決する。revisionのnamespaceに番号がない場合は、Projectメタデータの取得権限も必要。跨ProjectのSecret aliasは対象外。
+
+Windowsではgcloud.cmdをシェルで実行せず、PATHでCloud SDKの場所を調べてSDKのPythonエントリーポイントを呼ぶ。既定ではSDK同梱Pythonを利用する。独自Python構成は `CLOUDSDK_PYTHON` をpython.exeの絶対パスで指定する。npmもNodeでnpm-cli.jsを直接実行する。Docker DesktopはLinuxコンテナを起動しておく。
+
+既存の全ルートBearer認証、min 0／max 1、1vCPU／512MiBは維持する。最大1は厳密な単一writer保証ではない。read-only smokeは認証と全SoTの一覧取得だけを行い、本番Vaultへテスト記事を作らない。外部コマンドの生の出力・provider本文・認証情報は表示しない。失敗時の詳細調査は表示された段階に対応する手動コマンドで行う。
+
+### 構成・配置記録
+
+構成・実際の検証結果・料金確認は[構成と運用記録](cloud-run-overview.md)、実装範囲・ACは[自動化Plan](../plans/cloud-run-automation-implementation-plan.md)を参照する。
+
+---
+
 REST APIをGoogle Cloud Runへ手動で配置・更新・ロールバックする手順。構成と制約は [クラウド配置 Design](../specs/cloud-run.md) を参照。
 
 - `<PROJECT_ID>` 等の `<…>` は自分の環境の値に置き換える。これらの値・公開URL・Credentialは、このRepository（公開）・Issue・PRに書かない。
@@ -280,3 +327,4 @@ gcloud secrets versions destroy <version> --secret=ai-foundation-<name>
 - 配置後1週間・1か月で、「お支払い → レポート」をサービス別に確認する。
 - 不要なイメージはcleanup policyで、不要なSecret versionは §4.4 で削除する。トラフィックのない古いrevisionは課金されない。
 - Cloud Runのリクエストログにはpathとqueryが記録される（検索語を含む）。Authorization headerは記録されない。
+

@@ -19,7 +19,11 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:container": "vitest run --config vitest.container.config.ts",
     "auth:google": "tsx scripts/google-auth.ts",
-    "openapi": "tsx scripts/openapi.ts"
+    "openapi": "tsx scripts/openapi.ts",
+    "cloud:deploy": "node scripts/cloud-run.mjs deploy",
+    "cloud:status": "node scripts/cloud-run.mjs status",
+    "cloud:rollback": "node scripts/cloud-run.mjs rollback",
+    "test:cloud": "node --test tests/deploy/*.node.mjs"
   },
   "dependencies": {
     "@doist/todoist-sdk": "^15.3.1",
@@ -45,3 +49,4 @@
     "vitest": "^5.0.4"
   }
 }
+
