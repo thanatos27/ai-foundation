@@ -30,6 +30,27 @@ describe('resolveHttpOptions', () => {
     );
   });
 
+  it('uses the platform PORT when AI_FOUNDATION_HTTP_PORT is not set', () => {
+    expect(resolveHttpOptions({}, { AI_FOUNDATION_API_KEY: KEY, PORT: '8080' })).toMatchObject({ port: 8080 });
+    expect(resolveHttpOptions({}, { AI_FOUNDATION_API_KEY: KEY, PORT: '8080', AI_FOUNDATION_HTTP_PORT: ' ' })).toMatchObject({ port: 8080 });
+  });
+
+  it('takes --port, then AI_FOUNDATION_HTTP_PORT, over PORT', () => {
+    const env = { AI_FOUNDATION_API_KEY: KEY, PORT: '8080', AI_FOUNDATION_HTTP_PORT: '9000' };
+    expect(resolveHttpOptions({}, env)).toMatchObject({ port: 9000 });
+    expect(resolveHttpOptions({ port: '7000' }, env)).toMatchObject({ port: 7000 });
+  });
+
+  it('ignores a blank PORT', () => {
+    expect(resolveHttpOptions({}, { AI_FOUNDATION_API_KEY: KEY, PORT: '  ' })).toMatchObject({ port: DEFAULT_PORT });
+  });
+
+  it.each(['-1', '65536', 'http'])('refuses the PORT %j unless a higher-priority port is set', (port) => {
+    expect(() => resolveHttpOptions({}, { AI_FOUNDATION_API_KEY: KEY, PORT: port })).toThrow(/^PORT must be a port number/);
+    expect(resolveHttpOptions({}, { AI_FOUNDATION_API_KEY: KEY, PORT: port, AI_FOUNDATION_HTTP_PORT: '9000' })).toMatchObject({ port: 9000 });
+    expect(resolveHttpOptions({ port: '7000' }, { AI_FOUNDATION_API_KEY: KEY, PORT: port })).toMatchObject({ port: 7000 });
+  });
+
   it('needs the API key, from the environment only', () => {
     expect(() => resolveHttpOptions({}, {})).toThrow(ApiKeyError);
     expect(() => resolveHttpOptions({ port: '1' }, { AI_FOUNDATION_API_KEY: 'short' })).toThrow(/at least 32/);
