@@ -1,6 +1,6 @@
 # クラウド配置（Cloud Run・コンテナ・Config／Secret・更新手順） — Implementation Plan
 
-- Status: **承認済み・実装中**
+- Status: **承認済み・Repository変更は実装済み（§18）。実配置（§9・§14）は未実施**
 - 作成: 2026-11-15
 - 対象: [Issue #39](https://github.com/thanatos27/ai-foundation/issues/39)
 - 参照: [REST API](../specs/rest-api.md), [Google Drive保存](../specs/google-drive-storage.md), [REST API Implementation Plan](rest-api-implementation-plan.md), [Google Drive保存 Implementation Plan](google-drive-storage-implementation-plan.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -522,3 +522,26 @@ D13のとおりURL・Project IDはRepositoryに書かない。revision・digest�
 ## 17. 実配置の記録
 
 （実配置後に記入する。日付、対象commit、イメージdigest、revision名、各Secretのversion番号、cold startの実測、§13・§14の結果。URL・Project ID・Project番号は書かない。）
+
+---
+
+## 18. 実装で確定した事項
+
+### 18.1 Verification結果（2026-11-15、ローカルWindows・Node 24.20.0・Docker 29.3.1）
+
+| 確認 | 結果 |
+|---|---|
+| `npm run typecheck` / `npm run build` | 成功 |
+| `npm test` | 71 files・1908 passed・5 skipped |
+| `npm run test:container`（テスト内でビルド） | 11 passed |
+| §9.2の流れ（`--iidfile` で1回ビルド → `AI_FOUNDATION_CONTAINER_IMAGE` にイメージIDを渡してテスト） | 11 passed。テスト後もイメージIDは同じで、そのままtag・pushできる |
+| イメージサイズ | 約89 MB（`docker image inspect` の `Size`） |
+
+### 18.2 Planからの細部の変更・Plan外の変更
+
+- T1: PID 1がNodeであることは `/proc/1/cmdline` で確認する。Node 24はメインスレッド名を `MainThread` にするため、`/proc/1/comm` は `node` にならない。Process数は `docker top` で1つであることを確認する。
+- T9: DockerfileのCOPYは対象を個別に指定しているため、イメージの中身だけでは `.dockerignore` の効果を確認できない。同じ隔離コンテキストと `.dockerignore` を、コンテキスト外に置いた確認用Dockerfile（`COPY . /ctx`）でビルドし、ビルドコンテキストが許可リストの5項目だけであることも確認する。
+- T1のConfigはread-onlyのbind mountで渡す。Windowsのbind mountではファイルmodeを0444に固定できないため、Secretマウントで `node` ユーザーから読めることは実配置で確認する（§6.1）。
+- T8のSecret名の検索は、ベースイメージ（`node:24-bookworm-slim`）に元からあるファイルと `/app/node_modules/` 以下を除いて、追加されたものがないことを確認する。
+- `tsconfig.json` の `include` に `vitest.container.config.ts` を追加した（typecheckの対象にする）。
+- READMEの「クラウドに配置する（Cloud Run）」はREST APIの節の中に置いた。
