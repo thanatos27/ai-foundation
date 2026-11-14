@@ -13,8 +13,11 @@ token*.json
 *.key
 config.local.yaml
 config.cloud.yaml
+deploy.cloud.local.json
+.deploy/
 
 # OS / editor
 .DS_Store
 Thumbs.db
 *.log
+
