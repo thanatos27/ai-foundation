@@ -2,7 +2,7 @@
   "name": "ai-foundation",
   "version": "0.2.0",
   "private": true,
-  "description": "MCP server that lets AI clients read and write Task / Schedule / Collection / Knowledge / Project across their Sources of Truth.",
+  "description": "MCP server and REST API that let AI clients read and write Task / Schedule / Collection / Knowledge / Project / Area / Life Log across their Sources of Truth.",
   "type": "module",
   "engines": {
     "node": ">=24",
@@ -13,9 +13,12 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/serve-http.ts",
     "start": "node dist/index.js",
+    "start:http": "node dist/serve-http.js",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "auth:google": "tsx scripts/google-auth.ts"
+    "auth:google": "tsx scripts/google-auth.ts",
+    "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
     "@doist/todoist-sdk": "^15.3.1",

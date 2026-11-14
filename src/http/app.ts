@@ -32,7 +32,10 @@ export function createHttpApp({ config, connectors, apiKey, logError }: HttpAppO
 
   app.onError((error, c) => {
     const response = toHttpError(error);
-    if (response.status >= 500) log(error);
+    // Unexpected errors with their stack; provider and setup failures as one line, with the full
+    // (MCP) message, which may hold provider text the response leaves out.
+    if (response.status === 500) log(error);
+    else if (response.status >= 500) log(`${c.req.method} ${c.req.path}: ${response.status} ${response.code}: ${(error as Error).message}`);
     return c.json(errorBody(response.code, response.message), response.status);
   });
   app.notFound((c) => c.json(errorBody('route_not_found', `No such route: ${c.req.method} ${c.req.path}`), 404));
