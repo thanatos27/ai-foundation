@@ -30,12 +30,12 @@ npm run test:cloud
 - 追跡ファイルの変更と未追跡ファイルがあれば配置を止める。個人用設定・Credential・.deployは.gitignoreで除外する。スクリプトは自動pullやブランチ切り替えをしない。
 - デプロイとロールバックの同時実行をローカルロックで拒否する。別PC・別の手動操作は防げない。切り替え直前にもtrafficを再確認するが、分散排他や原子的な比較更新ではない。
 - 失敗した段階で停止する。新revisionの準備に失敗したらtrafficを切り替えない。切り替え後のsmoke失敗では非0終了し、復旧コマンドを表示する。無条件の自動ロールバック・SoT書き込み・自動再送はしない。
-- `.deploy/*.json` に段階・新旧revision・digest・Secret version・結果を記録する。Secret値は保存しない。`.public.md` はProject ID・URLを含まない共有用要約。個人用ファイルと.deployはGit対象外。
+- `.deploy/*.json` に段階・新旧revision・digest・Secret version・結果を記録する。Secret値は保存しない。`.public.md` はProject ID・URLを含まない共有用要約。個人用ファイルと.deployはGit対象外。公開要約のdigestはsha256値だけに正規化し、レジストリURIのProject IDを含めない。別の--configを使った実行では復旧案内にも指定を残す。シェル構文・空白・Windows区切りを含むパスは直接展開せず、private journalのconfigPathを各シェルに合わせて引用する案内にする。
 - 中断時はjournalと実際のtrafficを確認してから、新しい実行または明示的なrollbackを行う。自動再開はない。ロックが残った場合も実行中のプロセスがないことを確認してから手動で外す。
 
 ### 実行者の追加権限とWindows
 
-smokeでは戻し先／配置先revisionが参照するAPIキーのSecret versionを、gcloudでメモリにだけ取得する。したがって配置実行者にもAPIキーSecretへの `roles/secretmanager.secretAccessor` が必要。Secret管理権限だけでは読み取りできない場合がある。APIキーがローテーションされた旧revisionでも、対象のキーで検証する。Secretの無効化・破棄済み、または取得権限なしの場合はtraffic切り替え前に止まる。跨ProjectのSecret aliasは対象外。
+smokeでは戻し先／配置先revisionが参照するAPIキーのSecret versionを、gcloudでメモリにだけ取得する。したがって配置実行者にもAPIキーSecretへの `roles/secretmanager.secretAccessor` が必要。Secret管理権限だけでは読み取りできない場合がある。APIキーがローテーションされた旧revisionでも、対象のキーで検証する。Secretの無効化・破棄済み、または取得権限なしの場合はtraffic切り替え前に止まる。同一ProjectのSecret aliasはProject ID／番号を照合し、実Secret名へ解決する。revisionのnamespaceに番号がない場合は、Projectメタデータの取得権限も必要。跨ProjectのSecret aliasは対象外。
 
 Windowsではgcloud.cmdをシェルで実行せず、PATHでCloud SDKの場所を調べてSDKのPythonエントリーポイントを呼ぶ。既定ではSDK同梱Pythonを利用する。独自Python構成は `CLOUDSDK_PYTHON` をpython.exeの絶対パスで指定する。npmもNodeでnpm-cli.jsを直接実行する。Docker DesktopはLinuxコンテナを起動しておく。
 

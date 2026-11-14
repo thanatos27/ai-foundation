@@ -4,7 +4,8 @@ import { mkdtemp, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CREDENTIALS, validateConfig, parseArguments, activeRevision, assertRevision, apiKeyReference,
-  serviceUrl, smoke, execute, resolveTools, withLock, runAutomation, publicSummary, revisionVersions } from '../../scripts/cloud-run.mjs';
+  serviceUrl, smoke, execute, resolveTools, withLock, runAutomation, publicSummary, revisionVersions,
+  bareDigest, recoveryCommand } from '../../scripts/cloud-run.mjs';
 
 const key = 'dummy-only-key-'.padEnd(48, 'x');
 const old = 'ai-foundation-old';
@@ -42,6 +43,7 @@ async function fixture(t, opts = {}) {
     if (tool === 'npm') return ok('tests passed');
     if (tool !== 'gcloud') throw new Error('unexpected executable');
     if (args[0] === 'artifacts') return ok({ image_summary: { digest } });
+    if (args[0] === 'projects') return ok({ projectId: 'example-project', projectNumber: '123456789' });
     if (args[0] === 'secrets') return ok(opts.invalidKey ? 'invalid' : key);
     if (args[1] === 'deploy') return ok({});
     if (args[1] === 'revisions') {
@@ -49,6 +51,13 @@ async function fixture(t, opts = {}) {
       if (opts.foreign) r.metadata.labels['serving.knative.dev/service'] = 'another-service';
       if (opts.keyVersion) r.spec.containers[0].env[0].valueFrom.secretKeyRef.key = opts.keyVersion;
       if (opts.notReady) r.status.conditions[0].status = 'False';
+      if (opts.alias) {
+        r.spec.containers[0].env[0].valueFrom.secretKeyRef.name = 'lookup-api-key';
+        r.metadata.annotations = { 'run.googleapis.com/secrets': 'lookup-api-key:projects/123456789/secrets/ai-foundation-api-key,lookup-config:projects/123456789/secrets/ai-foundation-config' };
+        if (opts.namespace) r.metadata.namespace = '123456789';
+        r.spec.volumes = [{ secret: { secretName: 'lookup-config', items: [{ key: '1', path: 'config.yaml' }] } }];
+      }
+      if (opts.qualifiedDigest) r.status.imageDigest = `asia-northeast1-docker.pkg.dev/private-project/repo/app@${digest}`;
       return ok(r);
     }
     if (args[2] === 'update-traffic') {
@@ -250,4 +259,39 @@ test('public summary omits private configuration and URLs', () => {
   const text = publicSummary({ command: 'deploy', phase: 'complete', project: 'private-project',
     url: 'https://private.run.app', secret: key, credentialVersions: { 'api-key': '2' } });
   assert.ok(!text.includes('private')); assert.ok(!text.includes(key));
+});
+test('same-project aliases resolve project numbers and real Secret names', () => {
+  const r = revision(old);
+  r.spec.containers[0].env[0].valueFrom.secretKeyRef.name = 'lookup';
+  r.metadata.annotations = { 'run.googleapis.com/secrets': 'lookup:projects/123456789/secrets/real-api-key' };
+  assert.deepEqual(apiKeyReference(r, 'example-project', '123456789'), { name: 'real-api-key', key: '1' });
+  assert.throws(() => apiKeyReference(r, 'example-project', '999999999'), /Cross-project/);
+});
+for (const namespace of [false, true]) {
+  test(`rollback resolves aliases with ${namespace ? 'namespace' : 'project API fallback'} and records mounted Config`, async t => {
+    const f = await fixture(t, { alias: true, namespace });
+    const r = await runAutomation(rollbackOptions, f.deps);
+    assert.equal(r.configVersion, '1');
+    const access = f.calls.find(c => c.args[0] === 'secrets');
+    assert.ok(access.args.includes('--secret=ai-foundation-api-key'));
+    assert.equal(f.calls.some(c => c.args[0] === 'projects'), !namespace);
+  });
+}
+test('qualified rollback image URI never leaks project into public digest', async t => {
+  const f = await fixture(t, { qualifiedDigest: true });
+  const r = await runAutomation(rollbackOptions, f.deps);
+  assert.equal(r.digest, digest);
+  assert.equal(bareDigest(`registry/repo/image@${digest}`), digest);
+  assert.throws(() => bareDigest('invalid'));
+  const files = await readdir(path.join(f.root, '.deploy'));
+  const summary = await readFile(path.join(f.root, '.deploy', files.find(p => p.endsWith('.public.md'))), 'utf8');
+  assert.ok(!summary.includes('private-project'));
+});
+test('custom config is preserved for recovery without echoing shell syntax', async t => {
+  const f = await fixture(t, { smokeFailure: true });
+  await writeFile(path.join(f.root, 'custom.json'), JSON.stringify(config()));
+  await assert.rejects(runAutomation({ ...deployOptions, config: 'custom.json' }, f.deps));
+  assert.ok(f.logs.some(l => l.startsWith('Recovery:') && l.includes('--config custom.json')));
+  assert.ok(!recoveryCommand(old, 'path/$(echo evil).json').includes('$(echo'));
+  assert.ok(recoveryCommand(old, 'C:\\deploy\\custom.json').includes('<same-config-file>'));
 });

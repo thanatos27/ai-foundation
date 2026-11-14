@@ -125,22 +125,36 @@ export function assertRevision(revision, name, service) {
   }
 }
 
-export function apiKeyReference(revision, project) {
+export function resolveSecretName(revision, lookup, project, projectNumber) {
+  if (typeof lookup !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(lookup)) fail('Invalid Secret reference name.');
+  const aliases = revision?.metadata?.annotations?.['run.googleapis.com/secrets'];
+  if (!aliases) return lookup;
+  for (const alias of aliases.split(',')) {
+    const separator = alias.indexOf(':');
+    if (separator < 0) fail('Invalid Secret alias metadata.');
+    if (alias.slice(0, separator).trim() !== lookup) continue;
+    const resource = alias.slice(separator + 1).trim().match(/^projects\/([a-z0-9-]+)\/secrets\/([a-zA-Z0-9_-]+)$/);
+    if (!resource || (resource[1] !== project &&
+        !(typeof projectNumber === 'string' && /^[0-9]+$/.test(projectNumber) && resource[1] === projectNumber))) {
+      fail('Cross-project Secret aliases are unsupported.');
+    }
+    return resource[2];
+  }
+  return lookup;
+}
+
+export function apiKeyReference(revision, project, projectNumber) {
   const ref = revision?.spec?.containers?.[0]?.env?.find(e => e.name === 'AI_FOUNDATION_API_KEY')?.valueFrom?.secretKeyRef;
   if (!ref || !/^[a-zA-Z0-9_-]+$/.test(ref.name) || !numericVersion(ref.key)) {
     fail('Revision API key must reference a numeric Secret version in this project.');
   }
-  // Refuse aliases pointing to another project (Cloud Run stores these in annotations).
-  const aliases = revision?.metadata?.annotations?.['run.googleapis.com/secrets'];
-  if (aliases) {
-    for (const alias of aliases.split(',')) {
-      const [name, resource] = alias.split(':');
-      if (name === ref.name && resource !== `projects/${project}/secrets/${ref.name}`) {
-        fail('Cross-project Secret aliases are unsupported.');
-      }
-    }
-  }
-  return ref;
+  return { name: resolveSecretName(revision, ref.name, project, projectNumber), key: ref.key };
+}
+
+export function bareDigest(value) {
+  const match = typeof value === 'string' && value.match(/(?:^|@)(sha256:[a-f0-9]{64})$/);
+  if (!match) fail('Invalid revision image digest.');
+  return match[1];
 }
 
 export function serviceUrl(service) {
@@ -177,11 +191,12 @@ export function secretBindings(c) {
     ...Object.entries(CREDENTIALS).map(([name, variable]) => `${variable}=ai-foundation-${name}:${c.credentialVersions[name]}`)].join(',');
 }
 
-export function revisionVersions(revision) {
+export function revisionVersions(revision, project, projectNumber) {
   const container = revision.spec?.containers?.[0];
   const credentialVersions = Object.fromEntries(Object.entries(CREDENTIALS).map(([name, variable]) =>
     [name, container?.env?.find(e => e.name === variable)?.valueFrom?.secretKeyRef?.key ?? null]));
-  const volume = revision.spec?.volumes?.find(v => v.secret?.secretName === 'ai-foundation-config');
+  const volume = revision.spec?.volumes?.find(v => v.secret &&
+    resolveSecretName(revision, v.secret.secretName, project, projectNumber) === 'ai-foundation-config');
   const configVersion = volume?.secret?.items?.find(i => i.path === 'config.yaml')?.key ?? null;
   return { configVersion, credentialVersions };
 }
@@ -202,6 +217,13 @@ export function publicSummary(record) {
     `Commit: ${record.commit || 'n/a'}`, `Digest: ${record.digest || 'n/a'}`,
     `Previous revision: ${record.before || 'n/a'}`, `Revision: ${record.revision || 'n/a'}`,
     `Config version: ${record.configVersion || 'n/a'}`, `Smoke: ${record.smoke || 'not completed'}`, ''].join('\n');
+}
+
+export function recoveryCommand(revision, config) {
+  const base = `npm run cloud:rollback -- --revision ${revision} --writes-paused`;
+  // A single command is portable for simple paths. Never echo a path containing shell syntax.
+  if (/^[a-zA-Z0-9_./-]+$/.test(config)) return `${base} --config ${config}`;
+  return `${base} --config <same-config-file> (use configPath in the private journal; quote for your shell)`;
 }
 
 export async function runAutomation(options, {
@@ -251,7 +273,7 @@ export async function runAutomation(options, {
   }
   if (!options.writesPaused) fail('Pause writes and pass --writes-paused.');
   return await withLock(root, async dir => {
-    const record = { command: options.command, phase: 'preflight', time: new Date().toISOString(),
+    const record = { command: options.command, configPath: options.config, phase: 'preflight', time: new Date().toISOString(),
       configVersion: c.configVersion, credentialVersions: c.credentialVersions };
     const recordPath = path.join(dir, `${Date.now()}-${id}.json`);
     // Reserve a unique journal, never overwrite a prior deployment.
@@ -315,12 +337,23 @@ export async function runAutomation(options, {
         record.revision = options.revision;
         await phase('rollback-prepare');
         target = await getRevision(record.revision);
-        record.digest = target.status?.imageDigest;
-        Object.assign(record, revisionVersions(target));
+        record.digest = bareDigest(target.status?.imageDigest);
       }
+      // Cloud Run v1 namespaces normally contain the project number. If absent, resolve
+      // it through the explicitly scoped project API before comparing annotation aliases.
+      let projectNumber = target.metadata?.namespace;
+      if (target.metadata?.annotations?.['run.googleapis.com/secrets'] &&
+          !(typeof projectNumber === 'string' && /^[0-9]+$/.test(projectNumber))) {
+        const projectInfo = await json(['projects', 'describe', c.project], false);
+        if (projectInfo.projectId !== c.project || !/^[0-9]+$/.test(String(projectInfo.projectNumber))) {
+          fail('Could not resolve the target project number.');
+        }
+        projectNumber = String(projectInfo.projectNumber);
+      }
+      if (options.command === 'rollback') Object.assign(record, revisionVersions(target, c.project, projectNumber));
       // Access the exact target revision's API-key version, including after key rotation.
       // Requires the operator to have secretAccessor. Only capture the value in memory.
-      const ref = apiKeyReference(target, c.project);
+      const ref = apiKeyReference(target, c.project, projectNumber);
       const key = await gc(['secrets', 'versions', 'access', ref.key, `--secret=${ref.name}`], false);
       if (!/^[\x21-\x7e]{32,}$/.test(key)) fail('Target API key is invalid.');
       await phase('traffic-check');
@@ -342,7 +375,7 @@ export async function runAutomation(options, {
       // Do not persist arbitrary error text from providers, fetch, filesystem or SDKs.
       await save();
       log('[cloud] Failed. No automatic rollback or SoT writes were performed.');
-      if (record.before) log(`Recovery: npm run cloud:rollback -- --revision ${record.before} --writes-paused`);
+      if (record.before) log(`Recovery: ${recoveryCommand(record.before, options.config)}`);
       throw error;
     }
   });
