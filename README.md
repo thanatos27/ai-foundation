@@ -1,6 +1,6 @@
 # AI Foundation
 
-各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / Project / Area / Life LogをAIから統一的に操作するMCPベースの個人AI基盤。
+各サービスをSource of Truthとして維持しながら、Task / Schedule / Collection / Knowledge / Project / Area / Life LogをAIから統一的に操作するMCPベースの個人AI基盤。同じ操作をREST API（OpenAPI付き）からも利用できる（[REST API](#rest-api)）。
 
 ## Source of Truth
 
@@ -100,6 +100,55 @@ npm run dev      # tsx src/index.ts（Build不要）
 ```
 
 起動するとstdinでMCPメッセージを待ち受ける。終了はCtrl+C。
+
+## REST API
+
+MCPの21 Toolと同じ操作を、HTTP（JSON）の `/v1` 以下で公開する別の起動口。MCP Serverとは独立に起動し、MCP Serverの起動・動作は変わらない。仕様は [REST API Design](docs/specs/rest-api.md)。
+
+### 起動
+
+```sh
+npm run start:http   # node dist/serve-http.js（要Build）
+npm run dev:http     # tsx src/serve-http.ts（Build不要）
+```
+
+| 環境変数 | 内容 |
+|---|---|
+| `AI_FOUNDATION_API_KEY` | 必須。32文字以上の印字可能ASCII（空白なし）。未設定・不正ならHTTP Serverは起動せず、理由を表示して終了する |
+| `AI_FOUNDATION_HTTP_HOST` | 待ち受けるHost（既定 `127.0.0.1`）。`--host` が優先 |
+| `AI_FOUNDATION_HTTP_PORT` | 待ち受けるPort（既定 `8787`、`0` は空きPort）。`--port` が優先 |
+
+ConfigとProviderのCredentialはMCP Serverと同じ（`--config` / `AI_FOUNDATION_CONFIG` / `.env` / `--no-env-file`）。APIキーはランダムに生成して `.env` に設定する。キーの変更は環境変数を更新して再起動する。
+
+```sh
+node -e "console.log(crypto.randomBytes(32).toString('base64url'))"
+```
+
+HTTP Server自体はHTTPSを終端しない。このマシンの外から使う場合は、HTTPSを終端するReverse Proxy等の後ろに置く（`127.0.0.1` 以外で待ち受けると起動時に警告を表示する）。
+
+### 呼び出し
+
+すべてのRequest（`/openapi.json` を含む）に `Authorization: Bearer <APIキー>` が必要。IDはURLエンコードして渡し、`/` を含むKnowledge・ProjectのIDは `id` query parameterで渡す（queryでは `+` を `%2B` にする）。
+
+```sh
+KEY=...   # AI_FOUNDATION_API_KEY
+curl -H "Authorization: Bearer $KEY" "http://127.0.0.1:8787/v1/tasks?status=next&tags=home"
+curl -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{"title":"経費精算","due":"2026-11-20"}' http://127.0.0.1:8787/v1/tasks
+curl -H "Authorization: Bearer $KEY" \
+  "http://127.0.0.1:8787/v1/knowledge/entry?id=obsidian%3AAI_Foundation%2FKnowledge%2FCAP%E5%AE%9A%E7%90%86.md"
+```
+
+成功時は既存ToolのJSON payload（例: `{"task": ...}`、`{"tasks": [...]}`）を返し、失敗時は `{"error": {"code": "...", "message": "..."}}` を返す。HTTP status・`code` の一覧と各操作の再実行時の性質はOpenAPIに記載している。
+
+### OpenAPI
+
+Route定義とZod Schemaから生成し、手書きの仕様ファイルは持たない。
+
+```sh
+curl -H "Authorization: Bearer $KEY" http://127.0.0.1:8787/openapi.json
+npm run openapi > openapi.json   # Serverを起動せずに出力（APIキー不要、外部通信なし）
+```
 
 ## Configuration
 
@@ -390,14 +439,19 @@ src/
 ├─ config/       config.yamlのSchemaとLoader
 ├─ credentials/  CredentialProvider境界と環境変数実装
 ├─ connectors/   Connector境界と実装（todoist/, google-calendar/, notion/, obsidian/, github/）
+├─ operations/   MCP・HTTP共通の操作定義（説明・入出力Schema・Connector選択・既定値）
 ├─ tools/        MCP Toolの登録（task.ts, schedule.ts, collection.ts, knowledge.ts, project.ts, area.ts, lifelog.ts）
+├─ http/         REST API（認証・Route・Error変換・OpenAPI）
 ├─ shared/       Timezone計算などの共通処理
-├─ errors.ts     Tool呼び出しで返すError分類
+├─ errors.ts     Tool / API呼び出しで返すError分類
 ├─ instructions.ts  AI Clientへ送るInstructions
 ├─ server.ts     MCP Serverの組み立て
-└─ index.ts      Entry Point（.env / Config読込・Connector生成・stdio起動）
+├─ startup.ts    起動の共通処理（.env / Config読込・Connector生成）
+├─ index.ts      MCP Entry Point（stdio起動）
+└─ serve-http.ts HTTP Entry Point（APIキー検証・HTTP起動）
 scripts/
-└─ google-auth.ts  Google OAuth Refresh Tokenの取得
+├─ google-auth.ts  Google OAuth Refresh Tokenの取得
+└─ openapi.ts      OpenAPI documentの出力
 tests/
 ├─ integration/  実APIへのIntegration Test（npm run test:integration）
 └─ ...           通常のTest（外部通信なし）
@@ -405,9 +459,9 @@ tests/
 
 ### Adding Tools
 
-Entityごとに `src/tools/<entity>.ts` を作成し、`register<Entity>Tools(server, context)` 内でSDKの `server.registerTool()` を直接呼ぶ。作成した関数を `src/tools/index.ts` の `registerTools` から呼び出す。Provider固有処理は `src/connectors/<provider>/` に置き、Toolからは `context.connectors` 経由で利用する。
+操作は `src/operations/<entity>.ts` に定義する（名前・説明・入出力Schema・再実行時の性質 `repeat`・`run`）。名前は `src/operations/types.ts` の `OPERATION_NAMES` に加える。MCPは `src/tools/<entity>.ts` で `registerOperation(server, ops.<name>, annotations)` を呼び、HTTPは `src/http/routes/<entity>.ts` でMethod・Path・path / query / bodyの受け取り方を定義する。Provider固有処理は `src/connectors/<provider>/` に置き、操作からは `context.connectors` 経由で利用する。
 
-ConnectorはCredentialを `CredentialProvider` からのみ受け取り、`process.env` を直接読まない。失敗時は `src/errors.ts` のErrorを投げる。MCP SDKが `error.message` を `isError` 結果としてClientへ返すため、MessageにCredentialを含めない。
+ConnectorはCredentialを `CredentialProvider` からのみ受け取り、`process.env` を直接読まない。失敗時は `src/errors.ts` のErrorを投げる。MCP SDKが `error.message` を `isError` 結果としてClientへ返すため、MessageにCredentialを含めない。SDK・Providerが書いた文（SDK例外のmessage等）をMessageへ含めるときは `providerText()` / `errorText()` で包む。MCPには従来どおり全文を返し、REST APIはその部分を除いた `publicMessage` を返す。
 
 ### Logging
 
@@ -436,5 +490,7 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [繰り返しタスク Implementation Plan](docs/plans/task-recurrence-implementation-plan.md)
 - [複数Calendar・期間イベント Design](docs/specs/schedule-calendars.md)
 - [複数Calendar・期間イベント Implementation Plan](docs/plans/schedule-calendars-implementation-plan.md)
+- [REST API Design](docs/specs/rest-api.md)
+- [REST API Implementation Plan](docs/plans/rest-api-implementation-plan.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)
