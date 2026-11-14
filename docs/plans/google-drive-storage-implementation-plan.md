@@ -1,6 +1,6 @@
 # Google Drive保存対応（Knowledge／Life Log） — Implementation Plan
 
-- Status: **Draft。P-01〜P-03は実施済み（§17。P-02m・P-03mは未実施）。AC-D05・AC-D06は未確定（設計レビュー待ち）**
+- Status: **Draft。P-01〜P-03・P-02 Step 6・7は実施済み（§17）。P-02m・P-03mは未実施。AC-D05・AC-D06は未確定（設計レビュー待ち）**
 - 作成: 2026-11-14
 - 対象: [Issue #34](https://github.com/thanatos27/ai-foundation/issues/34)
 - 参照: [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Life Log Implementation Plan](lifelog-implementation-plan.md), [REST API](../specs/rest-api.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -94,7 +94,7 @@ Google Driveに同期済みのObsidian Vaultを、Google Drive APIから直接�
 本実装（`src/`）とは別のスクリプトで、`src/` からimportしない。`npm test` では実行しない。
 
 ```text
-npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
+npx tsx scripts/probe-google-drive.ts <p01|p02|p02m|p03> [--keep] [--manual]
 ```
 
 | 項目 | 内容 |
@@ -104,7 +104,7 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 | 再試行 | 読み取りを含む全要求で `retry: false` を指定する。SDKの既定の再試行（v2の `PUT` 等）を混ぜずに、各要求の結果をそのまま記録するため |
 | 後片付け | 作成したファイルを最後にゴミ箱へ移す（完全削除しない）。`--keep` で残す |
 | 出力 | 標準出力にJSON Lines: step、method・endpoint・uploadType・条件header名と値、HTTP status、応答の `id` `name` `mimeType` `version` `headRevisionId` `md5Checksum` `modifiedTime` `size`、応答の `ETag` header、本文のSHA-256。Authorization header・Access Token・Refresh Tokenは出さない |
-| `--manual` | Drive for desktopでの手動操作を挟む手順（P-02m・P-03m）で、標準入力のEnterを待つ |
+| 手動操作 | Drive for desktopでの手動操作を挟む手順（`p02m`、`p03 --manual` のP-03m）は、標準入力のEnterを待つ |
 
 ### 4.3 P-01：権限・既存ファイルの読み書き
 
@@ -134,7 +134,9 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 | 3c | 3a・3bで拒否された場合のみ：取得し直した値で同じ条件付き更新 | 200で成功すること（条件が常に失敗するのではないこと） |
 | 4 | Bがメタデータ取得（`headRevisionId` = r1）→ Aが更新（r2）→ Bが `alt=media` と `revisions.get(r1, alt=media)` で本文取得 | `alt=media` がr2の本文を返すか、`revisions.get` がr1の本文を返すか（メタデータと本文の取得の間の変更） |
 | 5 | 条件なしでBが古い本文から更新（基準として最後に実施） | Aの追記が失われることの確認 |
-| P-02m（`--manual`） | Bが取得した後、利用者がDrive for desktopの同期フォルダで同じファイルを編集・保存し、同期完了を待つ。Bが条件付き更新 | status、最終本文、同期フォルダ側の状態（競合コピーの有無） |
+| 6 | 本実装の追記手順を一連で実行する: Bがv2 `files.get`（etag・`headRevisionId`）→ その版を `revisions.get` → 追記した本文をv2 `files.update`＋`If-Match`。割り込みなし／本文取得後にAが更新／v2 `files.get` と本文取得の間にAが更新、の3通り | 各取得値、Bのstatus（200／412）、最終本文にAの更新・Bの追記が残るか |
+| 7 | A・Bが同じ版を読んだ後、Aが更新日時を維持して本文を更新（v2 `modifiedDateBehavior=noChange`、および `fromBody` で元の日時）→ Bが古いetagで条件付き更新 | A更新後の本文・`version`・`headRevisionId`・更新日時・etag（日時が実際に維持されたか）、Bのstatus、最終本文 |
+| P-02m（`p02m`） | Step 6の手順でBが取得した後、利用者がDrive for desktopの同期フォルダで同じファイルに `LOCAL EDIT` の行を加えて保存し、同期完了を待つ。Bが条件付き更新 | ローカル編集後の更新日時・etag・`headRevisionId`、Bのstatus、最終本文にローカル編集が残るか、Drive上の同名・類似名のファイル |
 
 ### 4.5 P-03：同名ファイルの同時作成
 
@@ -142,19 +144,19 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 |---|---|---|
 | 1 | A・Bが同じ親・同じ名前で同時に `files.create`（`Promise.all`）。2クライアントで3回、5クライアントで3回 | 各要求のstatus・file ID |
 | 2 | 作成直後・1秒後・5秒後に名前で一覧 | 見える件数（一覧の反映遅延の有無） |
-| 3a | §10.2の手順を、probeが順序を指定して実行する: A・Bの作成前確認 → Aの作成 → Aの作成後一覧 → Bの作成 → Bの作成後一覧 | 各要求の結果（成功／409）、残った件数、各一覧に相手の作成分が見えたか |
+| 3a | 作成後確認で他の同名項目が見えたら自分の作成分を取り消す手順を、probeが順序を指定して実行する: A・Bの作成前確認 → Aの作成 → Aの作成後一覧 → Bの作成 → Bの作成後一覧 | 各要求の結果（成功／409）、残った件数、各一覧に相手の作成分が見えたか |
 | 3b | 同上の順序違い: A・Bの作成前確認 → Aの作成 → Bの作成 → Aの作成後一覧 → Bの作成後一覧 | 同上（両方が取り消して0件になるか） |
-| 3c | 参考として、§10.2の手順を5クライアントで `Promise.all` により10回実行 | 各回の成功数・残った件数 |
+| 3c | 参考として、同じ手順を5クライアントで `Promise.all` により10回実行 | 各回の成功数・残った件数 |
 | 4 | `files.generateIds` で得たIDを2つの作成要求に同時に指定 | 2件目が拒否されるか（IDの一意性。名前の一意性ではない） |
 | P-03m（`--manual`） | 利用者がDrive for desktopで同名ファイルを作るのと同時にAPIで作成 | 同期後のDrive上の件数と名前（` (1)` 付き等） |
 
-P-03の結果は、観測した順序でどうなったかの記録であり、名前の一意性の証明ではない。同一 `createdTime`・異なるfile ID、ゴミ箱移動の失敗、作成の結果不明などの順序・失敗はFake Drive（§13.3）で確認する。
+P-03の結果は、観測した順序でどうなったかの記録であり、名前の一意性の証明ではない。§10.2の方式の順序・失敗はFake Drive（§13.3）で確認する。
 
 ### 4.6 検証結果から確定する事項
 
 | 確定事項 | 根拠 |
 |---|---|
-| 追記を許可する条件と競合時のレスポンス（§10.1の方式A／B） | P-02 Step 3a・3b・4、P-02m |
+| 追記を許可する条件と競合時のレスポンス（§10.1） | P-02 Step 3a・3b・4・6・7、P-02m |
 | 新規作成の同名検出の範囲と、作成の排他を設計レビューへ戻すか（§10.2・Q8） | P-03 Step 1〜4、P-03m |
 | Drive同期との競合で保証できない条件と運用（README） | P-02m、P-03m |
 | Storage interfaceの変更内容（§8の `DriveApi.updateContent` の条件） | P-02 |
@@ -245,7 +247,6 @@ interface DriveApi {
   createFile(parentId: string, name: string, bytes: Buffer): Promise<DriveItem>;  // v3 multipart, text/markdown
   /** v2 files.update（uploadType=media）に If-Match: revision.etag。412 conditionNotMet は StaleRevisionError */
   updateContent(revision: DriveRevision, bytes: Buffer): Promise<void>;
-  trash(fileId: string): Promise<void>;                              // 作成直後の自分のファイルの取り消し（§10.2）だけに使う
 }
 ```
 
@@ -254,7 +255,7 @@ interface DriveApi {
 
 - 一覧のqueryは `'<folderId>' in parents and trashed = false`（＋ `and name = '<escaped>'`）。名前は `\` → `\\`、`'` → `\'` でエスケープする。`pageSize=1000`、`nextPageToken` がなくなるまで取得する。
 - `fields` は必要な項目だけを指定する。
-- 書き込み（`createFile` / `updateContent` / `trash`）は `retry: false` を指定する。
+- 書き込み（`createFile` / `updateContent`）は `retry: false` を指定する。AI FoundationはDrive上のファイルを削除・ゴミ箱へ移動しない。
 
 ### 7.2 項目の分類
 
@@ -355,7 +356,7 @@ append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFil
 1. §7.4 → 親フォルダ（Knowledge: Knowledge Directory、Life Log: Life Log Directory）を解決。
 2. §7.3の作成時規則で同名候補を確認。1件でもあれば `ConflictError`（既存メッセージ）。
 3. 5 MiB以下を確認し、`createFile`（multipart、`text/markdown`、UTF-8・BOMなし）。
-4. 作成後確認（§10.2）。
+4. 作成後確認（§10.2）。Step 2〜4は§10.2の `DriveCreateLock` の中で行う。
 5. 作成要求の結果不明は `ProviderApiError`（「作成されたか分からない。取得して確認してから再実行する」旨）。再試行しない。
 
 ---
@@ -364,16 +365,23 @@ append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFil
 
 ### 10.1 追記
 
-P-02の結果、**方式A（条件付き更新）が成立する**。v2の `files.update` に `If-Match: <v2 etag>` を付けると、古いetagの更新は412 `conditionNotMet` で拒否されて本文は変わらず、取得し直したetagでは成功した。v3では条件付き更新に使える値が得られなかった（§7.1）。
+**方式A（v2の条件付き更新）:** §9.3。v2 `files.get` のetag・`headRevisionId` → その版の本文を `revisions.get` → v2 `files.update`（`If-Match`）。412は `ConflictError`（409）。
 
-| 方式 | 内容 | 保証 |
-|---|---|---|
-| **方式A** | §9.3。v2 `files.get` のetag・`headRevisionId` → `revisions.get` の本文 → v2 `files.update`（`If-Match`）。412は `ConflictError`（409） | 取得後にDrive上で他のClient・Drive同期による更新があれば書き込まない。既存本文・他の追記を失わない |
+P-02 Step 6で、この一連の手順をそのまま検証した。間に他の更新がなければ成功し、本文の取得後、またはv2 `files.get` と本文取得の間に他のClientの更新が入ると412で拒否され、他の更新は保持された。v3では条件付き更新に使える値が得られなかった（§7.1）。
 
-**設計レビューで確定する前提:**
+**検出できない更新（P-02 Step 7）:** 更新日時を維持する更新（v2 `modifiedDateBehavior=noChange`、および `fromBody` で元の日時を指定）では、本文・`version`・`headRevisionId` は変わったがetagは変わらず、古いetagによる更新が成功して他の更新が上書きされた。観測したetagは更新日時のepoch millisecondsをBase64にした値で（形式は文書化されていない）、条件付き更新はetagが変わる更新、すなわち更新日時が変わる更新だけを検出する。
 
-- 観測したv2のetagは、`modifiedTime` のepoch millisecondsをBase64にした値だった（例: `MTc5NDY2MjU4NjcxNw` = `1794662586717` = `2026-11-14T13:23:06.717Z`）。etagの形式は文書化されていない。条件付き更新が `modifiedTime` だけで判定されている場合、`modifiedTime` を変えない更新、同じミリ秒の更新は検出できない。Drive for desktopによる更新が `modifiedTime` を変えるかは、P-02mで確認する。
-- v2 APIを使い続けられること（v3への移行で同等の機能がない）。
+| 状況 | 結果 |
+|---|---|
+| 他のClient・Drive同期が更新日時を変えて更新した | 412で拒否（検出できる） |
+| 更新日時を維持する更新（API呼び出しの指定、更新日時を保持するツール等） | 検出できず上書きする。上書きされた内容は版の履歴に残る（Driveが古い版を自動で削除するまで） |
+| Drive for desktopの同期による更新 | P-02mで確認する |
+
+**設計レビューで決めること:**
+
+- (a) 上記の範囲を保証範囲として受け入れ、READMEに制約として書く。
+- (b) (a)に加え、書き込み後に版の履歴を確認する。`revisions.list` で自分の書き込んだ版の直前の版が、読み取った `headRevisionId` でなければ、取得後に検出できない更新があったと判断する。その場合は「追記したが、取得後の他の更新を上書きした可能性がある。Google Driveの版の履歴で確認する」旨の `ProviderApiError` を返す（書き込みは取り消さない）。版の履歴の順序・統合・自動削除の挙動は追加のprobeで確認する必要がある。
+- v2 APIを使い続けること（v3に同等の機能がない）。
 
 方式Aでも保証しないこと（READMEに書く）:
 
@@ -382,41 +390,36 @@ P-02の結果、**方式A（条件付き更新）が成立する**。v2の `file
 
 ### 10.2 新規作成
 
-Driveは同じ親の下の名前の一意性を保証せず、名前を条件にした原子的な作成もない。作成前確認・作成後確認はどちらも各要求が別の時点で見た一覧に基づくため、本節の方式は排他的な作成ではない。
+Driveは同じ親の下の名前の一意性を保証せず（P-03 Step 1）、名前を条件にした原子的な作成もない。本節の方式は、1つのServer Process内の作成だけを直列化し、それ以外のwriterとの重複は検出するだけである。全writerに対する排他的な作成ではない。
 
-**方式（勝者を選ばない作成後確認）:**
+**方式（設計案。未確定）:**
 
-1. 作成前確認（§9.4 Step 2）。同名があれば作成せず `ConflictError`。
-2. `createFile`。
-3. 作成直後に親フォルダの同名項目（§7.3の作成時規則）を一覧する。自分の作成分以外が1件でもあれば、自分の作成分をゴミ箱へ移して `ConflictError`（「同じ名前のファイルが同時に作成された。確認してから再実行する」旨）。
+1. **プロセス内の直列化**: 親フォルダのIDと、名前をNFC・小文字化した値の組をキーに、同じキーの作成をProcess内で1件ずつ実行する（`DriveCreateLock`、`createConnectors` で1つ作り、Knowledge・Life LogのStorageで共有する）。Step 2〜4をlockの中で行う。
+2. 作成前確認（§9.4 Step 2）。同名があれば作成せず `ConflictError`。
+3. `createFile`。
+4. 作成後確認: 親フォルダの同名項目（§7.3の作成時規則）を一覧する。自分の作成分以外があれば `ConflictError` を返す。メッセージでは、ファイルは作成済みであること、同じ名前の別のファイルがあり以後の操作が409になること、Google Driveで確認・整理する必要があることを示す。**自分の作成分は取り消さない。**
 
-勝者を選ばないのは、作成後の一覧を見る時点が要求ごとに異なり、先に成功を返した要求の判断を後の要求が覆せないためである（後の要求だけが規則上の勝者となって成功し、2件が残る）。この方式では、相手が見えた要求は必ず自分の作成分を取り消す。両方が取り消して0件になることはあるが、作成内容は呼び出し元に残っているため失われない。
+作成後に重複を見つけても取り消さない理由: 本当に同時の作成では全要求が取り消して0件になることが多い（P-03 Step 3c）。また、取り消すまでの間に他のClientが作成したファイルを編集していた場合、その編集までゴミ箱へ移してしまう。
 
 **保証すること:**
 
 - 既存ファイルを上書きしない（`files.create` は常に新規作成）。
 - 作成前に見えた同名項目があれば作成しない（409）。
-- 作成後に見えた他の同名項目があれば、自分の作成分を取り消して409を返す。
+- 同じProcessからの同じ名前の作成は直列化され、2件目は作成前確認で409になる。
+- 作成後に見えた他の同名項目があれば409を返し、作成済みであることを示す。
 - 重複が残った場合も、以後の取得・追記・作成・検索は§7.3により409となり、1件を黙って選ばない。
 
 **保証しないこと（READMEに書く）:**
 
-- AI Foundation同士の同時作成で、成功が1件以下になること。各要求の作成後の一覧に、それより前に完了した作成が必ず反映されるなら、後に一覧した要求が先の作成分を見て取り消すため、成功は1件以下になる。しかし一覧への反映についてDriveの文書は保証を示していない。P-03で観測した結果は記録するが、保証の根拠にはしない。
-- Drive for desktop・Obsidian・他のClientによる同時作成（AI Foundationの作成後確認に参加しない）。
-- 取り消し（ゴミ箱への移動）に失敗した場合。重複が残ったことを示す `ProviderApiError` を返す。
-- 作成要求の結果不明（§9.4 Step 5）。作成されているかもしれないファイルは取り消さない。
+- 複数のProcess（同じDrive Vaultを使うMCP Server〈stdio〉とHTTP Serverを同時に起動した場合、複数のServer・replica）からの同時作成。Process内のlockは他のProcessを排他しない。
+- Drive for desktop・Obsidian・他のClientによる同時作成。作成後確認の時点で見えなければ検出できない。
+- 作成要求の結果不明（§9.4 Step 5）。
 
-**`createExclusive` の契約との差:** Filesystemの `O_EXCL` は原子的で、同時作成でも成功は1件だけである。Driveの `createExclusive` は上記の範囲に限られ、「`ConflictError` ならファイルは作られていない」こと、「成功なら同名の他のファイルはない」ことのいずれも、同時作成時は保証しない。この差を受け入れるか、AI Foundationのwriter間で共有する排他（Q8）を設計するかは、P-03の結果とあわせて設計レビューで決める。
+**運用条件（READMEに書く）:** Drive保存で書き込みを行うServerは1 Processにする。クラウドへ配置する場合も、replicaを1つにする。複数Process・replicaへ拡張する場合は、Process間で共有する排他（Q8）を先に設計する。
 
-- ゴミ箱へ移すのは、その要求で作成した自分のファイルだけ（取り消し）。他の重複・同期の競合コピーは整理しない。
-**P-03の観測（保証の根拠にはしない）:**
+**`createExclusive` の契約との差:** Filesystemの `O_EXCL` は原子的で、他のwriterを含めて同時作成の成功は1件だけである。Driveの `createExclusive` は上記の範囲に限られる。成功を返しても、他のwriterが同じ名前のファイルを後から作る可能性がある。また、作成後確認による `ConflictError` の場合はファイルが作成済みである。`createExclusive` のInterfaceのコメントとREADMEにこの差を書く。
 
-- 同じ親・同じ名前の同時作成は、2件・5件とも全要求が成功した。作成直後（0 ms）の名前一覧に、6回とも全件が見えた。
-- 順序を指定した3a・3bは、いずれも成功1件・残存1件。
-- 5要求が同時に本方式を実行した3c（10回）では、9回が全要求の取り消し（成功0件・残存0件）、1回が成功1件・残存1件だった。成功が2件以上の回はなかった。本当に同時の作成では、全員が409になることが多い。
-- `files.generateIds` で得た同じIDを2つの作成要求に指定すると、1件は成功し、もう1件は409 `fileIdInUse` で拒否された。名前と異なり、file IDの一意性は作成時に原子的に検査される（Q8）。
-
-- 本節の方式は暫定の候補である。P-03後の設計レビューでは、結果不明・自己取り消し・`createExclusive` 契約との差に加え、取り消しまでの間に他のClientが自分の作成したファイルを編集した場合（取り消すと編集もゴミ箱へ移る）の扱いを確定する。
+- 他の重複・同期の競合コピーは整理しない。
 
 ---
 
@@ -435,6 +438,7 @@ Calendarの `toFoundationError` のうちGoogle共通の分類（`invalid_grant`
 | Vaultルート・設定Directoryが404・フォルダでない・ゴミ箱内・ショートカット・重複 | `ConfigurationError`（設定Keyを示す。フォルダIDは出さない） | 503 |
 | 対象ファイルがない・操作中に削除された | `NotFoundError`（既存メッセージ） | 404 |
 | 同名候補が複数 | `ConflictError` | 409 |
+| 作成後確認で他の同名項目を検出（§10.2） | `ConflictError`（作成済みであることを示す） | 409 |
 | 古い版からの追記（§10.1方式A） | `ConflictError` | 409 |
 | 5xx・通信断・タイムアウト | `ProviderApiError`（書き込みでは結果不明を示す） | 502 |
 
@@ -449,8 +453,8 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 
 | ID | 候補 | 確定に必要なこと |
 |---|---|---|
-| AC-D05 | 新規作成は既存ファイルを上書きせず、作成前に同名（大小文字・NFC正規化を無視）の項目があれば409。作成後に他の同名項目を検出したら自分の作成分を取り消して409。同時作成で成功が1件以下になること、他のClientとの同時作成は保証しない。重複が残った場合も以後の操作は409となる | §10.2の `createExclusive` 契約との差を受け入れるか、Q8の排他を設計するかの決定 |
-| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で（`modifiedTime` が変わる）更新があれば書き込まず409。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | 方式AはP-02で成立した（§10.1）。etagが `modifiedTime` に依存する前提（§10.1）を受け入れるかの決定。P-02mを実施するか |
+| AC-D05 | 新規作成は既存ファイルを上書きせず、作成前に同名（大小文字・NFC正規化を無視）の項目があれば409。同じProcessからの同じ名前の同時作成では1件だけが作成され、他は409。作成後に他の同名項目を検出した場合は、作成済みであることを示して409を返し、作成分を取り消さない。複数Process・他のClientとの同時作成は保証しない。重複が残った場合も以後の操作は409となる | §10.2の方式・運用条件（書き込むServerは1 Process）と `createExclusive` 契約との差の受け入れ |
+| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で更新日時が変わる更新があれば書き込まず409。更新日時を維持する更新は検出できない（(b)を採る場合は書き込み後に検出してErrorを返す）。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | §10.1の(a)／(b)の選択、v2 APIへの依存の受け入れ、P-02mの結果 |
 
 ---
 
@@ -479,17 +483,19 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | `src/connectors/obsidian/vault-directory.ts` / `filesystem-storage.ts` / `filesystem-lifelog-storage.ts` | `append(compose)` への対応（書き込み方法は不変）。デコード関数を共有用に切り出す |
 | `src/connectors/obsidian/connector.ts` / `lifelog-connector.ts` | `append` の呼び出し変更 |
 | `src/connectors/obsidian/drive-vault-directory.ts` / `drive-storage.ts` / `drive-lifelog-storage.ts`（新規） | §7・§9・§10 |
-| `src/connectors/index.ts` | `storage` によるStorageの選択。Driveでは `lazyDriveApi(credentials)` を1つ作りKnowledge・Life Logで共有 |
+| `src/connectors/obsidian/drive-create-lock.ts`（新規） | `DriveCreateLock`: キー（親フォルダID＋NFC・小文字化した名前）ごとに非同期処理を1件ずつ実行する。異なるキーは並行。例外時もlockを解放する（§10.2） |
+| `src/connectors/index.ts` | `storage` によるStorageの選択。Driveでは `lazyDriveApi(credentials)` と `DriveCreateLock` を1つずつ作り、Knowledge・Life Logで共有 |
 
 ### 13.3 Tests
 
 | File | 内容 |
 |---|---|
-| `tests/connectors/google-drive/fake-drive.ts`（新規） | メモリ上のDrive: 同名項目・ショートカット・Google Docs・ゴミ箱・ページ分割（小さいpageSize）・版・条件付き更新・作成直後の一覧遅延・任意の時点への割り込み更新・失敗注入。作成は要求ごとに一時停止でき、作成前確認・作成・作成後一覧の順序をテストから指定できる。`createdTime`・file IDをテストから指定できる |
+| `tests/connectors/google-drive/fake-drive.ts`（新規） | メモリ上のDrive: 同名項目・ショートカット・Google Docs・ゴミ箱・ページ分割（小さいpageSize）・版の履歴・v2 etag（更新日時から導出し、更新日時を維持する更新ではetagが変わらない）・条件付き更新・作成直後の一覧遅延・任意の時点への割り込み更新（外部writerの作成を含む）・失敗注入。要求ごとに一時停止でき、作成前確認・作成・作成後一覧の順序をテストから指定できる |
 | `tests/connectors/google-drive/client.test.ts`（新規） | queryのエスケープ、`trashed = false`、全ページ取得、`fields`、uploadType、条件header、書き込みの `retry: false`、Scope定数 |
 | `tests/connectors/google/errors.test.ts`（新規） | §11の分類、Provider文の分離 |
 | `tests/connectors/obsidian/storage-contract.ts`（新規） | Knowledge・Life Log StorageのContract Test。Filesystem（一時Vault）とDrive（Fake）の両方で同じfixture（日本語・空白・予約文字の名前、Frontmatter、CRLF、BOM、不正UTF-8、空ファイル）を実行 |
-| `tests/connectors/obsidian/drive-vault-directory.test.ts`（新規） | §7.2・§7.3・§7.4の境界・曖昧さ・ページ分割、§9.3のbyte保持、§10.1の競合。§10.2は次の各場合で、各要求の結果と残る件数が§10.2の記述どおりであること: 両方の作成前確認が終わった後の作成・作成後一覧の各順序、同一 `createdTime`・異なるfile ID、作成後一覧の反映遅延（重複が残り、以後の操作が409）、取り消しの失敗、作成の結果不明 |
+| `tests/connectors/obsidian/drive-vault-directory.test.ts`（新規） | §7.2・§7.3・§7.4の境界・曖昧さ・ページ分割、§9.3のbyte保持、§10.1の競合（本文取得後・v2 get と本文取得の間の割り込み更新で409、更新日時を維持する割り込み更新の扱い）。§10.2は次の各場合で、各要求の結果と残る件数が§10.2の記述どおりであること: 同じProcessからの同じ名前の同時作成（1件だけ作成、他は409）、大小文字・NFCだけが異なる名前の同時作成、異なる名前の並行作成、外部writerの作成が作成前確認と作成の間・作成と作成後確認の間に入る場合（作成済みの409、作成分は残る）、作成後一覧の反映遅延（重複が残り、以後の操作が409）、作成の結果不明。いずれもDriveのファイルを削除・ゴミ箱へ移動しないこと |
+| `tests/connectors/obsidian/drive-create-lock.test.ts`（新規） | 同じキーは直列、異なるキーは並行、例外時の解放、キーの正規化 |
 | `tests/connectors/obsidian/connector.test.ts` / `lifelog-connector.test.ts` / `filesystem-*.test.ts` | `append` 変更への追随、`compose` が例外のとき書き込まないこと |
 | `tests/config/schema.test.ts` | union（`filesystem` の既存設定がそのまま通る、`google_drive` に `vault_path`、不正な `vault_folder_id`、Directory重複） |
 | `tests/credentials/env.test.ts` | メッセージ変更 |
@@ -567,13 +573,13 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 
 `drive` は制限付きScopeのため、「本番環境」でも未確認アプリの警告が出る。個人利用では利用可能だが、Google側の方針変更でRefresh Tokenの扱いが変わり得る。READMEに再認可の手順を書く。
 
-### Q8. AI Foundationのwriter間で共有する作成の排他
+### Q8. 複数Process間で共有する作成の排他
 
-同時作成で成功を1件以下にする必要がある場合の候補。いずれも本Planの方式には含めない。
+§10.2の運用条件（書き込むServerは1 Process）を外す場合の候補。現段階では設計・実装しない。
 
 - **親フォルダのメタデータによる予約**: 親フォルダの `appProperties` に予約（作成する名前・期限・要求ID）を、取得したフォルダの版に対する条件付き更新で書き込み、成功した要求だけが作成する。P-02の条件付き更新がフォルダのメタデータ更新にも効くこと、ファイルの作成で親フォルダの版が変わるかをprobeで別途確認する必要がある。期限切れの予約の扱い、利用者のフォルダへメタデータを書き込むこと、Drive for desktop・Obsidianは予約に参加しないことが制約になる。
 - **固定file IDのlockファイル**: file IDの一意性は作成時に原子的に検査される（P-03 Step 4）。`generateIds` で一度だけ得たIDを親フォルダごとのlock用として決め、そのIDでlockファイルを作成できた要求だけが作成し、終わったらlockファイルを削除する。lock用IDの保管場所（Config等）、削除後に同じIDで再作成できるか（ゴミ箱へ移しただけではIDは使用中のまま）、異常終了で残ったlockの扱い、Drive for desktop・Obsidianは参加しないことを、probeと設計で確認する必要がある。
-- **プロセス内のlock**: 1つのServer Process内の同時作成だけを直列化する。複数Process・複数Server・他のClientは排他できないため、単独では保証の根拠にならない。
+- いずれの候補も、Drive for desktop・Obsidian・他のClientは排他に参加しない。
 
 ---
 
@@ -582,7 +588,7 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | 項目 | 内容 |
 |---|---|
 | 実施日 | 2026-11-14 |
-| 対象コミット | `87938f8`（`scripts/probe-google-drive.ts`） |
+| 対象コミット | P-01・P-02 Step 1〜5・P-03: `87938f8`、P-02 Step 6・7: `68a77af`（`scripts/probe-google-drive.ts`） |
 | 実行環境 | ローカルWindows、Node 24、`@googleapis/drive 27.0.0`、全要求 `retry: false` |
 | 対象 | マイドライブの検証用フォルダ（`AI Foundation Probe`）。手動ファイルはDrive for desktopで置いた `test.md`（33 bytes）1件 |
 | 未実施 | P-02m・P-03m（Drive for desktopでの手作業を挟む手順） |
@@ -614,7 +620,12 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | 3c | v2で取得し直したetag: 成功。最終本文はAの追記＋Bの追記 |
 | 4 | Bがメタデータ取得（r1）→ Aが更新（r2）→ `alt=media` はr2の本文、`revisions.get(r1)` はr1の本文 |
 | 5 | 条件なしでBが古い本文から更新: 成功し、Aの追記が失われた |
-| etag | 観測した2件のv2 etagはいずれも `modifiedTime` のepoch millisecondsをBase64にした値（§10.1） |
+| 6 割り込みなし | Bのv2 `files.get` → `revisions.get`（元の本文）→ 条件付き更新: 成功。最終本文はBの追記 |
+| 6 本文取得後にAが更新 | Bの条件付き更新: **412 `conditionNotMet`**。最終本文はAの更新のみ（Bの追記なし） |
+| 6 v2 get と本文取得の間にAが更新 | `revisions.get` はv2 `files.get` 時点の元の本文を返した。Bの条件付き更新: **412**。最終本文はAの更新のみ |
+| 7 `noChange` | Aの更新は成功し、本文・`version`・`headRevisionId` は変化、更新日時は維持、**etagは不変**。Bの古いetagでの条件付き更新: **成功**。最終本文はBの追記のみで、Aの更新は上書きされた |
+| 7 `fromBody`（元の日時） | `noChange` と同じ（更新日時は維持、etagは不変、Bの更新が成功し、Aの更新は上書きされた） |
+| etag | 観測したv2 etagはいずれも更新日時のepoch millisecondsをBase64にした値（§10.1） |
 
 ### 17.3 P-03
 
@@ -622,9 +633,9 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 |---|---|
 | 1 | 2要求×3回・5要求×3回の同時作成: 全要求が成功（同じ名前のファイルが2件・5件） |
 | 2 | 作成直後・1秒後・5秒後の名前一覧: 6回とも全件が見えた |
-| 3a | 作成前確認×2 → Aの作成 → A作成後確認 → Bの作成 → B作成後確認: A成功、Bは取り消して409。残存1件 |
+| 3a | 作成後確認で自分の作成分を取り消す手順。作成前確認×2 → Aの作成 → A作成後確認 → Bの作成 → B作成後確認: A成功、Bは取り消して409。残存1件 |
 | 3b | 作成前確認×2 → Aの作成 → Bの作成 → A作成後確認 → B作成後確認: Aは取り消して409、B成功。残存1件 |
-| 3c | 5要求で本方式を同時実行×10回: 9回は成功0件・残存0件、1回は成功1件・残存1件。成功2件以上は0回 |
+| 3c | 同じ手順を5要求で同時実行×10回: 9回は成功0件・残存0件、1回は成功1件・残存1件。成功2件以上は0回 |
 | 4 | 同じ生成IDで2要求を同時に作成: 1件成功、1件は409 `fileIdInUse`。残存1件 |
 | 後片付け | 作成した76件をゴミ箱へ移動（失敗0件） |
 
@@ -632,10 +643,10 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 
 | 事項 | 状態 |
 |---|---|
-| 追記の方式 | 方式A（v2の条件付き更新、§10.1）が成立。etagが `modifiedTime` に依存する前提の受け入れは設計レビューで確定する |
+| 追記の方式 | 方式A（v2の条件付き更新、§10.1）は本実装の手順のまま成立（Step 6）。更新日時を維持する更新は検出できない（Step 7）。§10.1の(a)／(b)の選択とP-02mの結果を設計レビューで確定する |
 | 本文と版の対応 | 追記は `revisions.get` でetagと同じ版の本文を読む（§7.1・§9.3） |
 | MIME type | 絞らない（Drive for desktopの `.md` は `text/plain`） |
 | 名前検索 | 大小文字を区別しないため、完全一致は呼び出し側で確認する（§7.1） |
 | 共有ドライブ | Vaultはマイドライブ。Q5の前提どおり |
-| 新規作成 | §10.2の方式は、観測した範囲では成功が1件以下だったが、同時作成で全員が409になることが多い。`createExclusive` 契約との差を受け入れるか、Q8（固定file IDのlockファイルを含む）を設計するかは設計レビューで決める |
+| 新規作成 | 作成後の取り消しは行わない（Step 3cで全要求の取り消しが多く、取り消しは他のClientの編集も移動し得る）。§10.2のProcess内の直列化＋作成後の重複検出と運用条件を設計レビューで確定する |
 | Storage interface | §8のとおり `append(compose)` に変更する。Drive側の版情報（etag・`headRevisionId`）はStorage内部に閉じる |
