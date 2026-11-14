@@ -94,6 +94,17 @@ describe('the 21 operations', () => {
     await expectConformsToDocument(app, c.method, c.template, result);
   });
 
+  it.each(cases)('$operation: rejects an unknown query parameter without calling the connector', async (c) => {
+    // A field sent in the query instead of the body (or misspelled) must not be ignored.
+    const options = { ...c.options, query: { ...c.options?.query, due: '2026-12-01' } };
+    const result = await call(app, c.method, c.path, options);
+
+    expect(result.status, result.text).toBe(400);
+    expect(result.body.error.code).toBe('invalid_input');
+    expect(c.expectedCall()!.calls).toEqual([]);
+    await expectConformsToDocument(app, c.method, c.template, result);
+  });
+
   it('returns exactly what the operation returns, as the MCP tool does', async () => {
     await call(app, 'POST', '/v1/tasks', { body: { title: 'a' } });
     const list = await call(app, 'GET', '/v1/tasks');

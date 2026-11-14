@@ -9,6 +9,7 @@ import {
   KnowledgeResponse,
   KnowledgeSearchQuery,
   KnowledgeSearchResponse,
+  NoQuery,
 } from '../schemas.js';
 
 const TAG = 'Knowledge';
@@ -31,7 +32,7 @@ export function registerKnowledgeRoutes(app: OpenAPIHono, ops: Operations): void
       method: 'post',
       path: '/v1/knowledge',
       ...describeOperation(ops.knowledge_create, TAG),
-      request: { body: jsonBody(KnowledgeCreateInputSchema) },
+      request: { query: NoQuery, body: jsonBody(KnowledgeCreateInputSchema) },
       responses: { ...success(201, KnowledgeResponse, 'The created knowledge'), ...errors([409, 413]) },
     }),
     async (c) => c.json(await ops.knowledge_create.run(c.req.valid('json')), 201),

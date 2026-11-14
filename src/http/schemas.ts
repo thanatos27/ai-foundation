@@ -79,7 +79,13 @@ export function queryArray<T extends z.ZodType>(item: T) {
   return z.preprocess((value) => (typeof value === 'string' ? [value] : value), z.array(item));
 }
 
-const REPEAT_FOR_MORE = 'Repeat the parameter for several values, e.g. tags=a&tags=b.';
+/**
+ * For operations without query parameters: any query is rejected with 400, so that a value sent in
+ * the query instead of the body (`POST /v1/tasks?due=...`) is not silently ignored.
+ */
+export const NoQuery = z.strictObject({});
+
+const REPEAT_FOR_MORE ='Repeat the parameter for several values, e.g. tags=a&tags=b.';
 
 /** The `{id}` path parameter, URL-encoded by the client. */
 export function idParam(example: string) {

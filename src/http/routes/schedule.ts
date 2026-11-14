@@ -2,7 +2,7 @@ import { createRoute, type OpenAPIHono } from '@hono/zod-openapi';
 import { ScheduleCreateInputSchema, ScheduleListFilterSchema } from '../../domain/index.js';
 import type { Operations } from '../../operations/index.js';
 import { describeOperation, errors, jsonBody, success } from '../openapi.js';
-import { idParam, ScheduleListResponse, ScheduleResponse, ScheduleUpdateBody } from '../schemas.js';
+import { idParam, NoQuery, ScheduleListResponse, ScheduleResponse, ScheduleUpdateBody } from '../schemas.js';
 
 const TAG = 'Schedule';
 const ID = idParam('google_calendar:xxxxxxxx@group.calendar.google.com:abc123');
@@ -28,7 +28,7 @@ export function registerScheduleRoutes(app: OpenAPIHono, ops: Operations): void 
       method: 'post',
       path: '/v1/schedules',
       ...describeOperation(ops.schedule_create, TAG),
-      request: { body: jsonBody(ScheduleCreateInputSchema) },
+      request: { query: NoQuery, body: jsonBody(ScheduleCreateInputSchema) },
       responses: { ...success(201, ScheduleResponse, 'The created event'), ...errors([413]) },
     }),
     async (c) => c.json(await ops.schedule_create.run(c.req.valid('json')), 201),
@@ -39,7 +39,7 @@ export function registerScheduleRoutes(app: OpenAPIHono, ops: Operations): void 
       method: 'patch',
       path: '/v1/schedules/{id}',
       ...describeOperation(ops.schedule_update, TAG),
-      request: { params: ID, body: jsonBody(ScheduleUpdateBody) },
+      request: { query: NoQuery, params: ID, body: jsonBody(ScheduleUpdateBody) },
       responses: { ...success(200, ScheduleResponse, 'The event after the update'), ...errors([404, 413]) },
     }),
     async (c) =>

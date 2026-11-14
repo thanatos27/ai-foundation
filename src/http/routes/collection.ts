@@ -8,6 +8,7 @@ import {
   CollectionSearchQuery,
   CollectionUpdateBody,
   idParam,
+  NoQuery,
 } from '../schemas.js';
 
 const TAG = 'Collection';
@@ -30,7 +31,7 @@ export function registerCollectionRoutes(app: OpenAPIHono, ops: Operations): voi
       method: 'post',
       path: '/v1/collection-items',
       ...describeOperation(ops.collection_create, TAG),
-      request: { body: jsonBody(CollectionCreateInputSchema) },
+      request: { query: NoQuery, body: jsonBody(CollectionCreateInputSchema) },
       responses: { ...success(201, CollectionItemResponse, 'The created item'), ...errors([413]) },
     }),
     async (c) => c.json(await ops.collection_create.run(c.req.valid('json')), 201),
@@ -41,7 +42,7 @@ export function registerCollectionRoutes(app: OpenAPIHono, ops: Operations): voi
       method: 'patch',
       path: '/v1/collection-items/{id}',
       ...describeOperation(ops.collection_update, TAG),
-      request: { params: ID, body: jsonBody(CollectionUpdateBody) },
+      request: { query: NoQuery, params: ID, body: jsonBody(CollectionUpdateBody) },
       responses: { ...success(200, CollectionItemResponse, 'The item after the update'), ...errors([404, 413]) },
     }),
     async (c) =>
