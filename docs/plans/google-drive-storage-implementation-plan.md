@@ -669,7 +669,8 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は次のとおりとす�
 | `npm test` | 71 files、1898 passed、5 skipped |
 | Calendarの既存テスト | Google共通Error分類の切り出し後も無変更で成功 |
 | Filesystem保存の既存テスト | `append(compose)` への変更後も成功（外部編集を挟むテストは、`compose` の中で外部編集を行う形に変更） |
-| Integration Test（`obsidian-drive.integration.test.ts`） | 未実施（`GOOGLE_DRIVE_IT_VAULT_FOLDER_ID` の検証用Vaultが必要） |
+| Integration Test（`obsidian-drive.integration.test.ts`、`d894d88`） | マイドライブの検証用Vaultで5件成功（2回実行）。Knowledgeの作成（日本語・空白・`'` を含む名前、`text/markdown`）・検索・取得・追記、別Clientが作ったCRLF・`text/plain` のファイルへの追記（改行コード・MIME typeを保持）、同一Processの同名同時作成で成功1件・409が1件、Life Logの作成・取得・追記。作成したファイルは終了時にゴミ箱へ移動 |
+| 検索の所要時間（Q6） | 数件のKnowledge Directoryで `knowledge_search` 2.3秒。テスト全体は約39秒（取得・追記・作成は1操作あたり数回の要求を順に行う） |
 
 ### 18.2 Planからの細部の変更・Plan外の変更
 
