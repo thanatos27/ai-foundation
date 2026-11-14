@@ -2,7 +2,10 @@
  * Verification probes for Google Drive storage (docs/plans/google-drive-storage-implementation-plan.md §4).
  * Separate from the implementation: nothing in src/ imports this file, and `npm test` does not run it.
  *
- *   npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
+ *   npx tsx scripts/probe-google-drive.ts <p01|p02|p02m|p03> [--keep] [--manual]
+ *
+ * p02m is the P-02m procedure alone (Drive for desktop edits in between: interactive). --manual adds
+ * P-03m to p03.
  *
  * Needs GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN (with the
  * Drive scope: `npm run auth:google -- --drive`) and GOOGLE_DRIVE_PROBE_FOLDER_ID, a folder in My
@@ -43,7 +46,8 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const USAGE = 'Usage: npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]';
+const USAGE = 'Usage: npx tsx scripts/probe-google-drive.ts <p01|p02|p02m|p03> [--keep] [--manual]';
+const PROBES = ['p01', 'p02', 'p02m', 'p03'] as const;
 let parsed: ReturnType<typeof parseArguments>;
 function parseArguments() {
   return parseArgs({
@@ -57,8 +61,8 @@ try {
 } catch (error) {
   fail(`${error instanceof Error ? error.message : String(error)}. ${USAGE}`);
 }
-const probe = parsed.positionals[0];
-if (parsed.positionals.length !== 1 || (probe !== 'p01' && probe !== 'p02' && probe !== 'p03')) fail(USAGE);
+const probe = parsed.positionals[0] as (typeof PROBES)[number];
+if (parsed.positionals.length !== 1 || !PROBES.includes(probe)) fail(USAGE);
 const { keep, manual } = parsed.values;
 
 const envFile = fileURLToPath(new URL('../.env', import.meta.url));
@@ -240,14 +244,60 @@ async function updateV3(client: Client, fileId: string, text: string, ifMatch?: 
   return res.data;
 }
 
-/** v2 files.update (PUT on upload/drive/v2), uploadType=media; `ifMatch` adds the precondition header. */
-async function updateV2(client: Client, fileId: string, text: string, ifMatch?: string) {
+/**
+ * v2 files.update (PUT on upload/drive/v2), uploadType=media; `ifMatch` adds the precondition header.
+ * `keepModifiedDate` keeps the modified date: `noChange`, or `fromBody` with the given date.
+ */
+async function updateV2(
+  client: Client,
+  fileId: string,
+  text: string,
+  ifMatch?: string,
+  keepModifiedDate?: { behavior: 'noChange' } | { behavior: 'fromBody'; modifiedDate: string },
+) {
   const res = await client.v2.files.update(
-    { fileId, media: { mimeType: MARKDOWN_MIME, body: text } },
+    {
+      fileId,
+      media: { mimeType: MARKDOWN_MIME, body: text },
+      ...(keepModifiedDate?.behavior === 'noChange' ? { modifiedDateBehavior: 'noChange' } : {}),
+      ...(keepModifiedDate?.behavior === 'fromBody'
+        ? { modifiedDateBehavior: 'fromBody', requestBody: { modifiedDate: keepModifiedDate.modifiedDate } }
+        : {}),
+    },
     { ...NO_RETRY, ...(ifMatch ? { headers: { 'If-Match': ifMatch } } : {}) },
   );
-  return { etag: res.data.etag, version: res.data.version, headRevisionId: res.data.headRevisionId };
+  return v2Facts(res.data);
 }
+
+/** The v2 fields the planned append uses, from one response. */
+function v2Facts(file: drive_v2.Schema$File) {
+  return {
+    etag: file.etag ?? undefined,
+    headRevisionId: file.headRevisionId ?? undefined,
+    modifiedDate: file.modifiedDate ?? undefined,
+    version: file.version ?? undefined,
+    md5Checksum: file.md5Checksum ?? undefined,
+  };
+}
+type V2Facts = ReturnType<typeof v2Facts>;
+
+/** Step 1 of the planned append: one v2 files.get for the etag and the head revision together. */
+async function revisionV2(client: Client, fileId: string): Promise<V2Facts> {
+  const { data } = await client.v2.files.get(
+    { fileId, fields: 'etag,headRevisionId,modifiedDate,version,md5Checksum' },
+    NO_RETRY,
+  );
+  return v2Facts(data);
+}
+
+/** Steps 1–2 of the planned append: the etag, and the content of the very revision it came with. */
+async function chainRead(client: Client, fileId: string): Promise<{ revision: V2Facts; bytes: Buffer }> {
+  const revision = await revisionV2(client, fileId);
+  if (!revision.etag || !revision.headRevisionId) throw new Error('v2 files.get returned no etag or headRevisionId');
+  return { revision, bytes: await downloadRevision(client, fileId, revision.headRevisionId) };
+}
+
+const v2Record = (facts: V2Facts): Record<string, Json> => ({ ...facts });
 
 async function trash(client: Client, fileId: string) {
   await client.v3.files.update({ fileId, requestBody: { trashed: true }, fields: 'id' }, NO_RETRY);
@@ -403,6 +453,8 @@ const snapshotFacts = (s: Snapshot) => ({
 });
 
 const BASE = '# Probe\n\nbase\n';
+const A_TEXT = 'appended by A';
+const B_TEXT = 'appended by B';
 
 async function p02(a: Client, b: Client): Promise<void> {
   for (const variant of ['v3', 'v2'] as const) {
@@ -487,30 +539,114 @@ async function p02(a: Client, b: Client): Promise<void> {
   const finalBytes = await download(a, baseId);
   record('5 final body', { ...bodyFacts(finalBytes), keepsA: finalBytes.toString('utf8').includes('appended by A') });
 
-  if (manual) await p02Manual(a, b);
+  // Step 6: the planned append as one chain — v2 files.get (etag + headRevisionId) → revisions.get of
+  // that revision → v2 files.update with If-Match — with and without another client's update in between.
+  for (const interference of ['none', 'after-content', 'between-get-and-content'] as const) {
+    const step = `6 ${interference}`;
+    const fileId = (await createFile(a, probeName(`p02-chain-${interference}`), BASE)).id!;
+    let seen: { revision: V2Facts; bytes: Buffer };
+    if (interference === 'between-get-and-content') {
+      const revision = await revisionV2(b, fileId);
+      record(`${step} 1 B v2 files.get`, v2Record(revision));
+      record(`${step} 2 A updates`, { file: fileFacts(await updateV3(a, fileId, `${BASE}\n${A_TEXT}\n`)) });
+      const bytes = await downloadRevision(b, fileId, revision.headRevisionId!);
+      record(`${step} 3 B revisions.get`, { ...bodyFacts(bytes), isBase: sha256(bytes) === sha256(BASE) });
+      seen = { revision, bytes };
+    } else {
+      seen = await chainRead(b, fileId);
+      record(`${step} 1 B reads (v2 files.get + revisions.get)`, { ...v2Record(seen.revision), ...bodyFacts(seen.bytes) });
+      if (interference === 'after-content') {
+        record(`${step} 2 A updates`, { file: fileFacts(await updateV3(a, fileId, `${BASE}\n${A_TEXT}\n`)) });
+      }
+    }
+    const etag = seen.revision.etag!;
+    await attempt(
+      `${step} 4 B conditional update`,
+      { api: 'files.update', version: 'v2', uploadType: 'media', ifMatch: 'etag from B\'s v2 files.get' },
+      () => updateV2(b, fileId, `${seen.bytes.toString('utf8')}\n${B_TEXT}\n`, etag),
+      (facts) => v2Record(facts),
+    );
+    const finalBytes = await download(a, fileId);
+    const finalText = finalBytes.toString('utf8');
+    record(`${step} 5 final body`, { ...bodyFacts(finalBytes), keepsA: finalText.includes(A_TEXT), hasB: finalText.includes(B_TEXT) });
+  }
+
+  // Step 7: an update that keeps the modified date — is a write from the stale etag still rejected?
+  for (const behavior of ['noChange', 'fromBody'] as const) {
+    const step = `7 ${behavior}`;
+    const fileId = (await createFile(a, probeName(`p02-keep-date-${behavior}`), BASE)).id!;
+    const seenByA = await chainRead(a, fileId);
+    const seenByB = await chainRead(b, fileId);
+    record(`${step} 1 read`, { a: v2Record(seenByA.revision), b: v2Record(seenByB.revision) });
+
+    const keep =
+      behavior === 'noChange'
+        ? ({ behavior: 'noChange' } as const)
+        : ({ behavior: 'fromBody', modifiedDate: seenByA.revision.modifiedDate! } as const);
+    const updatedByA = await attempt(
+      `${step} 2 A updates keeping the modified date`,
+      { api: 'files.update', version: 'v2', uploadType: behavior === 'noChange' ? 'media' : 'multipart', modifiedDateBehavior: behavior },
+      () => updateV2(a, fileId, `${seenByA.bytes.toString('utf8')}\n${A_TEXT}\n`, undefined, keep),
+      (facts) => v2Record(facts),
+    );
+    const after = await revisionV2(a, fileId);
+    record(`${step} 3 after A`, {
+      ...v2Record(after),
+      updateApplied: updatedByA.ok && after.md5Checksum !== seenByA.revision.md5Checksum,
+      modifiedDateKept: after.modifiedDate === seenByA.revision.modifiedDate,
+      etagChanged: after.etag !== seenByA.revision.etag,
+      versionChanged: after.version !== seenByA.revision.version,
+      headRevisionChanged: after.headRevisionId !== seenByA.revision.headRevisionId,
+    });
+    const etag = seenByB.revision.etag!;
+    await attempt(
+      `${step} 4 B conditional update from the stale etag`,
+      { api: 'files.update', version: 'v2', uploadType: 'media', ifMatch: 'etag from B\'s read before A' },
+      () => updateV2(b, fileId, `${seenByB.bytes.toString('utf8')}\n${B_TEXT}\n`, etag),
+      (facts) => v2Record(facts),
+    );
+    const finalBytes = await download(a, fileId);
+    const finalText = finalBytes.toString('utf8');
+    record(`${step} 5 final body`, { ...bodyFacts(finalBytes), keepsA: finalText.includes(A_TEXT), hasB: finalText.includes(B_TEXT) });
+  }
 }
 
-async function p02Manual(a: Client, b: Client): Promise<void> {
+/** P-02m: the planned append chain against an edit made through Drive for desktop. Interactive. */
+const LOCAL_EDIT = 'LOCAL EDIT';
+async function p02m(a: Client, b: Client): Promise<void> {
   const name = probeName('p02m');
-  const file = await createFile(a, name, BASE);
-  const fileId = file.id!;
+  const fileId = (await createFile(a, name, BASE)).id!;
   await waitForEnter(`P-02m: wait until "${name}" appears in the synced probe folder on this PC`);
-  const seen = await snapshot(b, fileId);
-  record('P-02m 1 B reads', snapshotFacts(seen));
-  await waitForEnter(`P-02m: edit and save "${name}" in the synced folder, and wait until Drive for desktop has synced it`);
-  const text = `${seen.bytes.toString('utf8')}\nappended by B from the read before the local edit\n`;
-  for (const variant of ['v3', 'v2'] as const) {
-    const ifMatch = variant === 'v3' ? seen.v3Etag : seen.v2Etag;
-    if (!ifMatch) {
-      record(`P-02m 2 ${variant}`, { skipped: `no ${variant} etag` });
-      continue;
-    }
-    await attempt(`P-02m 2 ${variant} conditional update`, { api: 'files.update', version: variant, ifMatch: 'etag from B\'s read' }, () =>
-      variant === 'v3' ? updateV3(b, fileId, text, ifMatch) : updateV2(b, fileId, text, ifMatch),
-    );
-  }
-  record('P-02m 3 final body', bodyFacts(await download(a, fileId)));
-  await waitForEnter('P-02m: note the state of the synced folder (conflict copies?) in the evidence');
+  const seen = await chainRead(b, fileId);
+  record('P-02m 1 B reads (v2 files.get + revisions.get)', { ...v2Record(seen.revision), ...bodyFacts(seen.bytes) });
+  await waitForEnter(
+    `P-02m: open "${name}" in the synced folder, add a line "${LOCAL_EDIT}", save it, and wait until Drive for desktop has synced it`,
+  );
+  const after = await revisionV2(a, fileId);
+  record('P-02m 2 after the local edit', {
+    ...v2Record(after),
+    modifiedDateChanged: after.modifiedDate !== seen.revision.modifiedDate,
+    etagChanged: after.etag !== seen.revision.etag,
+    headRevisionChanged: after.headRevisionId !== seen.revision.headRevisionId,
+  });
+  const etag = seen.revision.etag!;
+  await attempt(
+    'P-02m 3 B conditional update from the read before the local edit',
+    { api: 'files.update', version: 'v2', uploadType: 'media', ifMatch: 'etag from B\'s read' },
+    () => updateV2(b, fileId, `${seen.bytes.toString('utf8')}\n${B_TEXT}\n`, etag),
+    (facts) => v2Record(facts),
+  );
+  const finalBytes = await download(a, fileId);
+  const finalText = finalBytes.toString('utf8');
+  record('P-02m 4 final body', {
+    ...bodyFacts(finalBytes),
+    keepsLocalEdit: finalText.includes(LOCAL_EDIT),
+    hasB: finalText.includes(B_TEXT),
+  });
+  await waitForEnter('P-02m: wait a moment for Drive for desktop to sync back');
+  const stem = name.slice(0, -'.md'.length);
+  const similar = (await listChildren(a, probeFolderId!)).files.filter((f) => f.name?.startsWith(stem));
+  record('P-02m 5 files in Drive afterwards', { names: similar.map((f) => f.name ?? null), count: similar.length });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -693,6 +829,7 @@ async function main(): Promise<void> {
   try {
     if (probe === 'p01') await p01(a);
     else if (probe === 'p02') await p02(a, clients[1]!);
+    else if (probe === 'p02m') await p02m(a, clients[1]!);
     else await p03(clients);
   } finally {
     await cleanup(a);
