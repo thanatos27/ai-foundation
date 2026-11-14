@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ObsidianKnowledgeConnector } from '../../../src/connectors/obsidian/connector.js';
 import { FilesystemVaultStorage } from '../../../src/connectors/obsidian/filesystem-storage.js';
 import type { KnowledgeCreate } from '../../../src/connectors/types.js';
-import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
+import { ConfigurationError, ConflictError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
 import { createTestVault, KNOWLEDGE_DIR, linkDirectory, type TestVault } from '../../helpers/vault.js';
 
 const id = (rest: string) => `obsidian:${KNOWLEDGE_DIR}/${rest}`;
@@ -85,7 +85,7 @@ describe('create', () => {
   it('never overwrites a file with the same name', async () => {
     await connector.create(cap);
     const before = await vault.read(k('CAP定理.md'));
-    const message = await expectError(connector.create({ ...cap, content: 'overwrite?' }), InputValidationError);
+    const message = await expectError(connector.create({ ...cap, content: 'overwrite?' }), ConflictError);
     expect(message).toContain(id('CAP定理.md'));
     expect(message).toContain('knowledge_append');
     expect(await vault.read(k('CAP定理.md'))).toBe(before);

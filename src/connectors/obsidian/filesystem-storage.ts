@@ -1,4 +1,4 @@
-import { InputValidationError, NotFoundError } from '../../errors.js';
+import { ConflictError, NotFoundError } from '../../errors.js';
 import { quoteId, segmentsBelow, type VaultPath, vaultPathBelow } from './id.js';
 import type { VaultFile, VaultStorage } from './storage.js';
 import { FilesystemVaultDirectory } from './vault-directory.js';
@@ -32,7 +32,7 @@ export class FilesystemVaultStorage implements VaultStorage {
         quote: (segments) => quoteId(pathOf(segments)),
         notFound: (segments, cause) => notFound(pathOf(segments), cause),
         alreadyExists: (segments, cause) =>
-          new InputValidationError(
+          new ConflictError(
             `knowledge ${quoteId(pathOf(segments))} already exists; use knowledge_search and knowledge_append to add to it`,
             { cause },
           ),

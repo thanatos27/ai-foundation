@@ -20,15 +20,21 @@
   "dependencies": {
     "@doist/todoist-sdk": "^15.3.1",
     "@googleapis/calendar": "^20.1.0",
+    "@hono/node-server": "^2.1.8",
+    "@hono/zod-openapi": "^1.6.3",
     "@modelcontextprotocol/server": "^2.3.1",
     "@notionhq/client": "^5.27.0",
     "google-auth-library": "^11.3.0",
+    "hono": "^4.13.18",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.3.1",
+    "@seriousme/openapi-schema-validator": "^2.12.0",
     "@types/node": "^24.19.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^5.0.4"

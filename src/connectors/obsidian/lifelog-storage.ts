@@ -18,7 +18,7 @@ export interface LifeLogStorage {
   refOf(name: string): string;
   /** NotFoundError when no regular file is there; ProviderApiError when it is not valid UTF-8. */
   read(name: string): Promise<LifeLogFile>;
-  /** Creates the file; InputValidationError when anything already has that name. Never overwrites. */
+  /** Creates the file; ConflictError when anything already has that name. Never overwrites. */
   createExclusive(name: string, text: string): Promise<void>;
   /** Adds `text` to the end of the existing file and changes nothing else; NotFoundError when it is gone. */
   append(name: string, text: string): Promise<void>;

@@ -6,7 +6,7 @@ import { FilesystemLifeLogStorage } from '../../../src/connectors/obsidian/files
 import { FilesystemVaultStorage } from '../../../src/connectors/obsidian/filesystem-storage.js';
 import { ObsidianLifeLogConnector } from '../../../src/connectors/obsidian/lifelog-connector.js';
 import type { LifeLogStorage } from '../../../src/connectors/obsidian/lifelog-storage.js';
-import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
+import { ConfigurationError, ConflictError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
 import { createTestVault, KNOWLEDGE_DIR, LIFELOG_DIR, type TestVault } from '../../helpers/vault.js';
 
 const l = (name: string) => `${LIFELOG_DIR}/${name}`;
@@ -96,7 +96,7 @@ describe('same day, same name', () => {
     const before = await readFile(vault.abs(l('2026-10-03-東京散策.md')));
     const error = await expectError(
       connector.create({ date: '2026-10-03', title: '東京散策', content: '別の本文' }),
-      InputValidationError,
+      ConflictError,
     );
     expect(error.message).toContain('already exists');
     expect(Buffer.compare(await readFile(vault.abs(l('2026-10-03-東京散策.md'))), before)).toBe(0);
@@ -104,7 +104,7 @@ describe('same day, same name', () => {
 
   it('refuses titles that become the same file name', async () => {
     await connector.create({ date: '2026-10-03', title: '東京 散策', content: 'a' });
-    await expectError(connector.create({ date: '2026-10-03', title: '東京:散策', content: 'b' }), InputValidationError);
+    await expectError(connector.create({ date: '2026-10-03', title: '東京:散策', content: 'b' }), ConflictError);
     expect(await vault.read(l('2026-10-03-東京 散策.md'))).toBe('a\n');
   });
 
@@ -116,7 +116,7 @@ describe('same day, same name', () => {
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(9);
-    for (const { reason } of rejected) expect(reason).toBeInstanceOf(InputValidationError);
+    for (const { reason } of rejected) expect(reason).toBeInstanceOf(ConflictError);
     const winner = results.findIndex((r) => r.status === 'fulfilled');
     expect(await vault.read(l('2026-10-03-同時.md'))).toBe(`本文${winner}\n`);
   });
@@ -228,7 +228,7 @@ describe('articles created by hand in Obsidian', () => {
 
   it('refuses to create an article with the name of one written by hand', async () => {
     await vault.write(l('2026-10-05-鎌倉.md'), '手書き');
-    await expectError(connector.create({ date: '2026-10-05', title: '鎌倉', content: 'x' }), InputValidationError);
+    await expectError(connector.create({ date: '2026-10-05', title: '鎌倉', content: 'x' }), ConflictError);
     expect(await vault.read(l('2026-10-05-鎌倉.md'))).toBe('手書き');
   });
 });

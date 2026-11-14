@@ -23,7 +23,7 @@ export interface VaultStorage {
   list(): Promise<{ path: VaultPath; modifiedAt: number }[]>;
   /** NotFoundError when nothing readable is at `path`. */
   read(path: VaultPath): Promise<VaultFile>;
-  /** Creates the file; InputValidationError when anything already exists at `path`. Never overwrites. */
+  /** Creates the file; ConflictError when anything already exists at `path`. Never overwrites. */
   createExclusive(path: VaultPath, text: string): Promise<void>;
   /** Adds `text` to the end of an existing file and changes nothing else; NotFoundError when it is gone. */
   append(path: VaultPath, text: string): Promise<void>;

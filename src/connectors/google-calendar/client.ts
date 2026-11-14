@@ -1,7 +1,7 @@
 import { calendar, type calendar_v3 } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
 import type { CredentialProvider, GoogleOAuthCredentials } from '../../credentials/types.js';
-import { CredentialError, FoundationError, ProviderApiError } from '../../errors.js';
+import { CredentialError, FoundationError, type MessagePart, ProviderApiError, providerText } from '../../errors.js';
 
 export type GoogleEvent = calendar_v3.Schema$Event;
 export type GoogleCalendarListEntry = calendar_v3.Schema$CalendarListEntry;
@@ -158,14 +158,16 @@ export function toFoundationError(
       options,
     );
   }
-  if (status === 401) return new CredentialError(`Google rejected the credentials (HTTP 401): ${message}`, options);
+  if (status === 401) {
+    return new CredentialError(['Google rejected the credentials (HTTP 401): ', providerText(message)], options);
+  }
   if (status === 403 && forbidden && errorReasons(data).some((reason) => WRITE_FORBIDDEN_REASONS.has(reason))) {
     return forbidden();
   }
   if (status === 403 && !errorReasons(data).some((reason) => RATE_LIMIT_REASONS.has(reason))) {
-    return new CredentialError(`Google denied access (HTTP 403): ${message}`, options);
+    return new CredentialError(['Google denied access (HTTP 403): ', providerText(message)], options);
   }
   if ((status === 404 || status === 410) && notFound) return notFound();
-  const detail = status ? `HTTP ${status}: ${message}` : message;
-  return new ProviderApiError('Google Calendar', context ? `${context}: ${detail}` : detail, options);
+  const detail: MessagePart[] = [...(status ? [`HTTP ${status}: `] : []), providerText(message)];
+  return new ProviderApiError('Google Calendar', context ? [`${context}: `, ...detail] : detail, options);
 }

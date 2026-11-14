@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { lstat } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FilesystemLifeLogStorage } from '../../../src/connectors/obsidian/filesystem-lifelog-storage.js';
-import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
+import { ConfigurationError, ConflictError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
 import {
   canLinkFiles,
   createTestVault,
@@ -79,15 +79,15 @@ describe('read / createExclusive / append', () => {
     expect(stored.charCodeAt(0)).not.toBe(0xfeff);
   });
 
-  it('never overwrites: anything with the same name is an input error and stays as it was', async () => {
+  it('never overwrites: anything with the same name is a conflict and stays as it was', async () => {
     await vault.write(l(NAME), '既存');
-    const error = await expectError(storage.createExclusive(NAME, '新規'), InputValidationError);
+    const error = await expectError(storage.createExclusive(NAME, '新規'), ConflictError);
     expect(error.message).toContain(`"lifelog:${NAME}" already exists`);
     expect(error.message).toContain('lifelog_append');
     expect(await vault.read(l(NAME))).toBe('既存');
 
     await mkdir(vault.abs(l('2026-10-04-dir.md')));
-    await expectError(storage.createExclusive('2026-10-04-dir.md', 'x'), InputValidationError);
+    await expectError(storage.createExclusive('2026-10-04-dir.md', 'x'), ConflictError);
   });
 
   it('reports a missing file as not found, without the vault path', async () => {

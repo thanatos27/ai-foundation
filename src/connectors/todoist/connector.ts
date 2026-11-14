@@ -1,6 +1,13 @@
 import { type GetTasksResponse, TodoistRequestError } from '@doist/todoist-sdk';
 import type { Task, TaskCreateInput, TaskListFilter, TaskUpdateInput } from '../../domain/index.js';
-import { type FoundationError, InputValidationError, NotFoundError, ProviderApiError } from '../../errors.js';
+import {
+  errorText,
+  type FoundationError,
+  InputValidationError,
+  type MessagePart,
+  NotFoundError,
+  ProviderApiError,
+} from '../../errors.js';
 import type { TaskConnector } from '../types.js';
 import { type TodoistClient, type TodoistTask, toFoundationError } from './client.js';
 import { matchesFilter } from './filter.js';
@@ -137,7 +144,7 @@ export class TodoistTaskConnector implements TaskConnector {
       if (error instanceof NotFoundError) return undefined;
       throw new ProviderApiError(
         'Todoist',
-        `task ${id} was closed, but its state afterwards could not be read: ${(error as Error).message}`,
+        [`task ${id} was closed, but its state afterwards could not be read: `, errorText(error)],
         { cause: error },
       );
     });
@@ -153,8 +160,15 @@ export class TodoistTaskConnector implements TaskConnector {
   private async rollBackCreated(api: TodoistClient, created: TodoistTask, rule: string): Promise<never> {
     const notRecurring = `Todoist did not read recurrence "${rule}" as a recurring rule (it was read as ${this.describeDue(created.due)})`;
     const failure = await api.deleteTask(created.id).then(
-      (deleted) => (deleted === true ? undefined : new Error('Todoist did not confirm the deletion')),
-      (error: unknown) => toFoundationError(error),
+      (deleted): { reason: MessagePart; cause: Error } | undefined => {
+        if (deleted === true) return undefined;
+        const reason = 'Todoist did not confirm the deletion';
+        return { reason, cause: new Error(reason) };
+      },
+      (error: unknown) => {
+        const cause = toFoundationError(error);
+        return { reason: errorText(cause), cause };
+      },
     );
     const gone = failure ? await this.isGone(api, created.id) : true;
     if (gone === true) {
@@ -162,10 +176,13 @@ export class TodoistTaskConnector implements TaskConnector {
     }
     throw new ProviderApiError(
       'Todoist',
-      `${notRecurring} and task ${toTaskId(created.id)} was created, but deleting it failed: ${failure!.message}. ` +
-        `The task ${gone === false ? 'still exists' : 'may still exist'}: fix it with task_update (recurrence) ` +
-        `or delete it in Todoist; do not call task_create again.`,
-      { cause: failure },
+      [
+        `${notRecurring} and task ${toTaskId(created.id)} was created, but deleting it failed: `,
+        failure!.reason,
+        `. The task ${gone === false ? 'still exists' : 'may still exist'}: fix it with task_update (recurrence) ` +
+          `or delete it in Todoist; do not call task_create again.`,
+      ],
+      { cause: failure!.cause },
     );
   }
 
@@ -198,8 +215,11 @@ export class TodoistTaskConnector implements TaskConnector {
         const cause = toFoundationError(error);
         throw new ProviderApiError(
           'Todoist',
-          `${notRecurring} and task ${id} now has ${this.describeDue(restored.due)}; ` +
-            `restoring its previous due (${previous}) failed: ${cause.message}`,
+          [
+            `${notRecurring} and task ${id} now has ${this.describeDue(restored.due)}; ` +
+              `restoring its previous due (${previous}) failed: `,
+            errorText(cause),
+          ],
           { cause },
         );
       });

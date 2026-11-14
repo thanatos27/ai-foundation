@@ -3,7 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config } from '../../src/config/schema.js';
 import type { Connectors } from '../../src/connectors/types.js';
-import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../src/errors.js';
+import { ConfigurationError, ConflictError, NotFoundError, ProviderApiError } from '../../src/errors.js';
 import { createServer } from '../../src/server.js';
 import { FakeKnowledgeConnector, FakeLifeLogConnector } from '../helpers/fake-connectors.js';
 import { connectClient, repoConfig, resultText } from '../helpers/mcp.js';
@@ -137,7 +137,7 @@ describe('lifelog tools', () => {
 
   it.each([
     new ConfigurationError('sources.lifelog.obsidian.directory is not set'),
-    new InputValidationError(`life log "${ID}" already exists; choose another title, or use lifelog_append to add to it`),
+    new ConflictError(`life log "${ID}" already exists; choose another title, or use lifelog_append to add to it`),
     new NotFoundError(`life log "${ID}" was not found`),
     new ProviderApiError('Obsidian', `life log "${ID}" is not valid UTF-8; fix it in Obsidian`),
   ])('returns the connector error as a tool error: %s', async (error) => {

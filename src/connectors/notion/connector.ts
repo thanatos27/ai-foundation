@@ -12,7 +12,7 @@ import {
   type CollectionUpdateInput,
   mergeMetadata,
 } from '../../domain/index.js';
-import { ConfigurationError, NotFoundError, ProviderApiError } from '../../errors.js';
+import { ConfigurationError, errorText, NotFoundError, ProviderApiError } from '../../errors.js';
 import type { CollectionConnector } from '../types.js';
 import { type NotionClient, toFoundationError } from './client.js';
 import { canMatch, toQueryFilter } from './filter.js';
@@ -179,7 +179,7 @@ export class NotionCollectionConnector implements CollectionConnector {
         if (!updateBody) throw cause;
         throw new ProviderApiError(
           'Notion',
-          `the properties of collection item ${input.id} were updated, but the note could not be appended: ${cause.message}`,
+          [`the properties of collection item ${input.id} were updated, but the note could not be appended: `, errorText(cause)],
           { cause },
         );
       });
