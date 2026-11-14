@@ -1,6 +1,6 @@
 # Google Drive保存対応（Knowledge／Life Log） — Implementation Plan
 
-- Status: **Draft。P-01〜P-03・P-02 Step 6・7は実施済み（§17）。P-02m・P-03mは未実施。AC-D05・AC-D06は未確定（設計レビュー待ち）**
+- Status: **Draft。P-01〜P-03・P-02 Step 6・7・P-02mは実施済み（§17）。P-03mは未実施。AC-D05・AC-D06は未確定（設計レビュー待ち）**
 - 作成: 2026-11-14
 - 対象: [Issue #34](https://github.com/thanatos27/ai-foundation/issues/34)
 - 参照: [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Life Log Implementation Plan](lifelog-implementation-plan.md), [REST API](../specs/rest-api.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -375,7 +375,7 @@ P-02 Step 6で、この一連の手順をそのまま検証した。間に他の
 |---|---|
 | 他のClient・Drive同期が更新日時を変えて更新した | 412で拒否（検出できる） |
 | 更新日時を維持する更新（API呼び出しの指定、更新日時を保持するツール等） | 検出できず上書きする。上書きされた内容は版の履歴に残る（Driveが古い版を自動で削除するまで） |
-| Drive for desktopの同期による更新 | P-02mで確認する |
+| Drive for desktopの同期による更新（同期済みのローカル編集） | 更新日時・etagが変わり、412で拒否。ローカル編集は保持され、競合コピーは作られなかった（P-02m） |
 
 **設計レビューで決めること:**
 
@@ -385,7 +385,7 @@ P-02 Step 6で、この一連の手順をそのまま検証した。間に他の
 
 方式Aでも保証しないこと（READMEに書く）:
 
-- PC上のObsidianの未保存の編集、Drive for desktopがまだUploadしていない変更。これらはAPIから見えず、同期時にDrive for desktopの競合処理に委ねられる（P-02mの結果を記載）。
+- PC上のObsidianの未保存の編集、Drive for desktopがまだUploadしていない変更。これらはAPIから見えず、同期時にDrive for desktopの競合処理に委ねられる。P-02mで確認したのは、同期が完了したローカル編集が拒否の対象になることだけである。
 - 同時に追記した場合の順序。
 
 ### 10.2 新規作成
@@ -454,7 +454,7 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | ID | 候補 | 確定に必要なこと |
 |---|---|---|
 | AC-D05 | 新規作成は既存ファイルを上書きせず、作成前に同名（大小文字・NFC正規化を無視）の項目があれば409。同じProcessからの同じ名前の同時作成では1件だけが作成され、他は409。作成後に他の同名項目を検出した場合は、作成済みであることを示して409を返し、作成分を取り消さない。複数Process・他のClientとの同時作成は保証しない。重複が残った場合も以後の操作は409となる | §10.2の方式・運用条件（書き込むServerは1 Process）と `createExclusive` 契約との差の受け入れ |
-| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で更新日時が変わる更新があれば書き込まず409。更新日時を維持する更新は検出できない（(b)を採る場合は書き込み後に検出してErrorを返す）。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | §10.1の(a)／(b)の選択、v2 APIへの依存の受け入れ、P-02mの結果 |
+| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で更新日時が変わる更新があれば書き込まず409。更新日時を維持する更新は検出できない（(b)を採る場合は書き込み後に検出してErrorを返す）。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | §10.1の(a)／(b)の選択、v2 APIへの依存の受け入れ（P-02mでは同期済みのローカル編集が412で拒否され、保持された） |
 
 ---
 
@@ -591,7 +591,8 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | 対象コミット | P-01・P-02 Step 1〜5・P-03: `87938f8`、P-02 Step 6・7: `68a77af`（`scripts/probe-google-drive.ts`） |
 | 実行環境 | ローカルWindows、Node 24、`@googleapis/drive 27.0.0`、全要求 `retry: false` |
 | 対象 | マイドライブの検証用フォルダ（`AI Foundation Probe`）。手動ファイルはDrive for desktopで置いた `test.md`（33 bytes）1件 |
-| 未実施 | P-02m・P-03m（Drive for desktopでの手作業を挟む手順） |
+| P-02m | `68a77af`、Drive for desktop（Windows）の同期フォルダでの手作業を挟んで実施 |
+| 未実施 | P-03m（Drive for desktopでの同名ファイルの同時作成） |
 
 各Stepの記録（JSON Lines）は、file IDを含むためRepositoryには置かない。
 
@@ -627,6 +628,16 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | 7 `fromBody`（元の日時） | `noChange` と同じ（更新日時は維持、etagは不変、Bの更新が成功し、Aの更新は上書きされた） |
 | etag | 観測したv2 etagはいずれも更新日時のepoch millisecondsをBase64にした値（§10.1） |
 
+#### P-02m
+
+| Step | 結果 |
+|---|---|
+| 1 | Bがv2 `files.get` → `revisions.get` で元の本文を取得 |
+| 2 | 同期フォルダで `LOCAL EDIT` の行を加えて保存し、同期の完了後: 更新日時・etag・`headRevisionId` がいずれも変化 |
+| 3 | Bが取得時のetagで条件付き更新: **412 `conditionNotMet`** |
+| 4 | 最終本文はローカル編集を含み、Bの追記はない |
+| 5 | Drive上の同名・類似名のファイルは1件（競合コピーなし） |
+
 ### 17.3 P-03
 
 | Step | 結果 |
@@ -643,7 +654,7 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 
 | 事項 | 状態 |
 |---|---|
-| 追記の方式 | 方式A（v2の条件付き更新、§10.1）は本実装の手順のまま成立（Step 6）。更新日時を維持する更新は検出できない（Step 7）。§10.1の(a)／(b)の選択とP-02mの結果を設計レビューで確定する |
+| 追記の方式 | 方式A（v2の条件付き更新、§10.1）は本実装の手順のまま成立（Step 6）。更新日時を維持する更新は検出できない（Step 7）。Drive for desktopで同期済みのローカル編集は検出できる（P-02m）。§10.1の(a)／(b)の選択を設計レビューで確定する |
 | 本文と版の対応 | 追記は `revisions.get` でetagと同じ版の本文を読む（§7.1・§9.3） |
 | MIME type | 絞らない（Drive for desktopの `.md` は `text/plain`） |
 | 名前検索 | 大小文字を区別しないため、完全一致は呼び出し側で確認する（§7.1） |
