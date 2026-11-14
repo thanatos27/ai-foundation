@@ -369,7 +369,7 @@ append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFil
 
 P-02 Step 6で、この一連の手順をそのまま検証した。間に他の更新がなければ成功し、本文の取得後、またはv2 `files.get` と本文取得の間に他のClientの更新が入ると412で拒否され、他の更新は保持された。v3では条件付き更新に使える値が得られなかった（§7.1）。
 
-**運用前提（利用者確認済み）:** Vaultへ書き込むのはAI FoundationとObsidian／Drive for desktopの通常の利用とする。AI Foundationの更新では、更新日時を維持・復元する指定を使わず、Google Driveの通常の更新動作に従って更新日時を更新する。更新日時を維持する特殊なAPI呼び出し・ツールの利用は対象外とし、そのための追加の検出・保護処理は実装しない。
+**運用前提:** Vaultへ書き込むのはAI FoundationとObsidian／Drive for desktopの通常の利用とする。AI Foundationの更新では、更新日時を維持・復元する指定を使わず、Google Driveの通常の更新動作に従って更新日時を更新する。更新日時を維持する特殊なAPI呼び出し・ツールの利用は対象外とし、そのための追加の検出・保護処理は実装しない。
 
 P-02mでは、Drive for desktop（Windows）の同期済みローカル編集で更新日時・etagが変わり、古いetagの更新は412で拒否され、ローカル編集が保持された。AI Foundationはetagを不透明な値として扱い、解析・生成しない。
 
@@ -648,7 +648,7 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は次のとおりとす�
 
 | 事項 | 状態 |
 |---|---|
-| 追記の方式 | 方式A（v2の条件付き更新、§10.1）を採用する。本実装の手順をStep 6で検証し、同期済みDrive for desktop編集が保持されることをP-02mで確認した。利用者との確認により、通常のAI FoundationとObsidian／Drive for desktopの更新を前提とし、更新日時を維持する特殊な更新は対象外と確定。追加の履歴確認は行わない（§10.1、AC-D06） |
+| 追記の方式 | 方式A（v2の条件付き更新、§10.1）を採用する。本実装の手順をStep 6で検証し、同期済みDrive for desktop編集が保持されることをP-02mで確認した。通常のAI FoundationとObsidian／Drive for desktopの更新を前提とし、更新日時を維持する特殊な更新は対象外とする。追加の履歴確認は行わない（§10.1、AC-D06） |
 | 本文と版の対応 | 追記は `revisions.get` でetagと同じ版の本文を読む（§7.1・§9.3） |
 | MIME type | 絞らない（Drive for desktopの `.md` は `text/plain`） |
 | 名前検索 | 大小文字を区別しないため、完全一致は呼び出し側で確認する（§7.1） |
