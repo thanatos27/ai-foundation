@@ -41,6 +41,7 @@ MVPではAI Agent Runtime、Workflow Engine、Intent Classifier、独自Database
 - Coding AgentはRepositoryを調査してImplementation Planを作成する
 - ChatGPTのPlan Review、Coding Agentの修正、User承認を終えてから実装する
 - 実装後はAutomated Testを成功させ、Codexによる独立したImplementation Reviewを受ける
+- PRレビューの結果は、追加の指示や確認を待たずに対象PRへコメントする。指摘事項と検証結果を記載し、指摘がない場合もその旨をコメントする。
 
 ## Specification
 
