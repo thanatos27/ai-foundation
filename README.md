@@ -84,7 +84,7 @@ npm run typecheck
 npm test
 ```
 
-`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendars` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し（繰り返しタスクのTestはそのRunで作成したTaskだけを操作する）、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google CalendarのIntegration Testは `writable_calendars` の各Calendarへ予定を作成・更新し、終了時にそのRunで作成した予定だけを削除する（別名が2つ以上あれば、Calendarごとの絞り込みと分配も確認する）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。
+`npm test` は外部Serviceへ通信せず、個人のObsidian Vaultにもアクセスしない（Knowledge / Life Logのテストは一時Directoryに作るVaultを使う）。実際のTodoist / Google Calendar / Notion / Obsidian Vault / GitHubに対するIntegration Testは、Credentialと `writable_calendars` / `data_source_id` / `vault_path` を設定したうえで明示的に実行する。設定されていないServiceのTestはskipされる。テストで作成したTask / Event / Markdownは終了時に削除し（繰り返しタスクのTestはそのRunで作成したTaskだけを操作する）、NotionのPageはゴミ箱へ移す。ObsidianのIntegration Testは検証専用のVault（または検証専用の `knowledge_dir` / Life Log Directory）で実行する。Life LogのIntegration Testは `sources.lifelog.obsidian.directory` に記事を作成し、終了時にそのRunで作成したファイルだけを削除する。Google CalendarのIntegration Testは `writable_calendars` の各Calendarへ予定を作成・更新し、終了時にそのRunで作成した予定だけを削除する（別名が2つ以上あれば、Calendarごとの絞り込みと分配も確認する）。GitHubのIntegration Testは読み取りのみで、Repositoryへ書き込まない（private Repositoryの確認は任意で、`AI_FOUNDATION_IT_GITHUB_PRIVATE_REPO=<owner>/<repo>` を設定した場合のみ実行する）。Google Drive上のVaultのIntegration Testは、`GOOGLE_DRIVE_IT_VAULT_FOLDER_ID` に検証専用のVaultフォルダ（マイドライブ。`knowledge_dir` と Life Log Directoryのフォルダを事前に作っておく）を設定した場合のみ実行し、設定済みの `vault_folder_id` は使わない。そのRunで作成したファイルは終了時にゴミ箱へ移す。
 
 ```sh
 AI_FOUNDATION_INTEGRATION=1 npm run test:integration
@@ -169,7 +169,7 @@ Configが不正な場合、理由をstderrへ出力して終了コード1で終�
 
 ### ローカル設定（`config.local.yaml`）
 
-予定の書き込み先Calendar ID（`sources.schedule.writable_calendars`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Areas親ページのID（`sources.area.notion.parent_page_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
+予定の書き込み先Calendar ID（`sources.schedule.writable_calendars`）、CollectionのNotion Data Source ID（`sources.collection.data_source_id`）、Areas親ページのID（`sources.area.notion.parent_page_id`）、Obsidian VaultのPath（`sources.knowledge.obsidian.vault_path`）またはGoogle DriveのフォルダID（`vault_folder_id`）は個人の値のため、Public Repositoryにある `config.yaml` には書かない。`config.yaml` を `config.local.yaml`（Git管理外）へコピーして設定し、`--config` または `AI_FOUNDATION_CONFIG` で指定する。
 
 ```yaml
 sources:
@@ -196,7 +196,7 @@ sources:
       parent_page_id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
-未設定でもServerは起動する。`writable_calendars` がなければ `schedule_create` / `schedule_update` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path` / `knowledge_dir` がなければKnowledgeの4 Toolが、`sources.area` / `parent_page_id` がなければAreaの2 ToolがConfiguration Errorになる。`sources.area` 自体を省略したConfig（Areas以前に作ったもの）もそのまま起動できる。
+未設定でもServerは起動する。`writable_calendars` がなければ `schedule_create` / `schedule_update` が、`data_source_id` がなければCollectionの3 Toolが、`vault_path`（Google Driveでは `vault_folder_id`）/ `knowledge_dir` がなければKnowledgeの4 Toolが、`sources.area` / `parent_page_id` がなければAreaの2 ToolがConfiguration Errorになる。`sources.area` 自体を省略したConfig（Areas以前に作ったもの）もそのまま起動できる。
 
 以前の `writable_calendar_id` は廃止した。残っていると起動時にConfig Errorになるため、次のように置き換える（別名は英小文字・数字・`_`・`-`）。
 
@@ -208,7 +208,7 @@ sources:
 
 ### Obsidian
 
-KnowledgeはObsidian VaultのMarkdownとしてFilesystem経由で読み書きする。Credentialは不要。
+KnowledgeはObsidian VaultのMarkdownとして読み書きする。既定はFilesystem経由（`storage: filesystem`、Credentialは不要）。Google Drive APIで直接読み書きすることもできる（[`storage: google_drive`](#google-drive-apiで読み書きするstorage-google_drive)）。
 
 1. Vault内にAI Foundation用のKnowledge Directory（例: `AI Foundation/Knowledge`）を作成する。AI Foundationは自動作成しない
 2. `config.local.yaml` の `sources.knowledge.obsidian` に `vault_path`（Vaultの絶対パス）と `knowledge_dir`（Vault相対パス、`/` 区切り）を設定する。YAMLでWindowsのパスを書く場合は `/` 区切り（`"C:/Users/..."`）か単一引用符（`'C:\Users\...'`）にする（二重引用符内の `\` はEscapeになる）
@@ -224,12 +224,50 @@ KnowledgeはObsidian VaultのMarkdownとしてFilesystem経由で読み書きす
 
 VaultはGoogle Drive等の同期フォルダに置いてよい。AI Foundationは同期を管理せず、手元のFilesystemに見えている状態だけを扱う。同期の競合で作られたファイル（`CAP定理 (1).md` 等）も通常のKnowledgeとして検索される。Google Drive for desktopを「ストリーミング」で使うと検索のたびにファイルの読み込みが発生して遅くなるため、Vaultのフォルダは「ミラーリング」（またはオフラインで使用可能）を推奨する。
 
+#### Google Drive APIで読み書きする（`storage: google_drive`）
+
+Google Driveに同期しているVaultを、手元のFilesystemを通さずGoogle Drive APIで直接読み書きする（クラウド上のServerから使う場合など）。Obsidianは今までどおり同期フォルダを使い、AI Foundationは同じフォルダ・Markdownを読み書きする。Knowledge・Life LogのID（`obsidian:<Vault相対パス>` / `lifelog:<ファイル名>`）と `external_ref` はFilesystemのときと同じで、Tool・REST APIも変わらない。
+
+1. Google Drive APIを有効化し、Drive権限付きで認可し直す（[Google Drive](#google-drive)）
+2. Google DriveでVaultのルートフォルダを開き、URL（`https://drive.google.com/drive/folders/<ID>`）の `<ID>` を控える。Vaultはマイドライブに置く（共有ドライブは対象外）
+3. `config.local.yaml` を次のようにする。`vault_path` は使わない
+
+```yaml
+sources:
+  knowledge:
+    obsidian:
+      storage: google_drive
+      vault_folder_id: "<VaultのルートフォルダのID>"
+      knowledge_dir: "AI Foundation/Knowledge"
+  lifelog:
+    provider: obsidian
+    obsidian:
+      directory: "AI Foundation/LifeLog"
+```
+
+扱い方はFilesystemと同じ（`knowledge_dir` 以下の `.md` だけを読み書きし、フォルダは自動作成しない。Frontmatter・既存本文は変えない）。Drive特有の点:
+
+- フォルダ・ファイルはVaultのルートから名前で探す。同じフォルダに同じ名前の項目が複数あるとどれも選ばず、取得・追記・作成は409（Conflict）になり、`knowledge_search` も全体が409になって重複しているパスを示す。Google Driveで重複を整理する
+- 名前は完全一致で探す（大文字小文字・Unicode正規化の違いは別の名前）。作成だけは、大文字小文字・Unicode正規化だけが違う名前があっても409にする（同期先のWindows / macOSで同じ名前になるため）。IDは `knowledge_search` / `lifelog_create` が返した値をそのまま使う
+- ショートカットは辿らない。ゴミ箱内の項目、Google ドキュメント等は対象外。MIME typeは問わない（Drive for desktopの `.md` は `text/plain`）
+- 作成・追記後に5 MiBを超えるファイルには書き込まない（AI Foundationの上限）
+- AI FoundationはDrive上のファイルを削除・ゴミ箱へ移動・改名しない
+
+同時に書き込んだ場合:
+
+- 追記は、読み取った版に対する条件付き更新で書き込む。読み取った後にDrive上で更新されていれば（Obsidianでの編集がDrive for desktopで同期された場合を含む）書き込まず409を返すので、読み直して再実行する。AI Foundationと、Obsidian／Drive for desktopによる通常の更新を前提とし、更新日時を維持する特殊なAPI呼び出し・ツールでの更新は対象外
+- PC上のObsidianで保存していない編集、Drive for desktopがまだUploadしていない変更はAPIから見えないため保護しない。同時に追記した場合の順序も保証しない
+- 作成は、同じServer Process内の同じ名前の作成を1件ずつ実行し、作成前・作成後に同じ名前を確認する。作成後に同じ名前の別のファイルが見つかった場合は、作成済みであることを示して409を返す（作成したファイルは残る）。名前の一意性は保証しない（Driveは同じ名前のファイルを許すため、他のClientやDrive for desktopとの同時作成、一覧への反映の遅れでは重複し得る）
+- **書き込むServerは1 Processにする。** 同じVaultに対してMCP Server（stdio）とHTTP Serverを同時に起動したり、クラウドで複数のreplicaを動かしたりすると、作成の直列化が効かない
+- 書き込みの結果が分からない場合（タイムアウト・切断・5xx）は自動で再試行せず、確認してから再実行するよう示すErrorを返す
+- 検索はフォルダごとの一覧と全ファイルの本文の取得を毎回行う（Cacheしない）。ファイル数が多いと時間がかかる
+
 ### Life Log
 
-Life Logは、Knowledgeと同じObsidian Vaultの別Directoryに、出来事を1記事 = 1 Markdown file（UTF-8）として保存する。Credentialは不要。
+Life Logは、Knowledgeと同じObsidian Vaultの別Directoryに、出来事を1記事 = 1 Markdown file（UTF-8）として保存する。保存方式はKnowledgeと同じ（`sources.knowledge.obsidian.storage`。Filesystemの場合Credentialは不要）。
 
 1. Vault内にLife Log Directory（`config.yaml` の既定は `AI Foundation/LifeLog`）を作成する。AI Foundationは自動作成しない。`knowledge_dir` と同じ場所・その内側・それを含む場所には置けない（Knowledgeの検索にLife Logが混ざらないようにするため）。設定の文字列は起動時に、実際のフォルダはTool呼び出し時に実パスで確認する（Windowsの8.3短縮名 `KNOWLE~1` や大文字小文字違いで同じフォルダを指す場合もConfiguration Error。Knowledge Toolも同様）
-2. Directoryを変える場合は `sources.lifelog.obsidian.directory`（Vault相対パス）を設定する。Vaultは `sources.knowledge.obsidian.vault_path` を使う（Knowledgeの設定が必要）
+2. Directoryを変える場合は `sources.lifelog.obsidian.directory`（Vault相対パス）を設定する。Vaultは `sources.knowledge.obsidian` の `vault_path`（Google Driveでは `vault_folder_id`）を使う（Knowledgeの設定が必要）
 
 - ファイル名は `YYYY-MM-DD-<タイトル>.md`。タイトルの使えない文字はKnowledgeと同じく空白に置き換える。同じ日付に別タイトルの記事は作れるが、同じ日付・タイトルの記事があれば上書きせずErrorになる
 - 本文は渡されたとおりに保存する（改行をLFにそろえ、末尾に改行を付けるだけ）。Frontmatter・見出し・日付は付け足さない。画像・動画は外部ストレージのURLを本文に書く。Project / Area / Knowledgeへの参照も、IDやURLを任意に書いてよい（自動の紐付けはしない）
@@ -350,7 +388,19 @@ Todoistの [Settings → Integrations → Developer](https://app.todoist.com/app
 
 要求するScopeは `calendar.calendarlist.readonly` と `calendar.events`。`calendar.events` は技術的には全Calendarへ書き込めるが、AI Foundationは `writable_calendars` 以外へ書き込まない。
 
-`invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する。
+`invalid_grant` のCredential Errorが出た場合は、Refresh Tokenが失効している。`npm run auth:google` を再実行する（Google Driveも使っている場合は `npm run auth:google -- --drive`）。
+
+### Google Drive
+
+Obsidian Vaultを `storage: google_drive` で使う場合に必要（[Google Drive APIで読み書きする](#google-drive-apiで読み書きするstorage-google_drive)）。Google Calendarと同じOAuthクライアント・Refresh Tokenを使う。
+
+1. Google Calendarと同じGoogle Cloud ProjectでGoogle Drive APIを有効化し、OAuth同意画面のScopeに `https://www.googleapis.com/auth/drive` を追加する
+2. `npm run auth:google -- --drive` を実行し、表示されたURLで許可する。CalendarとDriveの両方のScopeを要求するので、同意画面ではすべて許可する（どれかが付与されなかった場合はRefresh Tokenを表示せずに終了する）
+3. 表示された `GOOGLE_OAUTH_REFRESH_TOKEN=...` で `.env` の値を置き換える（Calendarもこの値で引き続き使える）
+
+`drive` Scopeは、Google側ではDrive全体のファイルを管理できる権限である（Drive for desktopや手動で作ったVault内のファイルを読み書きするため、アプリが作ったファイルだけに限られる `drive.file` は使えない）。Knowledge / Life Logのフォルダ以外を操作しないのはAI Foundation側の制限で、Googleによるフォルダ単位の権限制限ではない。`drive` は制限付きScopeのため、同意画面では未確認アプリの警告が出る（個人利用では許可できる）。
+
+`npm run auth:google`（`--drive` なし）はCalendarのScopeだけを要求する。Driveを使っていない場合は今までどおりでよい。
 
 ### GitHub
 

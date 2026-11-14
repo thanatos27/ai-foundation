@@ -45,6 +45,11 @@ sources:
       # This repository is public: do not set it here. Set it in config.local.yaml
       # (see README "Obsidian").
       # vault_path: "C:/Users/you/Documents/Obsidian/MyVault"
+      # To reach the vault through the Google Drive API instead (README "Google Drive
+      # APIで読み書きする"), set storage: google_drive and the vault folder's ID
+      # (no vault_path), also in config.local.yaml:
+      # storage: google_drive
+      # vault_folder_id: "<the ID in https://drive.google.com/drive/folders/<ID>>"
 
   project:
     # Projects are the GitHub repositories GITHUB_TOKEN can access (1 repository = 1 project).
