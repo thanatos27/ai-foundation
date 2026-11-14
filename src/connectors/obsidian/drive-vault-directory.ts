@@ -175,9 +175,14 @@ export class DriveVaultDirectory {
     const { api, folderId } = await this.root();
     const { labels } = this.options;
     const quoted = labels.quote(segments);
-    const item = await this.resolveFile(api, folderId, segments);
+    const { item, parentId } = await this.resolve(api, folderId, segments);
     const read = { notFound: () => labels.notFound(segments), context: `cannot read ${quoted}` };
     const revision = await this.call(() => api.revisionOf(item.id), read);
+    // The write goes to the file ID: it must still be the file at this path. Renamed, trashed or
+    // moved since it was resolved (possibly out of the folder), it is not written to.
+    if (revision.trashed || revision.name !== item.name || !revision.parentIds.includes(parentId)) {
+      throw labels.notFound(segments);
+    }
     const bytes = await this.call(() => api.downloadRevision(revision), read);
     const content = { bytes, modifiedAt: modifiedAt(item) };
 
@@ -274,10 +279,19 @@ export class DriveVaultDirectory {
 
   /** The regular file at `segments` below the folder: every step must be a unique name. */
   private async resolveFile(api: DriveApi, folderId: string, segments: readonly string[]): Promise<DriveItem> {
+    return (await this.resolve(api, folderId, segments)).item;
+  }
+
+  /** `resolveFile`, with the folder the file was found in. */
+  private async resolve(
+    api: DriveApi,
+    folderId: string,
+    segments: readonly string[],
+  ): Promise<{ item: DriveItem; parentId: string }> {
     const parentId = await this.resolveParent(api, folderId, segments);
     const item = await this.unique(api, parentId, segments.at(-1)!, segments);
     if (!isRegularFile(item)) throw this.options.labels.notFound(segments);
-    return item;
+    return { item, parentId };
   }
 
   /** The folder holding `segments`' last name. */

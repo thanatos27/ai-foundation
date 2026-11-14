@@ -45,6 +45,10 @@ export interface DriveRevision {
   etag: string;
   headRevisionId: string;
   mimeType: string;
+  /** Where the file is at that version: callers check it is still the path they resolved. */
+  name: string;
+  parentIds: string[];
+  trashed: boolean;
 }
 
 /** A conditional update was refused (HTTP 412): the file changed after its revision was read. Nothing was written. */
@@ -97,6 +101,8 @@ export interface DriveResources {
 }
 
 const ITEM_FIELDS = 'id,name,mimeType,trashed,modifiedTime';
+/** v2 names: `title` is the name, `labels.trashed` the trash state. One response, one version. */
+const REVISION_FIELDS = 'etag,headRevisionId,mimeType,title,parents(id),labels(trashed)';
 const PAGE_SIZE = 1000;
 /** Writes are sent once: a write whose result is unknown is never repeated (reads keep the SDK's retries). */
 const WRITE_OPTIONS = { retry: false } as const;
@@ -154,11 +160,19 @@ export function driveApiFrom(api: DriveResources): DriveApi {
     },
 
     async revisionOf(fileId) {
-      const { data } = await api.v2.files.get({ fileId, fields: 'etag,headRevisionId,mimeType' });
-      if (!data.etag || !data.headRevisionId) {
+      const { data } = await api.v2.files.get({ fileId, fields: REVISION_FIELDS });
+      if (!data.etag || !data.headRevisionId || data.title == null) {
         throw new ProviderApiError('Google Drive', 'returned no revision for a file to append to');
       }
-      return { fileId, etag: data.etag, headRevisionId: data.headRevisionId, mimeType: data.mimeType || MARKDOWN_MIME };
+      return {
+        fileId,
+        etag: data.etag,
+        headRevisionId: data.headRevisionId,
+        mimeType: data.mimeType || MARKDOWN_MIME,
+        name: data.title,
+        parentIds: (data.parents ?? []).flatMap((parent) => (parent.id ? [parent.id] : [])),
+        trashed: data.labels?.trashed ?? false,
+      };
     },
 
     async downloadRevision({ fileId, headRevisionId }) {

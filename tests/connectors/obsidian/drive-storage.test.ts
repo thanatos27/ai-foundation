@@ -318,6 +318,25 @@ describe('append', () => {
     expect(drive.callsOf('updateContent')).toHaveLength(1);
   });
 
+  it.each([
+    ['renamed', (id: string) => drive.rename(id, 'renamed.md')],
+    ['trashed', (id: string) => drive.trashItem(id)],
+    ['moved out of the knowledge directory', (id: string) => drive.move(id, drive.mkdirs('Elsewhere'))],
+    ['moved to a subfolder', (id: string) => drive.move(id, drive.mkdirs(`${K}/sub`))],
+  ])('does not write to a file %s after its path was resolved, even after an update since', async (_label, change) => {
+    const id = drive.write(`${K}/a.md`, 'body\n');
+    drive.before = (method) => {
+      if (method !== 'revisionOf') return;
+      drive.before = undefined;
+      change(id);
+      drive.externalUpdate(id, 'body\nedited\n'); // a new etag: the precondition alone would pass
+    };
+    const error = await expectError(storage.append(p('a.md'), () => 'from AI\n'), NotFoundError);
+    expect(error.message).toContain(`"obsidian:${K}/a.md" was not found`);
+    expect(drive.callsOf('updateContent')).toHaveLength(0);
+    expect(drive.text(id)).toBe('body\nedited\n');
+  });
+
   it('reports a file that disappears before the write as not found', async () => {
     drive.write(`${K}/a.md`, 'body');
     drive.before = (method) => {

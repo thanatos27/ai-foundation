@@ -50,7 +50,14 @@ function fakeResources({ pages = [[]], fail }: { pages?: unknown[][]; fail?: Par
     },
     v2: {
       files: {
-        get: handle('v2.files.get', () => ({ etag: '"etag-1"', headRevisionId: 'rev-1', mimeType: 'text/plain' })),
+        get: handle('v2.files.get', () => ({
+          etag: '"etag-1"',
+          headRevisionId: 'rev-1',
+          mimeType: 'text/plain',
+          title: 'a.md',
+          parents: [{ id: 'folder-1' }],
+          labels: { trashed: false },
+        })),
         update: handle('v2.files.update', () => ({ etag: '"etag-2"' })),
       },
     },
@@ -58,6 +65,7 @@ function fakeResources({ pages = [[]], fail }: { pages?: unknown[][]; fail?: Par
   return { api: driveApiFrom(resources), requests };
 }
 
+const PLACE = { name: 'a.md', parentIds: ['folder-1'], trashed: false };
 const item = (id: string, name: string) => ({ id, name, mimeType: 'text/plain', trashed: false, modifiedTime: '2026-11-14T00:00:00.000Z' });
 
 describe('GOOGLE_DRIVE_SCOPES', () => {
@@ -109,11 +117,22 @@ describe('reading', () => {
     expect(requests[0]!.options).toMatchObject({ responseType: 'arraybuffer' });
   });
 
-  it('reads the etag and head revision from one v2 files.get, and downloads that revision', async () => {
+  it('reads the etag, head revision and place of the file from one v2 files.get, and downloads that revision', async () => {
     const { api, requests } = fakeResources();
     const revision = await api.revisionOf('file-1');
-    expect(revision).toEqual({ fileId: 'file-1', etag: '"etag-1"', headRevisionId: 'rev-1', mimeType: 'text/plain' });
-    expect(requests[0]).toMatchObject({ method: 'v2.files.get', params: { fileId: 'file-1', fields: 'etag,headRevisionId,mimeType' } });
+    expect(revision).toEqual({
+      fileId: 'file-1',
+      etag: '"etag-1"',
+      headRevisionId: 'rev-1',
+      mimeType: 'text/plain',
+      name: 'a.md',
+      parentIds: ['folder-1'],
+      trashed: false,
+    });
+    expect(requests[0]).toMatchObject({
+      method: 'v2.files.get',
+      params: { fileId: 'file-1', fields: 'etag,headRevisionId,mimeType,title,parents(id),labels(trashed)' },
+    });
     expect((await api.downloadRevision(revision)).toString('utf8')).toBe('版の本文');
     expect(requests[1]).toMatchObject({
       method: 'v3.revisions.get',
@@ -141,7 +160,7 @@ describe('writing', () => {
   it('updates the content conditionally on the etag, keeping the MIME type and the usual modified time', async () => {
     const { api, requests } = fakeResources();
     const bytes = Buffer.from([0x61, 0xff, 0x0a]);
-    await api.updateContent({ fileId: 'file-1', etag: '"etag-1"', headRevisionId: 'rev-1', mimeType: 'text/plain' }, bytes);
+    await api.updateContent({ fileId: 'file-1', etag: '"etag-1"', headRevisionId: 'rev-1', mimeType: 'text/plain', ...PLACE }, bytes);
     const [request] = requests;
     expect(request).toMatchObject({ method: 'v2.files.update', params: { fileId: 'file-1', media: { mimeType: 'text/plain' } } });
     expect((request!.params.media as { body: Buffer }).body).toBe(bytes);
@@ -153,7 +172,7 @@ describe('writing', () => {
   });
 
   it('reports a failed precondition as StaleRevisionError and passes other errors on', async () => {
-    const revision = { fileId: 'file-1', etag: '"old"', headRevisionId: 'rev-1', mimeType: 'text/plain' };
+    const revision = { fileId: 'file-1', etag: '"old"', headRevisionId: 'rev-1', mimeType: 'text/plain', ...PLACE };
     const stale = fakeResources({ fail: { 'v2.files.update': googleError(412, 'conditionNotMet') } });
     await expect(stale.api.updateContent(revision, Buffer.from('x'))).rejects.toBeInstanceOf(StaleRevisionError);
     const failure = googleError(500);

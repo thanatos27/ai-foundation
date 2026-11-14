@@ -103,8 +103,16 @@ export class FakeDrive implements DriveApi {
     this.item(id).trashed = true;
   }
 
+  /**
+   * Metadata changes by another client. Like Drive, they keep the content, and here the etag too, so
+   * that only the path checks can catch them.
+   */
   rename(id: string, name: string): void {
     this.item(id).name = name;
+  }
+
+  move(id: string, parent: string): void {
+    this.item(id).parent = parent;
   }
 
   settle(): void {
@@ -175,7 +183,15 @@ export class FakeDrive implements DriveApi {
     const item = this.found(fileId);
     const head = item.revisions.at(-1);
     if (!head) throw googleError(404, 'notFound');
-    return { fileId, etag: item.etag, headRevisionId: head.id, mimeType: item.mimeType };
+    return {
+      fileId,
+      etag: item.etag,
+      headRevisionId: head.id,
+      mimeType: item.mimeType,
+      name: item.name,
+      parentIds: item.parent ? [item.parent] : [],
+      trashed: item.trashed,
+    };
   }
 
   async downloadRevision(revision: DriveRevision): Promise<Buffer> {
