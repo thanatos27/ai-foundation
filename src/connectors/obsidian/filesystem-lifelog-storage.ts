@@ -1,5 +1,5 @@
-import { ConflictError, NotFoundError, ProviderApiError } from '../../errors.js';
-import { quoteLifeLogId } from './lifelog-id.js';
+import { decodeStrict } from './decode.js';
+import { lifeLogLabels, notUtf8 } from './labels.js';
 import type { LifeLogFile, LifeLogStorage } from './lifelog-storage.js';
 import { FilesystemVaultDirectory } from './vault-directory.js';
 
@@ -23,25 +23,10 @@ export class FilesystemLifeLogStorage implements LifeLogStorage {
   private readonly directory: FilesystemVaultDirectory;
 
   constructor(private readonly options: FilesystemLifeLogStorageOptions) {
-    const nameOf = (segments: readonly string[]) => segments.join('/');
     this.directory = new FilesystemVaultDirectory({
       vaultPath: options.vaultPath,
       dir: options.directory,
-      labels: {
-        dirConfigKey: 'sources.lifelog.obsidian.directory',
-        dirName: 'life log directory',
-        quote: (segments) => quoteLifeLogId(nameOf(segments)),
-        notFound: (segments, cause) =>
-          new NotFoundError(
-            `life log ${quoteLifeLogId(nameOf(segments))} was not found; it may have been renamed, moved or deleted in Obsidian`,
-            cause === undefined ? undefined : { cause },
-          ),
-        alreadyExists: (segments, cause) =>
-          new ConflictError(
-            `life log ${quoteLifeLogId(nameOf(segments))} already exists; choose another title, or use lifelog_append to add to it`,
-            { cause },
-          ),
-      },
+      labels: lifeLogLabels(),
       apartFrom: [{ dir: options.knowledgeDir, dirName: 'knowledge directory' }],
     });
   }
@@ -52,22 +37,17 @@ export class FilesystemLifeLogStorage implements LifeLogStorage {
 
   async read(name: string): Promise<LifeLogFile> {
     const { bytes } = await this.directory.read([name]);
-    let text: string;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch (error) {
-      throw new ProviderApiError('Obsidian', `life log ${quoteLifeLogId(name)} is not valid UTF-8; fix it in Obsidian`, {
-        cause: error,
-      });
-    }
-    return { name, text: text.replace(/^﻿/, '') };
+    return { name, text: decodeStrict(bytes, (cause) => notUtf8('Obsidian', name, cause)) };
   }
 
   createExclusive(name: string, text: string): Promise<void> {
     return this.directory.createExclusive([name], text);
   }
 
-  append(name: string, text: string): Promise<void> {
-    return this.directory.append([name], text);
+  /** Read (strictly), compose, then O_APPEND, as for knowledge (`FilesystemVaultStorage.append`). */
+  async append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFile> {
+    const file = await this.read(name);
+    await this.directory.append([name], compose(file));
+    return file;
   }
 }

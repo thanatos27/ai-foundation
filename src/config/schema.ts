@@ -31,6 +31,14 @@ const VaultRelativeDirSchema = z
     message: 'must not contain empty, "." or ".." segments',
   });
 
+/**
+ * A Google Drive folder ID, as in `https://drive.google.com/drive/folders/<ID>`. Aliases such as
+ * `root` are not IDs: the whole of My Drive is never the vault.
+ */
+const DriveFolderIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{10,}$/, { message: 'must be a Google Drive folder ID (the part after /folders/ in its URL)' });
+
 /** A Notion page ID: the hyphenated UUID or the 32-hex form used in Notion URLs. */
 const NotionPageIdSchema = z
   .string()
@@ -134,17 +142,31 @@ const ConfigObjectSchema = z.strictObject({
         default: KnowledgeSourceSchema,
         providers: z.array(KnowledgeSourceSchema).min(1),
         /**
-         * How the Obsidian vault is reached. Optional so the server still starts; the knowledge tools
-         * return a configuration error while vault_path or knowledge_dir is missing.
+         * How the Obsidian vault is reached (`storage`). Optional so the server still starts; the
+         * knowledge and lifelog tools return a configuration error while the vault or a directory is missing.
          */
         obsidian: z
-          .strictObject({
-            storage: z.literal('filesystem'),
-            /** Absolute path of the vault on this machine. Personal: keep it in a local config file. */
-            vault_path: z.string().min(1).refine(isAbsolute, { message: 'must be an absolute path' }).optional(),
-            /** The only directory the knowledge tools read and write, relative to the vault. */
-            knowledge_dir: VaultRelativeDirSchema.optional(),
-          })
+          .discriminatedUnion('storage', [
+            z.strictObject({
+              /** The vault is a folder on this machine (it may be inside a sync folder). */
+              storage: z.literal('filesystem'),
+              /** Absolute path of the vault on this machine. Personal: keep it in a local config file. */
+              vault_path: z.string().min(1).refine(isAbsolute, { message: 'must be an absolute path' }).optional(),
+              /** The only directory the knowledge tools read and write, relative to the vault. */
+              knowledge_dir: VaultRelativeDirSchema.optional(),
+            }),
+            z.strictObject({
+              /** The vault is a folder in My Drive, read and written through the Google Drive API. */
+              storage: z.literal('google_drive'),
+              /** ID of the vault's root folder. Personal: keep it in a local config file. */
+              vault_folder_id: DriveFolderIdSchema.optional(),
+              knowledge_dir: VaultRelativeDirSchema.optional(),
+              /** Rejected with a hint instead of "unrecognized key": Drive has no path on this machine. */
+              vault_path: z
+                .never({ error: 'is not used with storage: google_drive; set vault_folder_id to the vault folder\'s ID' })
+                .optional(),
+            }),
+          ])
           .optional(),
       })
       .refine((k) => k.providers.includes(k.default), {

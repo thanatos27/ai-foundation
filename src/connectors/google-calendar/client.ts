@@ -2,6 +2,7 @@ import { calendar, type calendar_v3 } from '@googleapis/calendar';
 import { OAuth2Client } from 'google-auth-library';
 import type { CredentialProvider, GoogleOAuthCredentials } from '../../credentials/types.js';
 import { CredentialError, FoundationError, type MessagePart, ProviderApiError, providerText } from '../../errors.js';
+import { googleErrorInfo, RATE_LIMIT_REASONS } from '../google/errors.js';
 
 export type GoogleEvent = calendar_v3.Schema$Event;
 export type GoogleCalendarListEntry = calendar_v3.Schema$CalendarListEntry;
@@ -116,20 +117,8 @@ export function lazyCalendarApi(
   };
 }
 
-interface GoogleErrorShape {
-  message?: string;
-  status?: number;
-  response?: { status?: number; data?: unknown };
-}
-
-const RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded']);
 /** 403 reasons meaning "this calendar or event may not be written", not "these credentials are wrong". */
 const WRITE_FORBIDDEN_REASONS = new Set(['forbidden', 'requiredAccessLevel', 'forbiddenForNonOrganizer']);
-
-function errorReasons(data: unknown): string[] {
-  const errors = (data as { error?: { errors?: { reason?: string }[] } } | undefined)?.error?.errors ?? [];
-  return errors.map((e) => e.reason ?? '');
-}
 
 /**
  * Converts anything thrown by the Google client into a Foundation error.
@@ -146,13 +135,10 @@ export function toFoundationError(
   }: { notFound?: () => FoundationError; forbidden?: () => FoundationError; context?: string } = {},
 ): FoundationError {
   if (error instanceof FoundationError) return error;
-  const e = (error ?? {}) as GoogleErrorShape;
-  const status = e.status ?? e.response?.status;
-  const data = e.response?.data;
-  const message = e.message ?? String(error);
+  const { status, reasons, message, invalidGrant } = googleErrorInfo(error);
   const options = { cause: error };
 
-  if ((data as { error?: unknown } | undefined)?.error === 'invalid_grant' || /invalid_grant/.test(message)) {
+  if (invalidGrant) {
     return new CredentialError(
       'Google rejected the refresh token (invalid_grant); run `npm run auth:google` and update GOOGLE_OAUTH_REFRESH_TOKEN',
       options,
@@ -161,10 +147,10 @@ export function toFoundationError(
   if (status === 401) {
     return new CredentialError(['Google rejected the credentials (HTTP 401): ', providerText(message)], options);
   }
-  if (status === 403 && forbidden && errorReasons(data).some((reason) => WRITE_FORBIDDEN_REASONS.has(reason))) {
+  if (status === 403 && forbidden && reasons.some((reason) => WRITE_FORBIDDEN_REASONS.has(reason))) {
     return forbidden();
   }
-  if (status === 403 && !errorReasons(data).some((reason) => RATE_LIMIT_REASONS.has(reason))) {
+  if (status === 403 && !reasons.some((reason) => RATE_LIMIT_REASONS.has(reason))) {
     return new CredentialError(['Google denied access (HTTP 403): ', providerText(message)], options);
   }
   if ((status === 404 || status === 410) && notFound) return notFound();

@@ -203,8 +203,55 @@ describe('ConfigSchema', () => {
       }
     });
 
-    it.each(['google_drive', undefined])('rejects storage %s', (storage) => {
+    it.each(['dropbox', undefined])('rejects storage %s', (storage) => {
       expect(issuePaths(withObsidian({ storage, knowledge_dir: 'K' }))).toEqual(['sources.knowledge.obsidian.storage']);
+    });
+
+    describe('storage: google_drive', () => {
+      const folderId = '1AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+
+      it('accepts a vault folder ID with a knowledge directory', () => {
+        const result = ConfigSchema.safeParse(
+          withObsidian({ storage: 'google_drive', vault_folder_id: folderId, knowledge_dir: 'AI Foundation/Knowledge' }),
+        );
+        expect(result.success && result.data.sources.knowledge.obsidian).toEqual({
+          storage: 'google_drive',
+          vault_folder_id: folderId,
+          knowledge_dir: 'AI Foundation/Knowledge',
+        });
+      });
+
+      it('allows vault_folder_id and knowledge_dir to be omitted', () => {
+        expect(ConfigSchema.safeParse(withObsidian({ storage: 'google_drive' })).success).toBe(true);
+      });
+
+      it.each(['root', 'short', 'has space 1234567', 'https://drive.google.com/drive/folders/1AbCdEfGhIjK', ''])(
+        'rejects a vault_folder_id that is not a folder ID: %j',
+        (vault_folder_id) => {
+          expect(issuePaths(withObsidian({ storage: 'google_drive', vault_folder_id }))).toEqual([
+            'sources.knowledge.obsidian.vault_folder_id',
+          ]);
+        },
+      );
+
+      it('rejects vault_path with a hint to use vault_folder_id', () => {
+        const result = ConfigSchema.safeParse(withObsidian({ storage: 'google_drive', vault_path: vaultPath }));
+        expect(result.success).toBe(false);
+        const issue = result.error!.issues.find((i) => i.path.join('.') === 'sources.knowledge.obsidian.vault_path');
+        expect(issue?.message).toContain('vault_folder_id');
+      });
+
+      it('rejects vault_folder_id with storage: filesystem', () => {
+        expect(issuePaths(withObsidian({ storage: 'filesystem', vault_folder_id: folderId }))).toEqual([
+          'sources.knowledge.obsidian',
+        ]);
+      });
+
+      it('checks knowledge_dir the same way', () => {
+        expect(issuePaths(withObsidian({ storage: 'google_drive', knowledge_dir: '../x' }))).toContain(
+          'sources.knowledge.obsidian.knowledge_dir',
+        );
+      });
     });
 
     it.each(['relative/vault', './vault', ''])('rejects a vault_path that is not absolute: %j', (vault_path) => {

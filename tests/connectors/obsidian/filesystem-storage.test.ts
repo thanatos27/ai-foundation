@@ -77,7 +77,7 @@ describe('knowledge_dir boundary (links between the vault root and knowledge_dir
       () => linked.list(),
       () => linked.read('Linked/secret.md' as VaultPath),
       () => linked.createExclusive('Linked/new.md' as VaultPath, 'x'),
-      () => linked.append('Linked/secret.md' as VaultPath, 'x'),
+      () => linked.append('Linked/secret.md' as VaultPath, () => 'x'),
     ]) {
       const error = await expectError(action(), ConfigurationError);
       expect(error.message).toMatch(/symbolic link or junction/);
@@ -94,7 +94,7 @@ describe('knowledge_dir boundary (links between the vault root and knowledge_dir
     for (const action of [
       () => via.list(),
       () => via.createExclusive('Via/Knowledge/new.md' as VaultPath, 'x'),
-      () => via.append('Via/Knowledge/a.md' as VaultPath, 'x'),
+      () => via.append('Via/Knowledge/a.md' as VaultPath, () => 'x'),
     ]) {
       await expectError(action(), ConfigurationError);
     }
@@ -153,7 +153,7 @@ describe('names starting with ".."', () => {
     expect((await storage.list()).map((file) => file.path).sort()).toEqual([p('..archive/note.md'), p('..note.md')].sort());
     expect((await storage.read(p('..note.md'))).text).toBe('a');
     expect((await storage.read(p('..archive/note.md'))).text).toBe('b');
-    await storage.append(p('..archive/note.md'), 'c');
+    await storage.append(p('..archive/note.md'), () => 'c');
     expect(await vault.read(p('..archive/note.md'))).toBe('bc');
   });
 });
@@ -232,26 +232,41 @@ describe('append', () => {
   it('adds text to the end and leaves the rest byte for byte', async () => {
     const original = '---\ntitle: a\nunknown: keep\n---\n\nbody\n';
     await vault.write(p('a.md'), original);
-    await storage.append(p('a.md'), '\nmore\n');
+    await storage.append(p('a.md'), () => '\nmore\n');
     expect(await vault.read(p('a.md'))).toBe(`${original}\nmore\n`);
   });
 
+  it('gives compose the file as read and writes nothing when compose throws', async () => {
+    await vault.write(p('a.md'), 'body\n');
+    const file = await storage.append(p('a.md'), (read) => {
+      expect(read).toMatchObject({ path: p('a.md'), text: 'body\n' });
+      return 'more\n';
+    });
+    expect(file.text).toBe('body\n');
+    await expect(
+      storage.append(p('a.md'), () => {
+        throw new Error('malformed');
+      }),
+    ).rejects.toThrow('malformed');
+    expect(await vault.read(p('a.md'))).toBe('body\nmore\n');
+  });
+
   it('does not create a missing file', async () => {
-    await expectError(storage.append(p('missing.md'), 'x'), NotFoundError);
+    await expectError(storage.append(p('missing.md'), () => 'x'), NotFoundError);
     expect(await readdir(vault.abs(KNOWLEDGE_DIR))).toEqual([]);
   });
 
   it('rejects a path through a directory link and leaves the target unchanged', async () => {
     await writeFile(join(vault.outside, 'secret.md'), 'secret');
     await linkDirectory(vault.outside, vault.abs(p('linked')));
-    await expectError(storage.append(p('linked/secret.md'), 'x'), InputValidationError);
+    await expectError(storage.append(p('linked/secret.md'), () => 'x'), InputValidationError);
     expect(await vault.read('../outside/secret.md')).toBe('secret');
   });
 
   it.skipIf(!fileLinks)('rejects a file link and leaves the target unchanged', async () => {
     await writeFile(join(vault.outside, 'secret.md'), 'secret');
     await linkFile(join(vault.outside, 'secret.md'), vault.abs(p('link.md')));
-    await expectError(storage.append(p('link.md'), 'x'), InputValidationError);
+    await expectError(storage.append(p('link.md'), () => 'x'), InputValidationError);
     expect(await vault.read('../outside/secret.md')).toBe('secret');
   });
 });
@@ -287,7 +302,7 @@ describe.skipIf(process.platform !== 'win32')('alternate data streams (Windows)'
     await writeFile(vault.abs(p('private.txt:notes.md')), 'stream');
     const error = await expectError(storage.read(p('private.txt:notes.md')), InputValidationError);
     expect(error.message).toContain('alternate data stream');
-    await expectError(storage.append(p('private.txt:notes.md'), 'x'), InputValidationError);
+    await expectError(storage.append(p('private.txt:notes.md'), () => 'x'), InputValidationError);
     await expectError(storage.createExclusive(p('new.txt:notes.md'), 'x'), InputValidationError);
     expect(await readFile(vault.abs(p('private.txt:notes.md')), 'utf8')).toBe('stream');
   });
