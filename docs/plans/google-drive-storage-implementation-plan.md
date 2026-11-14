@@ -74,7 +74,7 @@ Google Driveに同期済みのObsidian Vaultを、Google Drive APIから直接�
 | Google Docs等 | `application/vnd.google-apps.*`（フォルダ・ショートカット以外）は対象外（検索で除外、ID指定は `NotFoundError`）。変換しない | Markdownのbyte列を持たない |
 | ファイルの種類 | `.md` の判定は名前だけで行い、MIME typeでは絞らない | 同期クライアントが付けるMIME typeは一定でない可能性がある（P-01で記録） |
 | 共有ドライブ | 対象外（マイドライブのみ）。`supportsAllDrives` は指定しない（Q5） | 同期済みVaultはマイドライブにある前提。共有ドライブは権限・一覧のcorporaが異なる |
-| サイズ | 作成・追記後のファイルが5 MiBを超える場合は書き込まない（Q4） | multipart / media uploadの上限。Markdownのノートでは通常超えない |
+| サイズ | 作成・追記後のファイルが5 MiBを超える場合は書き込まない（アプリ独自の上限、Q4） | Googleのupload guideはmedia / multipart uploadを5 MB以下の小さいファイル向けとし、それを超える場合はresumable uploadを案内している。APIの最大ファイルサイズ（`files.update` のreference）とは別の値で、本Planはresumable uploadを実装しないためにこの上限を設ける。Markdownのノートでは通常超えない |
 
 ---
 
@@ -99,8 +99,9 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 
 | 項目 | 内容 |
 |---|---|
-| 入力 | `.env` / 環境変数の `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REFRESH_TOKEN` / `GOOGLE_DRIVE_PROBE_FOLDER_ID` |
-| 安全装置 | 対象フォルダの名前が `AI Foundation Probe` で始まらない、フォルダでない、ゴミ箱内のいずれかなら何もせず終了する。書き込むのは今回の実行で作成したファイル（名前 `probe-<runId>-…`）だけ。手動ファイルは読み取りのみ |
+| 入力 | `.env` / 環境変数の `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REFRESH_TOKEN` / `GOOGLE_DRIVE_PROBE_FOLDER_ID`。任意で `GOOGLE_DRIVE_VAULT_FOLDER_ID`（P-01 Step 10のメタデータ取得だけに使う） |
+| 安全装置 | 対象フォルダの名前が `AI Foundation Probe` で始まらない、フォルダでない、ゴミ箱内のいずれかなら何もせず終了する。書き込むのは今回の実行で作成したファイル（名前 `probe-<runId>-…`）だけ。手動ファイルは読み取りのみ。`GOOGLE_DRIVE_VAULT_FOLDER_ID` のフォルダは `files.get` 以外の要求を送らない |
+| 再試行 | 読み取りを含む全要求で `retry: false` を指定する。SDKの既定の再試行（v2の `PUT` 等）を混ぜずに、各要求の結果をそのまま記録するため |
 | 後片付け | 作成したファイルを最後にゴミ箱へ移す（完全削除しない）。`--keep` で残す |
 | 出力 | 標準出力にJSON Lines: step、method・endpoint・uploadType・条件header名と値、HTTP status、応答の `id` `name` `mimeType` `version` `headRevisionId` `md5Checksum` `modifiedTime` `size`、応答の `ETag` header、本文のSHA-256。Authorization header・Access Token・Refresh Tokenは出さない |
 | `--manual` | Drive for desktopでの手動操作を挟む手順（P-02m・P-03m）で、標準入力のEnterを待つ |
@@ -118,6 +119,7 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 | 7 | 検証ファイルの作成（multipart、`text/markdown`、名前に日本語・空白・`'` を含む） | status、`mimeType`、エスケープした名前での検索結果 |
 | 8 | 検証ファイルの本文更新（`uploadType=media`） | `version`・`headRevisionId` の変化、`mimeType` が変わらないこと |
 | 9 | `revisions.get(headRevisionId, alt=media)` | 本文が手順8の内容と一致するか |
+| 10 | `GOOGLE_DRIVE_VAULT_FOLDER_ID` が設定されていれば、そのフォルダの `files.get`（`driveId`・`ownedByMe`・`mimeType`・`trashed`） | 実際のVaultがマイドライブにあるか共有ドライブにあるか（Q5） |
 
 ### 4.4 P-02：古い内容からの更新を拒否できるか
 
@@ -140,16 +142,20 @@ npx tsx scripts/probe-google-drive.ts <p01|p02|p03> [--keep] [--manual]
 |---|---|---|
 | 1 | A・Bが同じ親・同じ名前で同時に `files.create`（`Promise.all`）。2クライアントで3回、5クライアントで3回 | 各要求のstatus・file ID |
 | 2 | 作成直後・1秒後・5秒後に名前で一覧 | 見える件数（一覧の反映遅延の有無） |
-| 3 | 各作成者が作成直後に名前で一覧し、§10.2の判定（最古の `createdTime`、同時刻はfile IDの昇順）で残す1件を決め、自分の作成分が負けならゴミ箱へ移す。10回繰り返す | 各回で残った件数（1件になるか） |
+| 3a | §10.2の手順を、probeが順序を指定して実行する: A・Bの作成前確認 → Aの作成 → Aの作成後一覧 → Bの作成 → Bの作成後一覧 | 各要求の結果（成功／409）、残った件数、各一覧に相手の作成分が見えたか |
+| 3b | 同上の順序違い: A・Bの作成前確認 → Aの作成 → Bの作成 → Aの作成後一覧 → Bの作成後一覧 | 同上（両方が取り消して0件になるか） |
+| 3c | 参考として、§10.2の手順を5クライアントで `Promise.all` により10回実行 | 各回の成功数・残った件数 |
 | 4 | `files.generateIds` で得たIDを2つの作成要求に同時に指定 | 2件目が拒否されるか（IDの一意性。名前の一意性ではない） |
 | P-03m（`--manual`） | 利用者がDrive for desktopで同名ファイルを作るのと同時にAPIで作成 | 同期後のDrive上の件数と名前（` (1)` 付き等） |
+
+P-03の結果は、観測した順序でどうなったかの記録であり、名前の一意性の証明ではない。同一 `createdTime`・異なるfile ID、ゴミ箱移動の失敗、作成の結果不明などの順序・失敗はFake Drive（§13.3）で確認する。
 
 ### 4.6 検証結果から確定する事項
 
 | 確定事項 | 根拠 |
 |---|---|
 | 追記を許可する条件と競合時のレスポンス（§10.1の方式A／B） | P-02 Step 3a・3b・4、P-02m |
-| 新規作成の排他・同名検出の保証範囲（§10.2） | P-03 Step 1〜3、P-03m |
+| 新規作成の同名検出の範囲と、作成の排他を設計レビューへ戻すか（§10.2・Q8） | P-03 Step 1〜4、P-03m |
 | Drive同期との競合で保証できない条件と運用（README） | P-02m、P-03m |
 | Storage interfaceの変更内容（§8の `DriveApi.updateContent` の条件） | P-02 |
 | AC-D05・AC-D06の文言（§12）、競合関連テスト（§14） | 上記すべて |
@@ -344,7 +350,7 @@ P-02で条件付き更新が成立しない場合の扱いは§10.1。
 1. §7.4 → 親フォルダ（Knowledge: Knowledge Directory、Life Log: Life Log Directory）を解決。
 2. §7.3の作成時規則で同名候補を確認。1件でもあれば `ConflictError`（既存メッセージ）。
 3. 5 MiB以下を確認し、`createFile`（multipart、`text/markdown`、UTF-8・BOMなし）。
-4. 作成後確認（§10.2、P-03の結果で確定）。
+4. 作成後確認（§10.2）。
 5. 作成要求の結果不明は `ProviderApiError`（「作成されたか分からない。取得して確認してから再実行する」旨）。再試行しない。
 
 ---
@@ -365,14 +371,33 @@ P-02で条件付き更新が成立しない場合の扱いは§10.1。
 
 ### 10.2 新規作成
 
-| P-03の結果 | 方式 | 保証 |
-|---|---|---|
-| 同時作成は両方成功し（Driveは名前の一意性を保証しない）、作成直後の名前一覧で互いの作成分が見える | 作成前確認（§9.4）に加え、作成直後に名前で一覧し、2件以上なら決定的な規則（最古の `createdTime`、同時刻はfile ID昇順）で勝者を決める。自分の作成分が負けならゴミ箱へ移して `ConflictError` | 既存ファイルを上書きしない（`files.create` は常に新規）。AI Foundation同士の同時作成では1件だけが残る |
-| 作成直後の一覧に反映遅延がある | 上記に加え、遅延の範囲内では重複が残り得ることを制約とする | 重複が残った場合も、以後の取得・追記・作成・検索は§7.3により409となり、1件を黙って選ばない |
-| Drive for desktopとの同時作成（P-03m） | 制御できない。結果をREADMEに記載 | 保証しない |
+Driveは同じ親の下の名前の一意性を保証せず、名前を条件にした原子的な作成もない。作成前確認・作成後確認はどちらも各要求が別の時点で見た一覧に基づくため、本節の方式は排他的な作成ではない。
+
+**方式（勝者を選ばない作成後確認）:**
+
+1. 作成前確認（§9.4 Step 2）。同名があれば作成せず `ConflictError`。
+2. `createFile`。
+3. 作成直後に親フォルダの同名項目（§7.3の作成時規則）を一覧する。自分の作成分以外が1件でもあれば、自分の作成分をゴミ箱へ移して `ConflictError`（「同じ名前のファイルが同時に作成された。確認してから再実行する」旨）。
+
+勝者を選ばないのは、作成後の一覧を見る時点が要求ごとに異なり、先に成功を返した要求の判断を後の要求が覆せないためである（後の要求だけが規則上の勝者となって成功し、2件が残る）。この方式では、相手が見えた要求は必ず自分の作成分を取り消す。両方が取り消して0件になることはあるが、作成内容は呼び出し元に残っているため失われない。
+
+**保証すること:**
+
+- 既存ファイルを上書きしない（`files.create` は常に新規作成）。
+- 作成前に見えた同名項目があれば作成しない（409）。
+- 作成後に見えた他の同名項目があれば、自分の作成分を取り消して409を返す。
+- 重複が残った場合も、以後の取得・追記・作成・検索は§7.3により409となり、1件を黙って選ばない。
+
+**保証しないこと（READMEに書く）:**
+
+- AI Foundation同士の同時作成で、成功が1件以下になること。各要求の作成後の一覧に、それより前に完了した作成が必ず反映されるなら、後に一覧した要求が先の作成分を見て取り消すため、成功は1件以下になる。しかし一覧への反映についてDriveの文書は保証を示していない。P-03で観測した結果は記録するが、保証の根拠にはしない。
+- Drive for desktop・Obsidian・他のClientによる同時作成（AI Foundationの作成後確認に参加しない）。
+- 取り消し（ゴミ箱への移動）に失敗した場合。重複が残ったことを示す `ProviderApiError` を返す。
+- 作成要求の結果不明（§9.4 Step 5）。作成されているかもしれないファイルは取り消さない。
+
+**`createExclusive` の契約との差:** Filesystemの `O_EXCL` は原子的で、同時作成でも成功は1件だけである。Driveの `createExclusive` は上記の範囲に限られ、「`ConflictError` ならファイルは作られていない」こと、「成功なら同名の他のファイルはない」ことのいずれも、同時作成時は保証しない。この差を受け入れるか、AI Foundationのwriter間で共有する排他（Q8）を設計するかは、P-03の結果とあわせて設計レビューで決める。
 
 - ゴミ箱へ移すのは、その要求で作成した自分のファイルだけ（取り消し）。他の重複・同期の競合コピーは整理しない。
-- ゴミ箱へ移すのに失敗した場合は、重複が残ったことを示す `ProviderApiError` を返す。
 
 ---
 
@@ -401,12 +426,12 @@ Calendarの `toFoundationError` のうちGoogle共通の分類（`invalid_grant`
 
 ## 12. Acceptance Criteria（AC-D05・AC-D06の確定案）
 
-AC-D01〜D04・D07は変更しない。AC-D05・D06はP-02・P-03の結果により以下のいずれかとする。
+AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P-03の結果と設計レビューを経て確定する。以下は確定案の候補。
 
-| ID | 方式A／P-03で作成後確認が成立する場合 | 成立しない場合 |
+| ID | 候補 | 確定に必要なこと |
 |---|---|---|
-| AC-D05 | 新規作成は既存ファイルを上書きせず、同名（大小文字・NFC正規化を無視）の項目があれば409。AI Foundation同士の同時作成では1件だけが残り、他は409。Drive for desktopとの同時作成、作成直後の一覧に反映されない範囲の重複は保証しない。重複が残った場合も以後の操作は409となる | 設計レビューで決める（作成前確認のみとし、重複時は以後の操作が409となることだけを保証する等） |
-| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で変更されていれば書き込まず409。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | §10.1方式Bの選択に従う |
+| AC-D05 | 新規作成は既存ファイルを上書きせず、作成前に同名（大小文字・NFC正規化を無視）の項目があれば409。作成後に他の同名項目を検出したら自分の作成分を取り消して409。同時作成で成功が1件以下になること、他のClientとの同時作成は保証しない。重複が残った場合も以後の操作は409となる | §10.2の `createExclusive` 契約との差を受け入れるか、Q8の排他を設計するかの決定 |
+| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で変更されていれば書き込まず409。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | P-02で§10.1方式Aが成立すること。成立しなければ方式Bの選択に従う |
 
 ---
 
@@ -441,11 +466,11 @@ AC-D01〜D04・D07は変更しない。AC-D05・D06はP-02・P-03の結果によ
 
 | File | 内容 |
 |---|---|
-| `tests/connectors/google-drive/fake-drive.ts`（新規） | メモリ上のDrive: 同名項目・ショートカット・Google Docs・ゴミ箱・ページ分割（小さいpageSize）・版・条件付き更新・作成直後の一覧遅延・任意の時点への割り込み更新・失敗注入 |
+| `tests/connectors/google-drive/fake-drive.ts`（新規） | メモリ上のDrive: 同名項目・ショートカット・Google Docs・ゴミ箱・ページ分割（小さいpageSize）・版・条件付き更新・作成直後の一覧遅延・任意の時点への割り込み更新・失敗注入。作成は要求ごとに一時停止でき、作成前確認・作成・作成後一覧の順序をテストから指定できる。`createdTime`・file IDをテストから指定できる |
 | `tests/connectors/google-drive/client.test.ts`（新規） | queryのエスケープ、`trashed = false`、全ページ取得、`fields`、uploadType、条件header、書き込みの `retry: false`、Scope定数 |
 | `tests/connectors/google/errors.test.ts`（新規） | §11の分類、Provider文の分離 |
 | `tests/connectors/obsidian/storage-contract.ts`（新規） | Knowledge・Life Log StorageのContract Test。Filesystem（一時Vault）とDrive（Fake）の両方で同じfixture（日本語・空白・予約文字の名前、Frontmatter、CRLF、BOM、不正UTF-8、空ファイル）を実行 |
-| `tests/connectors/obsidian/drive-vault-directory.test.ts`（新規） | §7.2・§7.3・§7.4の境界・曖昧さ・ページ分割、§9.3のbyte保持、§10の競合 |
+| `tests/connectors/obsidian/drive-vault-directory.test.ts`（新規） | §7.2・§7.3・§7.4の境界・曖昧さ・ページ分割、§9.3のbyte保持、§10.1の競合。§10.2は次の各場合で、各要求の結果と残る件数が§10.2の記述どおりであること: 両方の作成前確認が終わった後の作成・作成後一覧の各順序、同一 `createdTime`・異なるfile ID、作成後一覧の反映遅延（重複が残り、以後の操作が409）、取り消しの失敗、作成の結果不明 |
 | `tests/connectors/obsidian/connector.test.ts` / `lifelog-connector.test.ts` / `filesystem-*.test.ts` | `append` 変更への追随、`compose` が例外のとき書き込まないこと |
 | `tests/config/schema.test.ts` | union（`filesystem` の既存設定がそのまま通る、`google_drive` に `vault_path`、不正な `vault_folder_id`、Directory重複） |
 | `tests/credentials/env.test.ts` | メッセージ変更 |
@@ -509,11 +534,11 @@ AC-D01〜D04・D07は変更しない。AC-D05・D06はP-02・P-03の結果によ
 
 ### Q4. 5 MiBの上限
 
-Resumable uploadを使えば上限はなくなるが、実装とテストが増える。MarkdownのノートでFilesystem保存に上限がないこととの差をREADMEに書く。
+5 MiBはGoogle APIの上限ではなく、resumable uploadを実装しないためのアプリ独自の上限である（§3）。Resumable uploadを使えばこの上限はなくなるが、実装とテストが増える。Filesystem保存に上限がないこととの差をREADMEに書く。
 
 ### Q5. 共有ドライブ
 
-対象外とする。共有ドライブ上のVaultを使う場合は、`supportsAllDrives`・`corpora=drive`・権限の検証を別途行う。
+対象外とする。実際のVaultがマイドライブにあることをP-01 Step 10で確認する。共有ドライブにあった場合は、`supportsAllDrives`・`corpora=drive`・権限の検証を本Planに加えてから実装する。
 
 ### Q6. 検索の性能
 
@@ -522,6 +547,13 @@ Resumable uploadを使えば上限はなくなるが、実装とテストが増�
 ### Q7. OAuth同意画面の公開ステータス
 
 `drive` は制限付きScopeのため、「本番環境」でも未確認アプリの警告が出る。個人利用では利用可能だが、Google側の方針変更でRefresh Tokenの扱いが変わり得る。READMEに再認可の手順を書く。
+
+### Q8. AI Foundationのwriter間で共有する作成の排他
+
+同時作成で成功を1件以下にする必要がある場合の候補。いずれも本Planの方式には含めない。
+
+- **親フォルダのメタデータによる予約**: 親フォルダの `appProperties` に予約（作成する名前・期限・要求ID）を、取得したフォルダの版に対する条件付き更新で書き込み、成功した要求だけが作成する。P-02の条件付き更新がフォルダのメタデータ更新にも効くこと、ファイルの作成で親フォルダの版が変わるかをprobeで別途確認する必要がある。期限切れの予約の扱い、利用者のフォルダへメタデータを書き込むこと、Drive for desktop・Obsidianは予約に参加しないことが制約になる。
+- **プロセス内のlock**: 1つのServer Process内の同時作成だけを直列化する。複数Process・複数Server・他のClientは排他できないため、単独では保証の根拠にならない。
 
 ---
 
