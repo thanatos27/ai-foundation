@@ -51,7 +51,7 @@ ChatGPT／Muse向けの接続設定・Adapter、自動デプロイ、IaCは対�
 1. **アプリは変えず、外側で合わせる。** Cloud Runのコンテナ契約（`PORT`・`0.0.0.0`・SIGTERM）に合わせるための変更は、`PORT` の読み取りだけにする。Host・`--no-env-file`・Configのパスはコンテナの起動コマンドと環境変数で決める。
 2. **イメージに個人の値を入れない。** Config・Credentialは実行時にSecret Managerから注入する。ビルド送信対象は許可リスト（allowlist）で決め、追加したファイルが誤って入らないようにする。
 3. **1つのrevisionが「イメージ＋Config＋Secret」の組を固定する。** イメージはdigest、SecretはversionをCloud Runのrevisionに固定する。ロールバックはrevisionの切り替えで行う。
-4. **ローカルで確認したイメージをそのまま配置する。** ローカルでビルド・テストしたイメージをArtifact Registryへpushし、そのdigestで配置する。
+4. **ローカルで確認したイメージをそのまま配置する。** 配置候補は1回だけビルドし、テストしたイメージIDにタグを付けてArtifact Registryへpushし、そのdigestで配置する。テスト後に再ビルドしない。
 5. **単一writerは運用条件であり保証ではない。** 最大インスタンス1・1コンテナ1プロセスにするが、名前の排他は既存仕様どおり保証しない。
 6. **確認用の認証なしAPIを追加しない。** 起動確認はCloud Runの既定のTCP startup probeに任せる。
 
@@ -263,15 +263,21 @@ Cloud RunのService Agentは同じProjectのArtifact Registryからpullできる
 ### 9.2 配置（初回・更新共通）
 
 1. 対象commitで `npm ci && npm run typecheck && npm run build && npm test` を実行する。
-2. `npm run test:container` でイメージをビルドしてローカルで確認する（§13.2）。
-3. ビルドしたイメージにタグを付けてpushし、digestを控える。
+2. 配置候補のイメージを1回だけビルドし、そのイメージIDを指定してコンテナテストを実行する（§13.2）。
+3. テストしたイメージIDにタグを付けてpushし、digestを控える。ここで再ビルドしない。
 
    ```sh
    IMAGE=asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ai-foundation/ai-foundation
-   docker build --platform linux/amd64 -t "$IMAGE:$(git rev-parse --short HEAD)" .
+   IID_FILE=$(mktemp)
+   docker build --platform linux/amd64 --iidfile "$IID_FILE" .
+   IMAGE_ID=$(cat "$IID_FILE")                       # sha256:…
+   AI_FOUNDATION_CONTAINER_IMAGE="$IMAGE_ID" npm run test:container
+   docker tag "$IMAGE_ID" "$IMAGE:$(git rev-parse --short HEAD)"
    docker push "$IMAGE:$(git rev-parse --short HEAD)"
    # digest: the "digest: sha256:…" line of the push output
    ```
+
+   タグはイメージIDを指すため、pushされるのはテストしたイメージそのものである。テストが失敗したら3以降に進まない。
 
 4. 書き込みを止める（更新時、§10.1）。
 5. digestとSecret versionを指定して配置する。
@@ -380,7 +386,7 @@ Cloud Consoleの「お支払い → レポート」でサービス別に、配�
 | `.dockerignore` | 新規 | §4.2 |
 | `.gitignore` | 変更 | `config.cloud.yaml` を追加（`.env.cloud` は既存の `.env.*` で除外済み） |
 | `.env.example` | 変更 | `PORT` の説明（Cloud Runが設定する、`AI_FOUNDATION_HTTP_PORT` が優先） |
-| `package.json` | 変更 | `test:container` scriptの追加 |
+| `package.json` | 変更 | `test:container` scriptの追加（`AI_FOUNDATION_CONTAINER_IMAGE` で既存イメージを指定可能、§13.2） |
 | `vitest.config.ts` | 変更 | `tests/container/**` を `npm test` の対象から除く |
 | `vitest.container.config.ts` | 新規 | コンテナテスト用（timeout延長、ファイル直列） |
 | `tests/startup/http-options.test.ts` | 変更 | Portの優先順位（§13.1） |
@@ -409,7 +415,10 @@ Cloud Consoleの「お支払い → レポート」でサービス別に、配�
 
 ### 13.2 コンテナテスト（`npm run test:container`、Docker必須）
 
-`tests/container/http.container.test.ts`。`beforeAll` で `docker build --platform linux/amd64` し、各テストで `docker run` する。外部Providerへは接続しない（Credentialを渡さない）。
+`tests/container/http.container.test.ts`。外部Providerへは接続しない（Credentialを渡さない）。
+
+- テスト対象のイメージ: `AI_FOUNDATION_CONTAINER_IMAGE`（イメージIDまたはタグ）が設定されていればそのイメージをビルドせずに使う（配置時、§9.2）。未設定なら `beforeAll` で `docker build --platform linux/amd64 --iidfile` し、得たイメージIDを使う（開発時）。T1〜T8はこのイメージに対して `docker run` する。
+- T9だけは `.dockerignore` の規則を確かめるため、隔離したビルドコンテキストで別にビルドする。`fs.mkdtemp` で作ったOSの一時ディレクトリへ `Dockerfile`・`.dockerignore`・`package.json`・`package-lock.json`・`tsconfig.json`・`tsconfig.build.json`・`src/` をコピーし、その中にダミーファイルを作ってビルドする。テスト後はその一時ディレクトリだけを削除し、作ったイメージも削除する。Repositoryの作業ツリーには何も作成・削除しない（実運用の `.env.cloud`・`config.cloud.yaml` は同名なので触れない）。
 
 | # | 確認内容 | AC |
 |---|---|---|
@@ -421,7 +430,7 @@ Cloud Consoleの「お支払い → レポート」でサービス別に、配�
 | T6 | `AI_FOUNDATION_CONFIG` なしで終了コード1・`Config file not found`。不正なYAML・Schema違反のConfigで終了コード1・`Invalid configuration` | AC-C04, AC-C05 |
 | T7 | 実行ユーザーのuidが0でない。`/app` のファイルを書き換えられない | AC-C01 |
 | T8 | §4.3（イメージ内のファイル・環境変数・history） | AC-C04 |
-| T9 | `.dockerignore` の確認: 作業ツリーにダミーの `.env.cloud`・`config.cloud.yaml` を置いた状態でビルドしても、イメージに含まれない（テスト後に削除） | AC-C04 |
+| T9 | `.dockerignore` の確認: 隔離したビルドコンテキスト（上記）にダミーの `.env`・`.env.cloud`・`config.local.yaml`・`config.cloud.yaml`・`credentials.json`・`archive.zip` を置いてビルドしても、イメージに含まれない | AC-C04 |
 
 ProcessはNode 1つであること（`ps` でPID 1が `node`）もT1で確認する（AC-C06）。
 
@@ -463,7 +472,7 @@ ProcessはNode 1つであること（`ps` でPID 1が `node`）もT1で確認す
 
 ### 14.4 AC-C08（読み取りsmoke）
 
-本番Configのrevisionで、`GET /v1/tasks`・`/v1/schedules`（今日から7日間）・`/v1/collection`（検索1件）・`/v1/projects`・`/v1/areas` を実行して200を確認する（読み取りのみ）。stdio MCP・Filesystem保存はローカルの `npm test`（既存のe2e・storage-compat）で回帰を確認する。
+本番Configのrevisionで、`GET /v1/tasks`・`/v1/schedules`（今日から7日間）・`/v1/collection-items`（検索1件）・`/v1/projects`・`/v1/areas` を実行して200を確認する（読み取りのみ）。stdio MCP・Filesystem保存はローカルの `npm test`（既存のe2e・storage-compat）で回帰を確認する。
 
 ### 14.5 AC-C04（ログ）
 
