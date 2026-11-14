@@ -92,7 +92,7 @@ v2 `files.get` で取得したetagと `headRevisionId` を基準にし、その�
 
 ### 運用条件
 
-書き込みを行うServerは1 Processにする（同じVaultでMCP Server〈stdio〉とHTTP Serverを同時に起動しない。クラウドではreplicaを1つにする）。
+書き込みを行うServerを意図的に複数起動しない（同じVaultでMCP Server〈stdio〉とHTTP Serverを同時に起動しない。Cloud Runでは最大インスタンス1・トラフィック分割なし、[クラウド配置](cloud-run.md)）。これは運用条件で、プラットフォームによる一時的な複数インスタンスや更新時の切り替えを含め、Process間の名前の排他は保証しない（「作成」の複数Process）。
 
 ### 結果不明
 
