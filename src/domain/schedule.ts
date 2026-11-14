@@ -83,31 +83,48 @@ export type ScheduleListFilter = z.infer<typeof ScheduleListFilterSchema>;
 
 const SCHEDULE_UPDATE_FIELDS = ['title', 'start', 'end', 'description', 'location'] as const;
 
+/** The fields of `schedule_update` besides `id`; the HTTP API takes them as the request body. */
+export const ScheduleUpdateFields = {
+  title: z.string().min(1).optional(),
+  start: DateOrDateTimeSchema.optional(),
+  end: DateOrDateTimeSchema.optional(),
+  description: ScheduleTextSchema.nullable().optional(),
+  location: ScheduleTextSchema.nullable().optional(),
+};
+
+type ScheduleUpdateValue = Partial<Record<(typeof SCHEDULE_UPDATE_FIELDS)[number], unknown>> & {
+  start?: string | undefined;
+  end?: string | undefined;
+};
+
+/**
+ * The rules of `schedule_update` that span its fields, for any object schema holding them: at least
+ * one change, and a given start / end pair of the same kind and in order. Only start or only end is
+ * checked against the event by the connector.
+ */
+export function withScheduleUpdateRules<T extends z.ZodType<ScheduleUpdateValue>>(schema: T): T {
+  return schema
+    .refine((input) => SCHEDULE_UPDATE_FIELDS.some((field) => input[field] !== undefined), {
+      message: `At least one of ${SCHEDULE_UPDATE_FIELDS.join(', ')} must be specified`,
+    })
+    .refine((value) => value.start === undefined || sameDateKind({ start: value.start, end: value.end }), MIXED_DATE_KIND)
+    .refine(
+      (value) =>
+        value.start === undefined ||
+        !sameDateKind({ start: value.start, end: value.end }) ||
+        endNotBeforeStart({ start: value.start, end: value.end }),
+      END_BEFORE_START,
+    );
+}
+
 /**
  * Input of `schedule_update`. Omitted fields are kept; `description` / `location: null` clears them.
  * Only `start` or only `end` keeps the other one; the connector checks the pair against the event.
  * The calendar never changes (no `calendar` field).
  */
-export const ScheduleUpdateInputSchema = z
-  .strictObject({
-    id: z.string().min(1),
-    title: z.string().min(1).optional(),
-    start: DateOrDateTimeSchema.optional(),
-    end: DateOrDateTimeSchema.optional(),
-    description: ScheduleTextSchema.nullable().optional(),
-    location: ScheduleTextSchema.nullable().optional(),
-  })
-  .refine((input) => SCHEDULE_UPDATE_FIELDS.some((field) => input[field] !== undefined), {
-    message: `At least one of ${SCHEDULE_UPDATE_FIELDS.join(', ')} must be specified`,
-  })
-  .refine((value) => value.start === undefined || sameDateKind({ start: value.start, end: value.end }), MIXED_DATE_KIND)
-  .refine(
-    (value) =>
-      value.start === undefined ||
-      !sameDateKind({ start: value.start, end: value.end }) ||
-      endNotBeforeStart({ start: value.start, end: value.end }),
-    END_BEFORE_START,
-  );
+export const ScheduleUpdateInputSchema = withScheduleUpdateRules(
+  z.strictObject({ id: z.string().min(1), ...ScheduleUpdateFields }),
+);
 export type ScheduleUpdateInput = z.infer<typeof ScheduleUpdateInputSchema>;
 
 /** `schedule_create` input with its provider-independent defaults applied. */

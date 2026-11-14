@@ -52,24 +52,36 @@ export type CollectionSearchFilter = z.infer<typeof CollectionSearchFilterSchema
 
 const COLLECTION_UPDATE_FIELDS = ['status', 'metadata', 'tags', 'append_note'] as const;
 
+/** The fields of `collection_update` besides `id`; the HTTP API takes them as the request body. */
+export const CollectionUpdateFields = {
+  status: CollectionStatusSchema.nullable().optional(),
+  metadata: CollectionMetadataSchema.optional(),
+  tags: TagsSchema.optional(),
+  append_note: NoteSchema.nullable().optional(),
+};
+
+/**
+ * The rule of `collection_update` that spans its fields, for any object schema holding them: at
+ * least one change (`append_note: null` changes nothing, so it does not count).
+ */
+export function withCollectionUpdateRules<
+  T extends z.ZodType<Partial<Record<(typeof COLLECTION_UPDATE_FIELDS)[number], unknown>>>,
+>(schema: T): T {
+  return schema.refine(
+    (input) =>
+      input.status !== undefined || input.metadata !== undefined || input.tags !== undefined || input.append_note != null,
+    { message: `At least one of ${COLLECTION_UPDATE_FIELDS.join(', ')} must be specified` },
+  );
+}
+
 /**
  * Input of `collection_update`. Only the given fields change: `status: null` clears the status,
  * `metadata` is shallow-merged, `tags` replaces the tags and `append_note` is added to the end of
  * the page. `append_note: null` changes nothing, so it does not count as an update.
  */
-export const CollectionUpdateInputSchema = z
-  .strictObject({
-    id: z.string().min(1),
-    status: CollectionStatusSchema.nullable().optional(),
-    metadata: CollectionMetadataSchema.optional(),
-    tags: TagsSchema.optional(),
-    append_note: NoteSchema.nullable().optional(),
-  })
-  .refine(
-    (input) =>
-      input.status !== undefined || input.metadata !== undefined || input.tags !== undefined || input.append_note != null,
-    { message: `At least one of ${COLLECTION_UPDATE_FIELDS.join(', ')} must be specified` },
-  );
+export const CollectionUpdateInputSchema = withCollectionUpdateRules(
+  z.strictObject({ id: z.string().min(1), ...CollectionUpdateFields }),
+);
 export type CollectionUpdateInput = z.infer<typeof CollectionUpdateInputSchema>;
 
 /**
