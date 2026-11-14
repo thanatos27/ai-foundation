@@ -70,7 +70,10 @@ export const withId = (prefix: string, id: string, suffix = '') => `${prefix}/${
 
 // ---- OpenAPI conformance --------------------------------------------------------------------
 
-type OpenApiDocument = { paths: Record<string, Record<string, any>>; components: { schemas: Record<string, unknown> } };
+type OpenApiDocument = {
+  paths: Record<string, Record<string, any>>;
+  components: { schemas: Record<string, unknown>; securitySchemes?: Record<string, unknown> };
+};
 
 const documents = new WeakMap<TestApp, OpenApiDocument>();
 

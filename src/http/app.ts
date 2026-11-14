@@ -40,6 +40,14 @@ export function createHttpApp({ config, connectors, apiKey, logError }: HttpAppO
   });
   app.notFound((c) => c.json(errorBody('route_not_found', `No such route: ${c.req.method} ${c.req.path}`), 404));
 
+  // Hono hands only Error instances to onError: anything else thrown becomes one, so it is a 500 too.
+  app.use('*', async (_c, next) => {
+    try {
+      await next();
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('A non-error value was thrown', { cause: error });
+    }
+  });
   app.use('*', bearerAuth(apiKey));
   app.use(
     '*',

@@ -17,6 +17,8 @@ const notionConfig = fixture('notion-data-source.yaml');
 const serverCommand = { command: process.execPath, args: ['--import', 'tsx', 'src/index.ts', '--no-env-file'] };
 
 const CREDENTIAL_VARS = [
+  // The HTTP API key: the MCP server must start without it.
+  'AI_FOUNDATION_API_KEY',
   'TODOIST_API_TOKEN',
   'GOOGLE_OAUTH_CLIENT_ID',
   'GOOGLE_OAUTH_CLIENT_SECRET',
