@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,20 +44,27 @@ async function dockerOk(args: string[], timeout?: number): Promise<string> {
   return run.stdout.trim();
 }
 
-/** Builds `context` and returns the image ID. */
-async function build(context: string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'aif-iid-'));
-  try {
-    const iidFile = join(dir, 'iid');
-    await dockerOk(['build', '--platform', PLATFORM, '--iidfile', iidFile, context], 600_000);
-    return (await readFile(iidFile, 'utf8')).trim();
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+const imageId = (ref: string) => dockerOk(['image', 'inspect', '-f', '{{.Id}}', ref]);
+
+interface Built {
+  tag: string;
+  id: string;
 }
 
+/**
+ * Builds `context` under a tag of its own and returns the tag and the image ID. Tagged rather than
+ * read from --iidfile: with the containerd image store the iidfile can hold a digest that does not
+ * name the stored image (e.g. without build attestations), and an untagged image cannot be referenced.
+ */
+async function build(context: string, extra: string[] = []): Promise<Built> {
+  const tag = `ai-foundation-test:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  await dockerOk(['build', '--platform', PLATFORM, '-t', tag, ...extra, context], 600_000);
+  return { tag, id: await imageId(tag) };
+}
+
+/** The ID of the image under test. */
 let image: string;
-let builtHere = false;
+let builtHere: Built | undefined;
 let scratch: string;
 const containers: string[] = [];
 
@@ -65,19 +72,33 @@ beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'aif-container-'));
   const given = process.env.AI_FOUNDATION_CONTAINER_IMAGE?.trim();
   if (given) {
-    image = given;
+    // Normalized to the image ID, so that cleanup can tell it apart from images built by a test.
+    image = await imageId(given);
   } else {
-    image = await build(repoRoot);
-    builtHere = true;
+    builtHere = await build(repoRoot);
+    image = builtHere.id;
   }
 });
+
+/**
+ * Drops the tag a test built an image under. A build from the same inputs (e.g. the isolated
+ * context) can yield the image under test itself: then only the tag goes, and only when the image
+ * keeps another tag, so the deploy candidate always survives the tests.
+ */
+async function removeBuilt({ tag, id }: Built): Promise<void> {
+  if (id === image) {
+    const tags = JSON.parse(await dockerOk(['image', 'inspect', '-f', '{{json .RepoTags}}', id])) as string[];
+    if (tags.filter((t) => t !== tag).length === 0) return;
+  }
+  await docker(['rmi', tag]);
+}
 
 afterEach(async () => {
   for (const id of containers.splice(0)) await docker(['rm', '-f', id]);
 });
 
 afterAll(async () => {
-  if (builtHere && image) await docker(['rmi', image]);
+  if (builtHere) await docker(['rmi', builtHere.tag]);
   if (scratch) await rm(scratch, { recursive: true, force: true });
 });
 
@@ -222,7 +243,7 @@ describe('container: build context (AC-C04)', () => {
 
   it('sends only the .dockerignore allowlist, and the image holds none of the rest', async () => {
     const context = await mkdtemp(join(tmpdir(), 'aif-context-'));
-    let isolated: string | undefined;
+    let isolated: Built | undefined;
     try {
       for (const name of ['Dockerfile', '.dockerignore', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.build.json']) {
         await cp(join(repoRoot, name), join(context, name));
@@ -236,14 +257,12 @@ describe('container: build context (AC-C04)', () => {
       try {
         const probe = join(probeDir, 'Dockerfile');
         await writeFile(probe, `FROM ${BASE_IMAGE}\nCOPY . /ctx\n`, 'utf8');
-        const iidFile = join(probeDir, 'iid');
-        await dockerOk(['build', '--platform', PLATFORM, '-f', probe, '--iidfile', iidFile, context], 600_000);
-        const probeImage = (await readFile(iidFile, 'utf8')).trim();
+        const probeImage = await build(context, ['-f', probe]);
         try {
-          const listed = await dockerOk(['run', '--rm', '--platform', PLATFORM, '--entrypoint', 'sh', probeImage, '-c', 'ls -A /ctx']);
+          const listed = await dockerOk(['run', '--rm', '--platform', PLATFORM, '--entrypoint', 'sh', probeImage.tag, '-c', 'ls -A /ctx']);
           expect(listed.split('\n').sort()).toEqual(['package-lock.json', 'package.json', 'src', 'tsconfig.build.json', 'tsconfig.json']);
         } finally {
-          await docker(['rmi', probeImage]);
+          await removeBuilt(probeImage);
         }
       } finally {
         await rm(probeDir, { recursive: true, force: true });
@@ -251,12 +270,12 @@ describe('container: build context (AC-C04)', () => {
 
       isolated = await build(context);
       const found = await docker([
-        'run', '--rm', '--platform', PLATFORM, '--user', '0', '--entrypoint', 'sh', isolated, '-c',
+        'run', '--rm', '--platform', PLATFORM, '--user', '0', '--entrypoint', 'sh', isolated.tag, '-c',
         `find / -xdev \\( ${DUMMIES.map((name) => `-name '${name}'`).join(' -o ')} \\) -print 2>/dev/null; grep -rl DUMMY_SECRET_VALUE /app 2>/dev/null; true`,
       ]);
       expect(found.stdout.trim()).toBe('');
     } finally {
-      if (isolated) await docker(['rmi', isolated]);
+      if (isolated) await removeBuilt(isolated);
       await rm(context, { recursive: true, force: true });
     }
   });

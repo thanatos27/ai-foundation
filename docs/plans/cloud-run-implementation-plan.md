@@ -176,10 +176,15 @@ const port =
 ### 6.2 値の登録（実値をコマンド引数・履歴・ログに出さない）
 
 - Config: `gcloud secrets versions add ai-foundation-config --data-file=config.cloud.yaml`
-- Credential: ローカルの `.env`（または配置用の `.env.cloud`、`.gitignore` 済み）から標準入力で渡す。
+- Credential: 配置用の `.env.cloud`（`.gitignore` 済み）から標準入力で渡す。値は `.env.cloud` を `util.parseEnv` で直接解析して取り出す（`node --env-file` はシェルの既存の環境変数を優先し、ファイルを更新しても古い値を登録し得るため使わない）。値が空・未設定なら登録しない。
 
   ```sh
-  node --env-file=.env -e "process.stdout.write(process.env.TODOIST_API_TOKEN)" \
+  env_cloud() {  # <name>: the value of <name> in .env.cloud
+    node -e "const v = require('node:util').parseEnv(require('node:fs').readFileSync('.env.cloud', 'utf8'))[process.argv[1]];
+  if (!v) { console.error(process.argv[1] + ' is not set in .env.cloud'); process.exit(1); }
+  process.stdout.write(v);" "$1"
+  }
+  env_cloud TODOIST_API_TOKEN > /dev/null && env_cloud TODOIST_API_TOKEN \
     | gcloud secrets versions add ai-foundation-todoist-api-token --data-file=-
   ```
 
@@ -267,16 +272,15 @@ Cloud RunのService Agentは同じProjectのArtifact Registryからpullできる
 
    ```sh
    IMAGE=asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ai-foundation/ai-foundation
-   IID_FILE=$(mktemp)
-   docker build --platform linux/amd64 --iidfile "$IID_FILE" .
-   IMAGE_ID=$(cat "$IID_FILE")                       # sha256:…
+   docker build --pull --platform linux/amd64 -t ai-foundation:candidate .   # --pull: the latest node:24-bookworm-slim (D8)
+   IMAGE_ID=$(docker image inspect -f '{{.Id}}' ai-foundation:candidate)    # sha256:…
    AI_FOUNDATION_CONTAINER_IMAGE="$IMAGE_ID" npm run test:container
    docker tag "$IMAGE_ID" "$IMAGE:$(git rev-parse --short HEAD)"
    docker push "$IMAGE:$(git rev-parse --short HEAD)"
    # digest: the "digest: sha256:…" line of the push output
    ```
 
-   タグはイメージIDを指すため、pushされるのはテストしたイメージそのものである。テストが失敗したら3以降に進まない。
+   タグはイメージIDを指すため、pushされるのはテストしたイメージそのものである。テストが失敗したら3以降に進まない。イメージIDは `--iidfile` ではなく `docker image inspect` で取得する（containerdのイメージストアでは、ビルドのattestationを無効にした場合などに `--iidfile` の値で保存されたイメージを参照できない）。
 
 4. 書き込みを止める（更新時、§10.1）。
 5. digestとSecret versionを指定して配置する。
@@ -302,7 +306,7 @@ Cloud RunのService Agentは同じProjectのArtifact Registryからpullできる
 URL=$(gcloud run services describe ai-foundation --format='value(status.url)')
 curl -s -o /dev/null -w '%{http_code}\n' "$URL/openapi.json"                                   # 401
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer wrong-key' "$URL/openapi.json" # 401
-curl -s -H "Authorization: Bearer $(node --env-file=.env.cloud -p process.env.AI_FOUNDATION_API_KEY)" "$URL/openapi.json" | head -c 200
+curl -s -H "Authorization: Bearer $(env_cloud AI_FOUNDATION_API_KEY)" "$URL/openapi.json" | head -c 200
 ```
 
 APIキーはファイルから読み、コマンドラインに直接書かない（`-H` の値は自分のProcess一覧には現れるが、シェル履歴には残らない）。
@@ -416,7 +420,7 @@ Cloud Consoleの「お支払い → レポート」でサービス別に、配�
 
 `tests/container/http.container.test.ts`。外部Providerへは接続しない（Credentialを渡さない）。
 
-- テスト対象のイメージ: `AI_FOUNDATION_CONTAINER_IMAGE`（イメージIDまたはタグ）が設定されていればそのイメージをビルドせずに使う（配置時、§9.2）。未設定なら `beforeAll` で `docker build --platform linux/amd64 --iidfile` し、得たイメージIDを使う（開発時）。T1〜T8はこのイメージに対して `docker run` する。
+- テスト対象のイメージ: `AI_FOUNDATION_CONTAINER_IMAGE`（イメージIDまたはタグ）が設定されていればそのイメージをビルドせずに使う（配置時、§9.2）。指定はイメージIDに正規化する（同じ入力のビルドは同じIDになり得るため、後片付けで配置候補を消さないよう区別する）。未設定なら `beforeAll` でテスト用のタグを付けて `docker build --platform linux/amd64` し、`docker image inspect` で得たイメージIDを使う（開発時）。テスト内のビルドの後片付けはテスト用のタグを外す形で行い、テスト対象と同じイメージで他のタグがなければ外さない。T1〜T8はこのイメージに対して `docker run` する。
 - T9だけは `.dockerignore` の規則を確かめるため、隔離したビルドコンテキストで別にビルドする。`fs.mkdtemp` で作ったOSの一時ディレクトリへ `Dockerfile`・`.dockerignore`・`package.json`・`package-lock.json`・`tsconfig.json`・`tsconfig.build.json`・`src/` をコピーし、その中にダミーファイルを作ってビルドする。テスト後はその一時ディレクトリだけを削除し、作ったイメージも削除する。Repositoryの作業ツリーには何も作成・削除しない（実運用の `.env.cloud`・`config.cloud.yaml` は同名なので触れない）。
 
 | # | 確認内容 | AC |
@@ -533,7 +537,7 @@ D13のとおりURL・Project IDはRepositoryに書かない。revision・digest�
 | `npm run typecheck` / `npm run build` | 成功 |
 | `npm test` | 71 files・1908 passed・5 skipped |
 | `npm run test:container`（テスト内でビルド） | 11 passed |
-| §9.2の流れ（`--iidfile` で1回ビルド → `AI_FOUNDATION_CONTAINER_IMAGE` にイメージIDを渡してテスト） | 11 passed。テスト後もイメージIDは同じで、そのままtag・pushできる |
+| §9.2の流れ（1回ビルド → `AI_FOUNDATION_CONTAINER_IMAGE` にイメージIDを渡してテスト） | 11 passed。テスト後もイメージIDは同じで、そのままtag・pushできる |
 | イメージサイズ | 約89 MB（`docker image inspect` の `Size`） |
 
 ### 18.2 Planからの細部の変更・Plan外の変更

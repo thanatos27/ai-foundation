@@ -97,6 +97,16 @@ Project単位のRoleは付与しない（Secretへのアクセスだけを §1.6
   node -e "console.log('AI_FOUNDATION_API_KEY=' + crypto.randomBytes(32).toString('base64url'))" >> .env.cloud
   ```
 
+`.env.cloud` の値は次の関数で読む（以降の手順で使う。シェルを開き直したら定義し直す）。ファイルだけを解析し、シェルに同じ名前の環境変数があっても使わない（`node --env-file` は既存の環境変数を優先するため使わない）。値が空・未設定なら何も出力せずに失敗する。
+
+```sh
+env_cloud() {  # <name>: the value of <name> in .env.cloud
+  node -e "const v = require('node:util').parseEnv(require('node:fs').readFileSync('.env.cloud', 'utf8'))[process.argv[1]];
+if (!v) { console.error(process.argv[1] + ' is not set in .env.cloud'); process.exit(1); }
+process.stdout.write(v);" "$1"
+}
+```
+
 Secretを作り、実行用Service Accountに読み取りを許可する。
 
 ```sh
@@ -120,20 +130,21 @@ done
 npm ci && npm run typecheck && npm run build && npm test
 ```
 
-配置候補のイメージを1回だけビルドし、そのイメージをコンテナテストしてから、同じイメージIDにタグを付けてpushする（テスト後に再ビルドしない）。
+配置候補のイメージを1回だけビルドし、そのイメージをコンテナテストしてから、同じイメージIDにタグを付けてpushする（テスト後に再ビルドしない）。`--pull` でベースイメージ（`node:24-bookworm-slim`）の最新を取得し、Nodeのセキュリティ修正を取り込む。
 
 ```sh
 IMAGE=asia-northeast1-docker.pkg.dev/<PROJECT_ID>/ai-foundation/ai-foundation
-IID_FILE=$(mktemp)
-docker build --platform linux/amd64 --iidfile "$IID_FILE" .
-IMAGE_ID=$(cat "$IID_FILE")
+docker build --pull --platform linux/amd64 -t ai-foundation:candidate .
+IMAGE_ID=$(docker image inspect -f '{{.Id}}' ai-foundation:candidate)
 AI_FOUNDATION_CONTAINER_IMAGE="$IMAGE_ID" npm run test:container
 TAG=$(git rev-parse --short HEAD)
 docker tag "$IMAGE_ID" "$IMAGE:$TAG"
 docker push "$IMAGE:$TAG"     # 出力の "digest: sha256:…" を控える
 ```
 
-テストが失敗したらpushしない。
+- テストが失敗したらpushしない。
+- イメージIDは `--iidfile` ではなく `docker image inspect` で取得する（containerdのイメージストアでは、`--iidfile` の値で保存されたイメージを参照できない場合がある）。
+- コンテナテストは、テスト内でビルドしたイメージの後片付けで配置候補（`AI_FOUNDATION_CONTAINER_IMAGE`）を削除しない。
 
 ### 2.2 書き込みの停止（更新時）
 
@@ -176,7 +187,7 @@ GITHUB_TOKEN=ai-foundation-github-token:<v>"
 
 ```sh
 URL=$(gcloud run services describe ai-foundation --format='value(status.url)')
-KEY_HEADER="Authorization: Bearer $(node --env-file=.env.cloud -p process.env.AI_FOUNDATION_API_KEY)"
+KEY_HEADER="Authorization: Bearer $(env_cloud AI_FOUNDATION_API_KEY)"
 curl -s -o /dev/null -w '%{http_code}\n' "$URL/openapi.json"                                    # 401
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer wrong-key' "$URL/openapi.json" # 401
 curl -s -o /dev/null -w '%{http_code}\n' -H "$KEY_HEADER" "$URL/openapi.json"                     # 200
@@ -209,14 +220,14 @@ gcloud run services update-traffic ai-foundation --to-revisions <前のrevision>
 
 ### 4.1 値の登録
 
-値はpipeで渡し、コマンドラインには変数名だけが現れるようにする。
+値はpipeで渡し、コマンドラインには変数名だけが現れるようにする。`env_cloud` は §1.6 の関数。
 
 ```sh
 gcloud secrets versions add ai-foundation-config --data-file=config.cloud.yaml
 
 add_env_secret() {  # <secret name> <variable name in .env.cloud>
-  node --env-file=.env.cloud -e "process.stdout.write(process.env['$2'] ?? '')" \
-    | gcloud secrets versions add "$1" --data-file=-
+  env_cloud "$2" > /dev/null || return 1   # empty or missing: register nothing
+  env_cloud "$2" | gcloud secrets versions add "$1" --data-file=-
 }
 add_env_secret ai-foundation-api-key AI_FOUNDATION_API_KEY
 add_env_secret ai-foundation-todoist-api-token TODOIST_API_TOKEN
