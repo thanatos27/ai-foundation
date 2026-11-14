@@ -17,6 +17,7 @@
     "start": "node dist/index.js",
     "start:http": "node dist/serve-http.js",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:container": "vitest run --config vitest.container.config.ts",
     "auth:google": "tsx scripts/google-auth.ts",
     "openapi": "tsx scripts/openapi.ts"
   },

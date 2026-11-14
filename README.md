@@ -117,6 +117,7 @@ npm run dev:http     # tsx src/serve-http.ts（Build不要）
 | `AI_FOUNDATION_API_KEY` | 必須。32文字以上の印字可能ASCII（空白なし）。未設定・不正ならHTTP Serverは起動せず、理由を表示して終了する |
 | `AI_FOUNDATION_HTTP_HOST` | 待ち受けるHost（既定 `127.0.0.1`）。`--host` が優先 |
 | `AI_FOUNDATION_HTTP_PORT` | 待ち受けるPort（既定 `8787`、`0` は空きPort）。`--port` が優先 |
+| `PORT` | `AI_FOUNDATION_HTTP_PORT` も `--port` もないときに使うPort。Cloud Run等のコンテナ実行環境が設定する |
 
 ConfigとProviderのCredentialはMCP Serverと同じ（`--config` / `AI_FOUNDATION_CONFIG` / `.env` / `--no-env-file`）。APIキーはランダムに生成して `.env` に設定する。キーの変更は環境変数を更新して再起動する。
 
@@ -148,6 +149,14 @@ Route定義とZod Schemaから生成し、手書きの仕様ファイルは持�
 ```sh
 curl -H "Authorization: Bearer $KEY" http://127.0.0.1:8787/openapi.json
 npm run --silent openapi > openapi.json   # Serverを起動せずに出力（APIキー不要、外部通信なし）
+```
+
+### クラウドに配置する（Cloud Run）
+
+`Dockerfile` でHTTP Serverのコンテナイメージを作り、Google Cloud Runへ手動で配置できる。HTTPSはCloud Runが終端し、APIキーの認証はそのまま全ルートに掛かる。ConfigとCredentialはイメージに含めず、Secret Managerから注入する。Knowledge / Life Logは `storage: google_drive` で使う。仕様は [クラウド配置 Design](docs/specs/cloud-run.md)、手順は [Cloud Run配置手順](docs/deploy/cloud-run.md)。
+
+```sh
+npm run test:container   # Dockerでイメージをビルドし、起動・認証・停止・イメージの中身を確認（外部通信なし）
 ```
 
 ## Configuration
@@ -258,7 +267,7 @@ sources:
 - 追記は、読み取った版に対する条件付き更新で書き込む。読み取った後にDrive上で更新されていれば（Obsidianでの編集がDrive for desktopで同期された場合を含む）書き込まず409を返すので、読み直して再実行する。AI Foundationと、Obsidian／Drive for desktopによる通常の更新を前提とし、更新日時を維持する特殊なAPI呼び出し・ツールでの更新は対象外
 - PC上のObsidianで保存していない編集、Drive for desktopがまだUploadしていない変更はAPIから見えないため保護しない。同時に追記した場合の順序も保証しない
 - 作成は、同じServer Process内の同じ名前の作成を1件ずつ実行し、作成前・作成後に同じ名前を確認する。作成後に同じ名前の別のファイルが見つかった場合は、作成済みであることを示して409を返す（作成したファイルは残る）。名前の一意性は保証しない（Driveは同じ名前のファイルを許すため、他のClientやDrive for desktopとの同時作成、一覧への反映の遅れでは重複し得る）
-- **書き込むServerは1 Processにする。** 同じVaultに対してMCP Server（stdio）とHTTP Serverを同時に起動したり、クラウドで複数のreplicaを動かしたりすると、作成の直列化が効かない
+- **書き込むServerを意図的に複数起動しない。** 同じVaultに対してMCP Server（stdio）とHTTP Serverを同時に起動しない。Cloud Runでは最大インスタンス1にするが、一時的に複数のインスタンスが動く場合があり、その間は作成の直列化が効かない（[Cloud Run配置手順](docs/deploy/cloud-run.md)の更新手順で書き込みを止める）
 - 書き込みの結果が分からない場合（タイムアウト・切断・5xx）は自動で再試行せず、確認してから再実行するよう示すErrorを返す
 - 検索はフォルダごとの一覧と全ファイルの本文の取得を毎回行う（Cacheしない）。ファイル数が多いと時間がかかる
 
@@ -542,5 +551,8 @@ stdoutはMCPのJSON-RPC専用。`console.log` を使うとstdio通信が壊れ�
 - [複数Calendar・期間イベント Implementation Plan](docs/plans/schedule-calendars-implementation-plan.md)
 - [REST API Design](docs/specs/rest-api.md)
 - [REST API Implementation Plan](docs/plans/rest-api-implementation-plan.md)
+- [クラウド配置（Cloud Run） Design](docs/specs/cloud-run.md)
+- [クラウド配置（Cloud Run） Implementation Plan](docs/plans/cloud-run-implementation-plan.md)
+- [Cloud Run配置手順](docs/deploy/cloud-run.md)
 - [Development Workflow](docs/development/workflow.md)
 - [Agent Guidelines](AGENTS.md)

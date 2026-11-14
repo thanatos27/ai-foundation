@@ -12,6 +12,7 @@ token*.json
 *.pem
 *.key
 config.local.yaml
+config.cloud.yaml
 
 # OS / editor
 .DS_Store

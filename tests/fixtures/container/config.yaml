@@ -1,0 +1,30 @@
+# Config for the container tests (npm run test:container). No personal IDs: the vault folder ID
+# is a placeholder and no credential is passed, so no test reaches a provider.
+version: "0.1"
+
+defaults:
+  area: personal
+  timezone: Asia/Tokyo
+
+sources:
+  task:
+    provider: todoist
+  schedule:
+    provider: google_calendar
+  collection:
+    provider: notion
+  knowledge:
+    default: obsidian
+    providers:
+      - obsidian
+    obsidian:
+      storage: google_drive
+      vault_folder_id: "container-test-vault-folder"
+      knowledge_dir: "AI_Foundation/Knowledge"
+  project:
+    providers:
+      - github
+  lifelog:
+    provider: obsidian
+    obsidian:
+      directory: "AI_Foundation/LifeLog"
