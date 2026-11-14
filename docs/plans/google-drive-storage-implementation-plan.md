@@ -1,6 +1,6 @@
 # Google Drive保存対応（Knowledge／Life Log） — Implementation Plan
 
-- Status: **Draft。実API検証（P-01〜P-03）は未実施。AC-D05・AC-D06は未確定**
+- Status: **Draft。P-01〜P-03は実施済み（§17。P-02m・P-03mは未実施）。AC-D05・AC-D06は未確定（設計レビュー待ち）**
 - 作成: 2026-11-14
 - 対象: [Issue #34](https://github.com/thanatos27/ai-foundation/issues/34)
 - 参照: [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Life Log Implementation Plan](lifelog-implementation-plan.md), [REST API](../specs/rest-api.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -72,7 +72,7 @@ Google Driveに同期済みのObsidian Vaultを、Google Drive APIから直接�
 | ショートカット | 辿らない。Vaultルート〜対象Directory上にあれば `ConfigurationError`、対象Directory内の検索では除外、ID指定の対象・途中にあれば `InputValidationError` | Symbolic Linkと同じ扱い |
 | ゴミ箱 | 一覧・解決とも `trashed = false` のみ。Vaultルート・対象Directoryがゴミ箱内なら `ConfigurationError` | 削除済みのものを操作しない |
 | Google Docs等 | `application/vnd.google-apps.*`（フォルダ・ショートカット以外）は対象外（検索で除外、ID指定は `NotFoundError`）。変換しない | Markdownのbyte列を持たない |
-| ファイルの種類 | `.md` の判定は名前だけで行い、MIME typeでは絞らない | 同期クライアントが付けるMIME typeは一定でない可能性がある（P-01で記録） |
+| ファイルの種類 | `.md` の判定は名前だけで行い、MIME typeでは絞らない | Drive for desktopで置いた `.md` のMIME typeは `text/plain` だった（P-01）。API・同期クライアントで値が異なる |
 | 共有ドライブ | 対象外（マイドライブのみ）。`supportsAllDrives` は指定しない（Q5） | 同期済みVaultはマイドライブにある前提。共有ドライブは権限・一覧のcorporaが異なる |
 | サイズ | 作成・追記後のファイルが5 MiBを超える場合は書き込まない（アプリ独自の上限、Q4） | Googleのupload guideはmedia / multipart uploadを5 MB以下の小さいファイル向けとし、それを超える場合はresumable uploadを案内している。APIの最大ファイルサイズ（`files.update` のreference）とは別の値で、本Planはresumable uploadを実装しないためにこの上限を設ける。Markdownのノートでは通常超えない |
 
@@ -230,20 +230,27 @@ Connector側が使う最小のInterfaceを定義し、テストではFakeを注�
 interface DriveItem {
   id: string; name: string; mimeType: string; trashed: boolean;
   parents: string[]; size?: number; modifiedTime: string; createdTime: string;
-  headRevisionId?: string; /* P-02で採用した条件の値（etag / version） */
 }
 
+/** 追記の基準: 1回のv2 files.getで得たetagとheadRevisionId（同じ版を指す） */
+interface DriveRevision { fileId: string; etag: string; headRevisionId: string }
+
 interface DriveApi {
-  getItem(fileId: string): Promise<DriveItem>;                       // files.get
-  /** 全ページを取得してから返す。trashed = false のみ。name指定時もDrive側の一致規則に依らず呼び出し側で完全一致を確認する */
+  getItem(fileId: string): Promise<DriveItem>;                       // v3 files.get
+  /** 全ページを取得してから返す。trashed = false のみ。Driveの名前検索は大小文字を区別しない（P-01）ため、呼び出し側で完全一致を確認する */
   listChildren(folderId: string, options?: { name?: string }): Promise<DriveItem[]>;
-  download(item: DriveItem): Promise<Buffer>;                        // P-02 Step 4の結果で alt=media か revisions.get
-  createFile(parentId: string, name: string, bytes: Buffer): Promise<DriveItem>;  // multipart, text/markdown
-  /** 取得した版に対する条件付き更新。古ければ StaleRevisionError（P-02で方式を確定） */
-  updateContent(item: DriveItem, bytes: Buffer): Promise<DriveItem>;
+  download(fileId: string): Promise<Buffer>;                         // v3 files.get alt=media（最新の本文）
+  revisionOf(fileId: string): Promise<DriveRevision>;                // v2 files.get（fields: etag, headRevisionId）
+  downloadRevision(revision: DriveRevision): Promise<Buffer>;        // v3 revisions.get alt=media
+  createFile(parentId: string, name: string, bytes: Buffer): Promise<DriveItem>;  // v3 multipart, text/markdown
+  /** v2 files.update（uploadType=media）に If-Match: revision.etag。412 conditionNotMet は StaleRevisionError */
+  updateContent(revision: DriveRevision, bytes: Buffer): Promise<void>;
   trash(fileId: string): Promise<void>;                              // 作成直後の自分のファイルの取り消し（§10.2）だけに使う
 }
 ```
+
+- v3のfiles resourceにはetagがなく、v3の応答にETag headerも付かない（P-02）。条件付き更新はv2の `files.update` と、v2の `files.get` が返すetagで行う。
+- メタデータの取得後に更新が入ると、`alt=media` は新しい本文を返す（P-02 Step 4）。追記では、etagと同じ応答で得た `headRevisionId` の本文を `revisions.get` で取得し、etagと本文が同じ版を指すようにする。
 
 - 一覧のqueryは `'<folderId>' in parents and trashed = false`（＋ `and name = '<escaped>'`）。名前は `\` → `\\`、`'` → `\'` でエスケープする。`pageSize=1000`、`nextPageToken` がなくなるまで取得する。
 - `fields` は必要な項目だけを指定する。
@@ -331,19 +338,17 @@ append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFil
 ### 9.2 `read`
 
 1. §7.4 → 途中のフォルダと対象ファイルを§7.2・§7.3で解決。
-2. `download`（P-02 Step 4の結果により、`headRevisionId` を指定した `revisions.get` またはfile本体）。
+2. `download`（最新の本文）。書き込みの基準にしないため、版の固定は不要。
 3. デコードして返す。
 
 ### 9.3 `append`
 
-1. `read` と同じく解決・取得する（版情報を保持）。
+1. `read` と同じく解決し、`revisionOf` → `downloadRevision` で、etagと同じ版の本文を取得する。
 2. デコードした内容を `compose` に渡す。`compose` が例外を投げたら書き込まない。
 3. 追記後の内容は**取得したbyte列＋追記文のUTF-8**とする。デコード後の文字列から再エンコードしない（Knowledgeの寛容デコードで不正バイトをU+FFFDに置き換えた内容で上書きしないため）。
 4. 5 MiBを超える場合は書き込まず `InputValidationError`。
-5. `updateContent` で取得した版に対して条件付き更新する。古い版と判定されたら `ConflictError`（「取得後に変更されたため書き込んでいない。再度実行する」旨）。`mimeType`・名前・親は変えない。
+5. `updateContent` で取得した版に対して条件付き更新する。412（`conditionNotMet`）なら `ConflictError`（「取得後に変更されたため書き込んでいない。再度実行する」旨）。`mimeType`・名前・親は変えない。
 6. 通信断・タイムアウト・5xxは `ProviderApiError`（「追記されたか分からない。`knowledge_get` / `lifelog_get` で確認してから再実行する」旨）。再試行しない。
-
-P-02で条件付き更新が成立しない場合の扱いは§10.1。
 
 ### 9.4 `createExclusive`
 
@@ -359,12 +364,18 @@ P-02で条件付き更新が成立しない場合の扱いは§10.1。
 
 ### 10.1 追記
 
-| P-02の結果 | 方式 | 保証 |
-|---|---|---|
-| 3a・3bのいずれかが古い版の更新を412等で拒否し、3cが成功し、Step 4で取得版の本文を確実に得る方法がある | **方式A**: その条件付き更新を `updateContent` に使う。拒否は `ConflictError`（409） | 取得後に他クライアント・Drive同期で更新されていれば書き込まない。既存本文・他の追記を失わない |
-| いずれも拒否しない | **方式B**: 設計レビューへ戻す。候補: (B1) Drive保存では追記を `ConfigurationError` として提供しない、(B2) 更新直前の版確認＋更新後の版確認で検出のみ行い、検出時は利用者に確認を求める（確認から書き込みまでの間の更新は失われ得る） | 既存 `append` の契約（既存本文を消さない）を満たせないため、B2を採る場合はACとREADMEで弱まる範囲を明示する |
+P-02の結果、**方式A（条件付き更新）が成立する**。v2の `files.update` に `If-Match: <v2 etag>` を付けると、古いetagの更新は412 `conditionNotMet` で拒否されて本文は変わらず、取得し直したetagでは成功した。v3では条件付き更新に使える値が得られなかった（§7.1）。
 
-どちらの方式でも保証しないこと（READMEに書く）:
+| 方式 | 内容 | 保証 |
+|---|---|---|
+| **方式A** | §9.3。v2 `files.get` のetag・`headRevisionId` → `revisions.get` の本文 → v2 `files.update`（`If-Match`）。412は `ConflictError`（409） | 取得後にDrive上で他のClient・Drive同期による更新があれば書き込まない。既存本文・他の追記を失わない |
+
+**設計レビューで確定する前提:**
+
+- 観測したv2のetagは、`modifiedTime` のepoch millisecondsをBase64にした値だった（例: `MTc5NDY2MjU4NjcxNw` = `1794662586717` = `2026-11-14T13:23:06.717Z`）。etagの形式は文書化されていない。条件付き更新が `modifiedTime` だけで判定されている場合、`modifiedTime` を変えない更新、同じミリ秒の更新は検出できない。Drive for desktopによる更新が `modifiedTime` を変えるかは、P-02mで確認する。
+- v2 APIを使い続けられること（v3への移行で同等の機能がない）。
+
+方式Aでも保証しないこと（READMEに書く）:
 
 - PC上のObsidianの未保存の編集、Drive for desktopがまだUploadしていない変更。これらはAPIから見えず、同期時にDrive for desktopの競合処理に委ねられる（P-02mの結果を記載）。
 - 同時に追記した場合の順序。
@@ -398,6 +409,13 @@ Driveは同じ親の下の名前の一意性を保証せず、名前を条件に
 **`createExclusive` の契約との差:** Filesystemの `O_EXCL` は原子的で、同時作成でも成功は1件だけである。Driveの `createExclusive` は上記の範囲に限られ、「`ConflictError` ならファイルは作られていない」こと、「成功なら同名の他のファイルはない」ことのいずれも、同時作成時は保証しない。この差を受け入れるか、AI Foundationのwriter間で共有する排他（Q8）を設計するかは、P-03の結果とあわせて設計レビューで決める。
 
 - ゴミ箱へ移すのは、その要求で作成した自分のファイルだけ（取り消し）。他の重複・同期の競合コピーは整理しない。
+**P-03の観測（保証の根拠にはしない）:**
+
+- 同じ親・同じ名前の同時作成は、2件・5件とも全要求が成功した。作成直後（0 ms）の名前一覧に、6回とも全件が見えた。
+- 順序を指定した3a・3bは、いずれも成功1件・残存1件。
+- 5要求が同時に本方式を実行した3c（10回）では、9回が全要求の取り消し（成功0件・残存0件）、1回が成功1件・残存1件だった。成功が2件以上の回はなかった。本当に同時の作成では、全員が409になることが多い。
+- `files.generateIds` で得た同じIDを2つの作成要求に指定すると、1件は成功し、もう1件は409 `fileIdInUse` で拒否された。名前と異なり、file IDの一意性は作成時に原子的に検査される（Q8）。
+
 - 本節の方式は暫定の候補である。P-03後の設計レビューでは、結果不明・自己取り消し・`createExclusive` 契約との差に加え、取り消しまでの間に他のClientが自分の作成したファイルを編集した場合（取り消すと編集もゴミ箱へ移る）の扱いを確定する。
 
 ---
@@ -432,7 +450,7 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 | ID | 候補 | 確定に必要なこと |
 |---|---|---|
 | AC-D05 | 新規作成は既存ファイルを上書きせず、作成前に同名（大小文字・NFC正規化を無視）の項目があれば409。作成後に他の同名項目を検出したら自分の作成分を取り消して409。同時作成で成功が1件以下になること、他のClientとの同時作成は保証しない。重複が残った場合も以後の操作は409となる | §10.2の `createExclusive` 契約との差を受け入れるか、Q8の排他を設計するかの決定 |
-| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で変更されていれば書き込まず409。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | P-02で§10.1方式Aが成立すること。成立しなければ方式Bの選択に従う |
+| AC-D06 | 追記は取得したbyte列を保持して末尾に加える。取得後にDrive上で（`modifiedTime` が変わる）更新があれば書き込まず409。結果不明は再試行せず、確認を促すErrorを返す。未同期のローカル編集は保証しない | 方式AはP-02で成立した（§10.1）。etagが `modifiedTime` に依存する前提（§10.1）を受け入れるかの決定。P-02mを実施するか |
 
 ---
 
@@ -554,10 +572,70 @@ AC-D01〜D04・D07は変更しない。AC-D05・AC-D06は未確定で、P-02・P
 同時作成で成功を1件以下にする必要がある場合の候補。いずれも本Planの方式には含めない。
 
 - **親フォルダのメタデータによる予約**: 親フォルダの `appProperties` に予約（作成する名前・期限・要求ID）を、取得したフォルダの版に対する条件付き更新で書き込み、成功した要求だけが作成する。P-02の条件付き更新がフォルダのメタデータ更新にも効くこと、ファイルの作成で親フォルダの版が変わるかをprobeで別途確認する必要がある。期限切れの予約の扱い、利用者のフォルダへメタデータを書き込むこと、Drive for desktop・Obsidianは予約に参加しないことが制約になる。
+- **固定file IDのlockファイル**: file IDの一意性は作成時に原子的に検査される（P-03 Step 4）。`generateIds` で一度だけ得たIDを親フォルダごとのlock用として決め、そのIDでlockファイルを作成できた要求だけが作成し、終わったらlockファイルを削除する。lock用IDの保管場所（Config等）、削除後に同じIDで再作成できるか（ゴミ箱へ移しただけではIDは使用中のまま）、異常終了で残ったlockの扱い、Drive for desktop・Obsidianは参加しないことを、probeと設計で確認する必要がある。
 - **プロセス内のlock**: 1つのServer Process内の同時作成だけを直列化する。複数Process・複数Server・他のClientは排他できないため、単独では保証の根拠にならない。
 
 ---
 
 ## 17. 検証結果
 
-未実施。P-01〜P-03の実行後に、対象コミット、要求・付与Scope、各Stepのstatus・最終本文、確定した方式（§10）を記録する。
+| 項目 | 内容 |
+|---|---|
+| 実施日 | 2026-11-14 |
+| 対象コミット | `87938f8`（`scripts/probe-google-drive.ts`） |
+| 実行環境 | ローカルWindows、Node 24、`@googleapis/drive 27.0.0`、全要求 `retry: false` |
+| 対象 | マイドライブの検証用フォルダ（`AI Foundation Probe`）。手動ファイルはDrive for desktopで置いた `test.md`（33 bytes）1件 |
+| 未実施 | P-02m・P-03m（Drive for desktopでの手作業を挟む手順） |
+
+各Stepの記録（JSON Lines）は、file IDを含むためRepositoryには置かない。
+
+### 17.1 P-01
+
+| Step | 結果 |
+|---|---|
+| 1 | 付与Scope: `calendar.calendarlist.readonly`、`calendar.events`、`drive`（要求どおり） |
+| 2 | Calendar `calendarList.list`: 200 |
+| 3 | 検証フォルダ: folder、ゴミ箱外、`ownedByMe: true` |
+| 4 | 子は1件のみで、`pageSize=2` でも1ページ。ページ分割は確認できていない（Fake Drive・Integration Testで確認する） |
+| 5 | 手動ファイル: `mimeType: text/plain`、`size` 33、`md5Checksum` と取得した本文が一致、`headRevisionId`・`version` あり |
+| 6 | `name = 'TEST.MD'` で `test.md` が見つかった: 名前検索は大小文字を区別しない |
+| 7 | 日本語・空白・`'` を含む名前で作成: 成功、`mimeType: text/markdown`。エスケープした名前で検索して完全一致1件 |
+| 8 | `uploadType=media` で更新: `version` 1 → 3、`headRevisionId` が変化、`mimeType` は変わらない |
+| 9 | 更新後の `headRevisionId` を `revisions.get alt=media`: 現在の本文と一致 |
+| 10 | Vaultフォルダ: folder、ゴミ箱外、`ownedByMe: true`、`driveId` なし（マイドライブ） |
+
+### 17.2 P-02
+
+| Step | 結果 |
+|---|---|
+| 1 | v3 `files.get` の応答にETag headerなし。v2 `files.get` はetagを返す |
+| 3a | v3の条件付き更新: 送るetagがないため未実施 |
+| 3b | v2 `files.update`（`uploadType=media`）＋ `If-Match: <Bの古いetag>`: **412 `conditionNotMet`**。最終本文はAの追記のみ |
+| 3c | v2で取得し直したetag: 成功。最終本文はAの追記＋Bの追記 |
+| 4 | Bがメタデータ取得（r1）→ Aが更新（r2）→ `alt=media` はr2の本文、`revisions.get(r1)` はr1の本文 |
+| 5 | 条件なしでBが古い本文から更新: 成功し、Aの追記が失われた |
+| etag | 観測した2件のv2 etagはいずれも `modifiedTime` のepoch millisecondsをBase64にした値（§10.1） |
+
+### 17.3 P-03
+
+| Step | 結果 |
+|---|---|
+| 1 | 2要求×3回・5要求×3回の同時作成: 全要求が成功（同じ名前のファイルが2件・5件） |
+| 2 | 作成直後・1秒後・5秒後の名前一覧: 6回とも全件が見えた |
+| 3a | 作成前確認×2 → Aの作成 → A作成後確認 → Bの作成 → B作成後確認: A成功、Bは取り消して409。残存1件 |
+| 3b | 作成前確認×2 → Aの作成 → Bの作成 → A作成後確認 → B作成後確認: Aは取り消して409、B成功。残存1件 |
+| 3c | 5要求で本方式を同時実行×10回: 9回は成功0件・残存0件、1回は成功1件・残存1件。成功2件以上は0回 |
+| 4 | 同じ生成IDで2要求を同時に作成: 1件成功、1件は409 `fileIdInUse`。残存1件 |
+| 後片付け | 作成した76件をゴミ箱へ移動（失敗0件） |
+
+### 17.4 確定・設計レビューへ戻す事項
+
+| 事項 | 状態 |
+|---|---|
+| 追記の方式 | 方式A（v2の条件付き更新、§10.1）が成立。etagが `modifiedTime` に依存する前提の受け入れは設計レビューで確定する |
+| 本文と版の対応 | 追記は `revisions.get` でetagと同じ版の本文を読む（§7.1・§9.3） |
+| MIME type | 絞らない（Drive for desktopの `.md` は `text/plain`） |
+| 名前検索 | 大小文字を区別しないため、完全一致は呼び出し側で確認する（§7.1） |
+| 共有ドライブ | Vaultはマイドライブ。Q5の前提どおり |
+| 新規作成 | §10.2の方式は、観測した範囲では成功が1件以下だったが、同時作成で全員が409になることが多い。`createExclusive` 契約との差を受け入れるか、Q8（固定file IDのlockファイルを含む）を設計するかは設計レビューで決める |
+| Storage interface | §8のとおり `append(compose)` に変更する。Drive側の版情報（etag・`headRevisionId`）はStorage内部に閉じる |
