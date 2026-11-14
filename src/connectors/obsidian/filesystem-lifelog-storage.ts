@@ -1,4 +1,4 @@
-import { InputValidationError, NotFoundError, ProviderApiError } from '../../errors.js';
+import { ConflictError, NotFoundError, ProviderApiError } from '../../errors.js';
 import { quoteLifeLogId } from './lifelog-id.js';
 import type { LifeLogFile, LifeLogStorage } from './lifelog-storage.js';
 import { FilesystemVaultDirectory } from './vault-directory.js';
@@ -37,7 +37,7 @@ export class FilesystemLifeLogStorage implements LifeLogStorage {
             cause === undefined ? undefined : { cause },
           ),
         alreadyExists: (segments, cause) =>
-          new InputValidationError(
+          new ConflictError(
             `life log ${quoteLifeLogId(nameOf(segments))} already exists; choose another title, or use lifelog_append to add to it`,
             { cause },
           ),

@@ -71,34 +71,43 @@ export type TaskListFilter = z.infer<typeof TaskListFilterSchema>;
 
 const TASK_UPDATE_FIELDS = ['title', 'status', 'due', 'recurrence', 'area', 'tags'] as const;
 
+/** The fields of `task_update` besides `id`; the HTTP API takes them as the request body. */
+export const TaskUpdateFields = {
+  title: z.string().min(1).optional(),
+  status: ActiveTaskStatusSchema.optional(),
+  due: DateOrDateTimeSchema.nullable().optional(),
+  area: AreaSchema.nullable().optional(),
+  /** Replaces the task's tags. AI Foundation's own labels are kept. */
+  tags: TaskTagsInputSchema.optional(),
+  /** Sets or changes the recurring rule; `null` removes the rule together with the due. */
+  recurrence: RecurrenceSchema.nullable().optional(),
+};
+
 /**
- * Input of `task_update`. Only the given fields change; `null` clears `due` / `area`.
- * `recurrence` must be the only change, so a rule Todoist does not accept never leaves other fields updated.
+ * The rules of `task_update` that span its fields, for any object schema holding them: at least one
+ * change, and `recurrence` as the only change, so a rule Todoist does not accept never leaves other
+ * fields updated.
  */
-export const TaskUpdateInputSchema = z
-  .strictObject({
-    id: z.string().min(1),
-    title: z.string().min(1).optional(),
-    status: ActiveTaskStatusSchema.optional(),
-    due: DateOrDateTimeSchema.nullable().optional(),
-    area: AreaSchema.nullable().optional(),
-    /** Replaces the task's tags. AI Foundation's own labels are kept. */
-    tags: TaskTagsInputSchema.optional(),
-    /** Sets or changes the recurring rule; `null` removes the rule together with the due. */
-    recurrence: RecurrenceSchema.nullable().optional(),
-  })
-  .refine((input) => TASK_UPDATE_FIELDS.some((field) => input[field] !== undefined), {
-    message: `At least one of ${TASK_UPDATE_FIELDS.join(', ')} must be specified`,
-  })
-  .refine(
-    (input) =>
-      input.recurrence === undefined ||
-      TASK_UPDATE_FIELDS.every((field) => field === 'recurrence' || input[field] === undefined),
-    {
-      message: 'recurrence must be updated on its own; change title / status / due / area / tags in a separate task_update',
-      path: ['recurrence'],
-    },
-  );
+export function withTaskUpdateRules<T extends z.ZodType<Partial<Record<(typeof TASK_UPDATE_FIELDS)[number], unknown>>>>(
+  schema: T,
+): T {
+  return schema
+    .refine((input) => TASK_UPDATE_FIELDS.some((field) => input[field] !== undefined), {
+      message: `At least one of ${TASK_UPDATE_FIELDS.join(', ')} must be specified`,
+    })
+    .refine(
+      (input) =>
+        input.recurrence === undefined ||
+        TASK_UPDATE_FIELDS.every((field) => field === 'recurrence' || input[field] === undefined),
+      {
+        message: 'recurrence must be updated on its own; change title / status / due / area / tags in a separate task_update',
+        path: ['recurrence'],
+      },
+    );
+}
+
+/** Input of `task_update`. Only the given fields change; `null` clears `due` / `area`. */
+export const TaskUpdateInputSchema = withTaskUpdateRules(z.strictObject({ id: z.string().min(1), ...TaskUpdateFields }));
 export type TaskUpdateInput = z.infer<typeof TaskUpdateInputSchema>;
 
 /** Input of `task_complete`. */

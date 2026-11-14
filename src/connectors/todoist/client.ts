@@ -1,6 +1,6 @@
 import { TodoistApi, TodoistRequestError, type Task as TodoistTask } from '@doist/todoist-sdk';
 import type { CredentialProvider } from '../../credentials/types.js';
-import { CredentialError, FoundationError, NotFoundError, ProviderApiError } from '../../errors.js';
+import { CredentialError, FoundationError, NotFoundError, ProviderApiError, providerText } from '../../errors.js';
 
 export type { TodoistTask };
 
@@ -43,9 +43,11 @@ export function toFoundationError(error: unknown, notFound?: string): Foundation
       return new CredentialError(`Todoist rejected the API token (HTTP ${status})`, { cause: error });
     }
     if (status === 404 && notFound) return new NotFoundError(notFound, { cause: error });
-    return new ProviderApiError('Todoist', status ? `HTTP ${status}: ${error.message}` : error.message, {
+    return new ProviderApiError('Todoist', [...(status ? [`HTTP ${status}: `] : []), providerText(error.message)], {
       cause: error,
     });
   }
-  return new ProviderApiError('Todoist', error instanceof Error ? error.message : String(error), { cause: error });
+  return new ProviderApiError('Todoist', [providerText(error instanceof Error ? error.message : String(error))], {
+    cause: error,
+  });
 }

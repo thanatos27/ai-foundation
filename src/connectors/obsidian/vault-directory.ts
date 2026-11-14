@@ -1,7 +1,7 @@
 import { constants, type Dirent } from 'node:fs';
 import { lstat, open, readdir, readFile, realpath, stat, unlink } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { ConfigurationError, InputValidationError, type NotFoundError, ProviderApiError } from '../../errors.js';
+import { ConfigurationError, type ConflictError, InputValidationError, type NotFoundError, ProviderApiError } from '../../errors.js';
 import { isValidSegment } from './id.js';
 
 /**
@@ -16,7 +16,7 @@ export interface VaultDirectoryLabels {
   /** How a file is quoted in messages, e.g. `"obsidian:AI Foundation/Knowledge/x.md"`. */
   quote(segments: readonly string[]): string;
   notFound(segments: readonly string[], cause?: unknown): NotFoundError;
-  alreadyExists(segments: readonly string[], cause: unknown): InputValidationError;
+  alreadyExists(segments: readonly string[], cause: unknown): ConflictError;
 }
 
 export interface FilesystemVaultDirectoryOptions {

@@ -1,5 +1,5 @@
 import type { CredentialProvider } from '../../credentials/types.js';
-import { CredentialError, ProviderApiError } from '../../errors.js';
+import { MissingCredentialError, ProviderApiError } from '../../errors.js';
 import { type GitHubRequest, httpError, networkError } from './errors.js';
 
 /** The only origin a request carrying the token is sent to. GitHub Enterprise Server is not supported. */
@@ -47,7 +47,7 @@ export type GitHubClientFactory = (token: string) => GitHubClient;
 export function createGitHubClient(token: string, options: GitHubClientOptions = {}): GitHubClient {
   // fetch reports an invalid header value with the value itself in the message: never let it see one.
   if (!/^[\x21-\x7e]+$/.test(token)) {
-    throw new CredentialError('GITHUB_TOKEN contains characters that cannot be sent in an HTTP header');
+    throw new MissingCredentialError('GITHUB_TOKEN contains characters that cannot be sent in an HTTP header');
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

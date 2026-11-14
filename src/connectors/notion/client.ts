@@ -7,7 +7,7 @@ import {
   type Logger,
 } from '@notionhq/client';
 import type { CredentialProvider } from '../../credentials/types.js';
-import { ConfigurationError, CredentialError, FoundationError, ProviderApiError } from '../../errors.js';
+import { ConfigurationError, CredentialError, FoundationError, type MessagePart, ProviderApiError, providerText } from '../../errors.js';
 
 /**
  * Notion API version sent with every request. Pinned here rather than taken from the SDK default,
@@ -71,12 +71,20 @@ export function toFoundationError(
     }
     if (code === APIErrorCode.RestrictedResource) {
       return new ConfigurationError(
-        `the Notion connection lacks a required capability (read, update and insert content) (HTTP ${status}): ${message}`,
+        [
+          `the Notion connection lacks a required capability (read, update and insert content) (HTTP ${status}): `,
+          providerText(message),
+        ],
         options,
       );
     }
     if (code === APIErrorCode.ObjectNotFound && notFound) return notFound();
-    return new ProviderApiError('Notion', `HTTP ${status} ${code}: ${message}`, options);
+    return new ProviderApiError('Notion', [`HTTP ${status} `, codeText(code), ': ', providerText(message)], options);
   }
-  return new ProviderApiError('Notion', error instanceof Error ? error.message : String(error), options);
+  return new ProviderApiError('Notion', [providerText(error instanceof Error ? error.message : String(error))], options);
+}
+
+/** Notion's error code (e.g. `rate_limited`): public when it has the form of one, otherwise provider text. */
+function codeText(code: string): MessagePart {
+  return /^[a-z_]+$/.test(code) ? code : providerText(code);
 }

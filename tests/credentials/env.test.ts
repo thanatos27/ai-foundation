@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EnvCredentialProvider } from '../../src/credentials/env.js';
-import { CredentialError } from '../../src/errors.js';
+import { CredentialError, MissingCredentialError } from '../../src/errors.js';
 
 const google = {
   GOOGLE_OAUTH_CLIENT_ID: 'client-id',
@@ -42,7 +42,8 @@ describe('EnvCredentialProvider', () => {
     ['blank', { TODOIST_API_TOKEN: '   ' }],
   ])('reports a %s Todoist token by variable name', async (_label, env) => {
     const error = await credentialError(new EnvCredentialProvider(env).getTodoistApiToken());
-    expect(error.code).toBe('credential');
+    expect(error).toBeInstanceOf(MissingCredentialError);
+    expect(error.code).toBe('credential_missing');
     expect(error.message).toBe('Credential error: Todoist credential is not configured: set TODOIST_API_TOKEN');
   });
 

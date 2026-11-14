@@ -2,7 +2,7 @@
   "name": "ai-foundation",
   "version": "0.2.0",
   "private": true,
-  "description": "MCP server that lets AI clients read and write Task / Schedule / Collection / Knowledge / Project across their Sources of Truth.",
+  "description": "MCP server and REST API that let AI clients read and write Task / Schedule / Collection / Knowledge / Project / Area / Life Log across their Sources of Truth.",
   "type": "module",
   "engines": {
     "node": ">=24",
@@ -13,22 +13,31 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/serve-http.ts",
     "start": "node dist/index.js",
+    "start:http": "node dist/serve-http.js",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "auth:google": "tsx scripts/google-auth.ts"
+    "auth:google": "tsx scripts/google-auth.ts",
+    "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
     "@doist/todoist-sdk": "^15.3.1",
     "@googleapis/calendar": "^20.1.0",
+    "@hono/node-server": "^2.1.8",
+    "@hono/zod-openapi": "^1.6.3",
     "@modelcontextprotocol/server": "^2.3.1",
     "@notionhq/client": "^5.27.0",
     "google-auth-library": "^11.3.0",
+    "hono": "^4.13.18",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.3.1",
+    "@seriousme/openapi-schema-validator": "^2.12.0",
     "@types/node": "^24.19.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vitest": "^5.0.4"

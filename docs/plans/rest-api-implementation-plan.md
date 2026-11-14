@@ -1,6 +1,6 @@
 # REST API化（Hono・OpenAPI・単一APIキー認証） — Implementation Plan
 
-- Status: **Plan Review待ち**
+- Status: **承認済み・実装済み（§17）。実接続での確認（§15）は未実施**
 - 作成: Coding Agent (Claude Code) / 2026-11-14
 - 対象: [Issue #31](https://github.com/thanatos27/ai-foundation/issues/31)
 - 参照: [MVP v0.1仕様](../specs/mvp-v0.1.md)（変更しない）, [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
@@ -505,3 +505,33 @@ MCPの `strictObject` と同じ挙動にする（D7）。接続先クライア�
 ### Q3. `task_complete` の再実行時の挙動
 
 完了済みの単発Taskを再度完了したときのTodoistの応答（成功・404等）は本Planでは確定しない。OpenAPIでは「自動再試行しない。結果が不明なら `task_list` で確認する」と記載する。
+
+---
+
+## 17. 実装で確定した事項
+
+### 17.1 Verification結果（2026-11-14、ローカルWindows・Node 24.20.0）
+
+| 確認 | 結果 |
+|---|---|
+| `npm run typecheck` | 成功 |
+| `npm run build` | 成功（`dist/serve-http.js` を含む） |
+| `npm test` | 65 files / 1765 passed / 5 skipped（skipは既存のOS依存テスト） |
+| MCP `tools/list` | 変更前後でバイト単位で同一（名前・説明・入出力Schema・annotations）。Update系3 SchemaのJSON Schemaも同一 |
+| `npm run openapi` | OpenAPI 3.1.0、17 path・21 operation |
+| `npm run dev:http` の手動起動 | キー未設定・31文字で理由を表示して終了コード1。キーありで起動し、キーなし401、`/openapi.json` 200、Todoistトークン未設定の `GET /v1/tasks` は503 `credential_missing` |
+
+### 17.2 Planからの細部の変更・Plan外の変更
+
+| 項目 | 内容 | 理由 |
+|---|---|---|
+| Update Schemaの分割（§5） | 検査関数（superRefine）ではなく、既存の `.refine()` 群を任意のobject Schemaに適用する `withTaskUpdateRules` / `withScheduleUpdateRules` / `withCollectionUpdateRules` と、項目のshape `TaskUpdateFields` 等をexportした | 既存のrefineをそのまま使うため、issueの生成・実行条件が変更前と同一になる |
+| Tool登録（§4.2） | 7 EntityのToolファイルは残し、各Toolは共通の `registerOperation(server, operation, annotations)` で登録する | 説明・Schema・`run` の参照を1か所にする。SDKのcallback型は具体型で受ける |
+| Component名（§10） | `.openapi('Task')` ではなく `.meta({ id: 'Task' })` で付与し、入力bodyはinlineとした | `.openapi()` は `@hono/zod-openapi` の読み込み後に作られたSchemaにしか付かず、Domain Schemaが先に読み込まれると失敗する。`.meta()` は複製に付くため、元のDomain Schema・MCPの出力に影響しない |
+| オプション解決 | `src/http/options.ts`（`resolveHttpOptions`）を追加し、`tests/startup/http-options.test.ts` で単体テストする | 引数・環境変数・既定値の優先順位をProcess起動なしで検証するため |
+| Provider由来の文のテスト（§12.2） | 既存のConnectorテストを変更せず、`tests/connectors/provider-text.test.ts` に12か所をまとめた | 既存のメッセージ期待値を変えないことを確認しやすくするため |
+| Error以外のthrow | 最外のmiddlewareでErrorに包み、500 `internal_error` とする | HonoはError以外の値を `onError` に渡さず、そのままthrowするため |
+| 5xxの記録（§6.2） | 500はstack trace付き、502・503はmethod・path・status・code・MCP向けmessageの1行 | 設定不足・外部サービスの失敗はstack traceを出さずに原因を把握するため |
+| `route_not_found` のmessage | 固定文ではなく `No such route: <METHOD> <path>` | 認証後にだけ返し、利用者自身のRequestを示すだけのため |
+| `task_complete` のbody | 宣言せず、送られても無視してpathのIDを使う | bodyのない操作として定義したため |
+| e2e（§14.2 AC-03） | `0.0.0.0` での起動はe2eで行わず、警告の判定（`isLoopback`）を単体テストで確認する | 全インターフェイスで待ち受けるとWindowsでファイアウォールの確認が表示され得るため |

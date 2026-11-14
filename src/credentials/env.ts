@@ -1,4 +1,4 @@
-import { CredentialError } from '../errors.js';
+import { MissingCredentialError } from '../errors.js';
 import type { CredentialProvider, GoogleOAuthCredentials } from './types.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -32,7 +32,7 @@ export class EnvCredentialProvider implements CredentialProvider {
   private require<const N extends readonly string[]>(provider: string, names: N): { [K in keyof N]: string } {
     const missing = names.filter((name) => !this.env[name]?.trim());
     if (missing.length > 0) {
-      throw new CredentialError(`${provider} credential is not configured: set ${missing.join(', ')}`);
+      throw new MissingCredentialError(`${provider} credential is not configured: set ${missing.join(', ')}`);
     }
     return names.map((name) => this.env[name]!.trim()) as { [K in keyof N]: string };
   }

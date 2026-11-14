@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FilesystemVaultDirectory, type VaultDirectoryLabels } from '../../../src/connectors/obsidian/vault-directory.js';
-import { ConfigurationError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
+import { ConfigurationError, ConflictError, InputValidationError, NotFoundError, ProviderApiError } from '../../../src/errors.js';
 import { createTestVault, linkDirectory, type TestVault } from '../../helpers/vault.js';
 
 /** errno to throw from the next readFile / open (permission errors cannot be made portably on Windows). */
@@ -32,7 +32,7 @@ const labels: VaultDirectoryLabels = {
   dirName: 'test directory',
   quote: (segments) => `"test:${segments.join('/')}"`,
   notFound: (segments, cause) => new NotFoundError(`test ${segments.join('/')} is gone`, { cause }),
-  alreadyExists: (segments, cause) => new InputValidationError(`test ${segments.join('/')} is taken`, { cause }),
+  alreadyExists: (segments, cause) => new ConflictError(`test ${segments.join('/')} is taken`, { cause }),
 };
 
 let vault: TestVault;
@@ -75,7 +75,7 @@ describe('labels', () => {
   it('uses notFound, alreadyExists and quote for file errors', async () => {
     expect((await expectError(directory.read(['a.md']), NotFoundError)).message).toContain('test a.md is gone');
     await directory.createExclusive(['a.md'], 'x');
-    expect((await expectError(directory.createExclusive(['a.md'], 'y'), InputValidationError)).message).toContain(
+    expect((await expectError(directory.createExclusive(['a.md'], 'y'), ConflictError)).message).toContain(
       'test a.md is taken',
     );
 

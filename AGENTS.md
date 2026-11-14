@@ -25,7 +25,9 @@ MVPではAI Agent Runtime、Workflow Engine、Intent Classifier、独自Database
 | Layer | 責務 |
 |---|---|
 | Domain | Providerに依存しない共通Data Model |
+| Operations | MCP・HTTP共通の操作定義（説明・入出力Schema・Connector選択・既定値）。TransportやProviderに依存しない |
 | Tools | AIへ公開するMCP Interface。Provider固有APIを直接公開しない |
+| HTTP | REST API。認証、HTTP入力の読み取り・検証、レスポンス・Error変換、OpenAPI生成だけを持つ |
 | Connectors | Provider固有処理。AI判断やPlanningを持たない |
 | Config | 静的設定。個別Project名・Project ID・Task等の動的データを列挙しない |
 

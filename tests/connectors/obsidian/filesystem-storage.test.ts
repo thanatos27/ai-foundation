@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FilesystemVaultStorage } from '../../../src/connectors/obsidian/filesystem-storage.js';
 import type { VaultPath } from '../../../src/connectors/obsidian/id.js';
-import { ConfigurationError, InputValidationError, NotFoundError } from '../../../src/errors.js';
+import { ConfigurationError, ConflictError, InputValidationError, NotFoundError } from '../../../src/errors.js';
 import { canLinkFiles, createTestVault, KNOWLEDGE_DIR, linkDirectory, linkFile, type TestVault } from '../../helpers/vault.js';
 
 const fileLinks = await canLinkFiles();
@@ -204,19 +204,19 @@ describe('createExclusive', () => {
 
   it('never overwrites an existing file', async () => {
     await vault.write(p('a.md'), 'original');
-    const error = await expectError(storage.createExclusive(p('a.md'), 'new'), InputValidationError);
+    const error = await expectError(storage.createExclusive(p('a.md'), 'new'), ConflictError);
     expect(error.message).toMatch(/already exists.*knowledge_append/);
     expect(await vault.read(p('a.md'))).toBe('original');
   });
 
   it('fails when a directory has the name', async () => {
     await vault.write(p('a.md/inner.md'), 'x');
-    await expectError(storage.createExclusive(p('a.md'), 'new'), InputValidationError);
+    await expectError(storage.createExclusive(p('a.md'), 'new'), ConflictError);
   });
 
   it('does not write through an existing directory link', async () => {
     await linkDirectory(vault.outside, vault.abs(p('linked.md')));
-    await expectError(storage.createExclusive(p('linked.md'), 'new'), InputValidationError);
+    await expectError(storage.createExclusive(p('linked.md'), 'new'), ConflictError);
     expect(await readdir(vault.outside)).toEqual([]);
   });
 
