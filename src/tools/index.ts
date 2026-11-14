@@ -1,6 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { Config } from '../config/schema.js';
-import type { Connectors } from '../connectors/types.js';
+import type { OperationContext } from '../operations/index.js';
 import { registerAreaTools } from './area.js';
 import { registerCollectionTools } from './collection.js';
 import { registerKnowledgeTools } from './knowledge.js';
@@ -9,11 +8,8 @@ import { registerProjectTools } from './project.js';
 import { registerScheduleTools } from './schedule.js';
 import { registerTaskTools } from './task.js';
 
-/** What tool handlers may use. Tools reach providers only through `connectors`. */
-export interface ToolContext {
-  config: Config;
-  connectors: Connectors;
-}
+/** What tool handlers may use: the operations' context. Tools reach providers only through `connectors`. */
+export type ToolContext = OperationContext;
 
 /**
  * Registers every public tool on `server`. Each entity has its own
