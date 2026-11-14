@@ -1,6 +1,6 @@
 # Google Drive保存対応（Knowledge／Life Log） — Implementation Plan
 
-- Status: **承認済み・実装中。P-01〜P-03・P-02 Step 6・7・P-02mは実施済み（§17）。P-03mは未実施（外部writerとの名前の排他を保証しないため必須としない）。AC-D05・AC-D06は§12**
+- Status: **実装済み。P-01〜P-03・P-02 Step 6・7・P-02mは実施済み（§17）。P-03mは未実施（外部writerとの名前の排他を保証しないため必須としない）。AC-D05・AC-D06は§12**
 - 作成: 2026-11-14
 - 対象: [Issue #34](https://github.com/thanatos27/ai-foundation/issues/34)
 - 参照: [Phase 4 Implementation Plan](phase-4-implementation-plan.md), [Life Log Implementation Plan](lifelog-implementation-plan.md), [REST API](../specs/rest-api.md), [Development Workflow](../development/workflow.md), [AGENTS.md](../../AGENTS.md)
