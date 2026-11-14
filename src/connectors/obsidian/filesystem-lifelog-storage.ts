@@ -1,4 +1,5 @@
 import { ConflictError, NotFoundError, ProviderApiError } from '../../errors.js';
+import { decodeStrict } from './decode.js';
 import { quoteLifeLogId } from './lifelog-id.js';
 import type { LifeLogFile, LifeLogStorage } from './lifelog-storage.js';
 import { FilesystemVaultDirectory } from './vault-directory.js';
@@ -52,22 +53,24 @@ export class FilesystemLifeLogStorage implements LifeLogStorage {
 
   async read(name: string): Promise<LifeLogFile> {
     const { bytes } = await this.directory.read([name]);
-    let text: string;
-    try {
-      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    } catch (error) {
-      throw new ProviderApiError('Obsidian', `life log ${quoteLifeLogId(name)} is not valid UTF-8; fix it in Obsidian`, {
-        cause: error,
-      });
-    }
-    return { name, text: text.replace(/^﻿/, '') };
+    return { name, text: decodeStrict(bytes, (cause) => notUtf8('Obsidian', name, cause)) };
   }
 
   createExclusive(name: string, text: string): Promise<void> {
     return this.directory.createExclusive([name], text);
   }
 
-  append(name: string, text: string): Promise<void> {
-    return this.directory.append([name], text);
+  /** Read (strictly), compose, then O_APPEND, as for knowledge (`FilesystemVaultStorage.append`). */
+  async append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFile> {
+    const file = await this.read(name);
+    await this.directory.append([name], compose(file));
+    return file;
   }
+}
+
+/** The error for a life log that is not valid UTF-8: it is neither shown nor appended to. */
+export function notUtf8(provider: string, name: string, cause: unknown): ProviderApiError {
+  return new ProviderApiError(provider, `life log ${quoteLifeLogId(name)} is not valid UTF-8; fix it in Obsidian`, {
+    cause,
+  });
 }

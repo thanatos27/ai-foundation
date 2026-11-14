@@ -65,7 +65,7 @@ async function strictText(path: string): Promise<string> {
 describe('read / createExclusive / append', () => {
   it('creates, reads and appends to a file directly in the life log directory', async () => {
     await storage.createExclusive(NAME, '# 東京散策\n');
-    await storage.append(NAME, '\n夕食\n');
+    await storage.append(NAME, () => '\n夕食\n');
     expect(await storage.read(NAME)).toEqual({ name: NAME, text: '# 東京散策\n\n夕食\n' });
     expect(storage.refOf(NAME)).toBe(`${LIFELOG_DIR}/${NAME}`);
   });
@@ -73,7 +73,7 @@ describe('read / createExclusive / append', () => {
   it('writes valid UTF-8 without a byte order mark (Japanese, emoji, surrogate pairs)', async () => {
     const text = '日本語 😀 𠮷野家 ｶﾀｶﾅ\r\n';
     await storage.createExclusive(NAME, text);
-    await storage.append(NAME, '追記 👍\r\n');
+    await storage.append(NAME, () => '追記 👍\r\n');
     const stored = await strictText(l(NAME));
     expect(stored).toBe(`${text}追記 👍\r\n`);
     expect(stored.charCodeAt(0)).not.toBe(0xfeff);
@@ -93,14 +93,14 @@ describe('read / createExclusive / append', () => {
   it('reports a missing file as not found, without the vault path', async () => {
     const error = await expectError(storage.read(NAME), NotFoundError);
     expect(error.message).toContain(`"lifelog:${NAME}" was not found`);
-    await expectError(storage.append(NAME, 'x'), NotFoundError);
+    await expectError(storage.append(NAME, () => 'x'), NotFoundError);
     expect(await readdir(vault.abs(LIFELOG_DIR))).toEqual([]); // append never creates
   });
 
   it('treats a directory with an article name as not found', async () => {
     await mkdir(vault.abs(l(NAME)));
     await expectError(storage.read(NAME), NotFoundError);
-    await expectError(storage.append(NAME, 'x'), NotFoundError);
+    await expectError(storage.append(NAME, () => 'x'), NotFoundError);
   });
 });
 
@@ -127,7 +127,7 @@ describe('configuration', () => {
     ['the directory does not exist', { directory: 'AI Foundation/Missing' }, /life log directory "AI Foundation\/Missing"/],
   ])('is a configuration error when %s, and creates nothing', async (_label, options, message) => {
     const configured = new FilesystemLifeLogStorage({ vaultPath: vault.vault, directory: LIFELOG_DIR, ...options });
-    const actions = [() => configured.read(NAME), () => configured.createExclusive(NAME, 'x'), () => configured.append(NAME, 'x')];
+    const actions = [() => configured.read(NAME), () => configured.createExclusive(NAME, 'x'), () => configured.append(NAME, () => 'x')];
     for (const action of actions) {
       expect((await expectError(action(), ConfigurationError)).message).toMatch(message);
     }
@@ -150,7 +150,7 @@ describe('boundary', () => {
     await writeFile(join(vault.outside, 'secret.md'), '外');
     await linkDirectory(vault.outside, vault.abs(l(NAME)));
     expect((await expectError(storage.read(NAME), InputValidationError)).message).toMatch(/symbolic link or junction/);
-    await expectError(storage.append(NAME, 'x'), InputValidationError);
+    await expectError(storage.append(NAME, () => 'x'), InputValidationError);
     expect(await readFile(join(vault.outside, 'secret.md'), 'utf8')).toBe('外');
   });
 
@@ -158,7 +158,7 @@ describe('boundary', () => {
     await writeFile(join(vault.outside, 'secret.md'), '外');
     await linkFile(join(vault.outside, 'secret.md'), vault.abs(l(NAME)));
     expect((await expectError(storage.read(NAME), InputValidationError)).message).toMatch(/symbolic link or junction/);
-    await expectError(storage.append(NAME, 'x'), InputValidationError);
+    await expectError(storage.append(NAME, () => 'x'), InputValidationError);
     await expectError(storage.createExclusive(NAME, 'x'), InputValidationError);
     expect(await readFile(join(vault.outside, 'secret.md'), 'utf8')).toBe('外');
   });
@@ -173,7 +173,7 @@ describe('apart from the knowledge directory (by real path)', () => {
   async function expectRefused(storage: FilesystemLifeLogStorage): Promise<void> {
     await vault.write(`${KNOWLEDGE_DIR}/${NAME}`, 'knowledge');
     const before = (await readdir(vault.abs(KNOWLEDGE_DIR), { recursive: true })).sort();
-    const actions = [() => storage.createExclusive('2026-10-24-x.md', 'x'), () => storage.read(NAME), () => storage.append(NAME, 'x')];
+    const actions = [() => storage.createExclusive('2026-10-24-x.md', 'x'), () => storage.read(NAME), () => storage.append(NAME, () => 'x')];
     for (const action of actions) {
       const error = await expectError(action(), ConfigurationError);
       expect(error.message).toContain('the knowledge directory "AI Foundation/Knowledge"');
@@ -212,7 +212,7 @@ describe.skipIf(!windows)('alternate data streams (Windows)', () => {
     await writeFile(vault.abs(l('2026-10-24-private.txt:notes.md')), 'stream');
     const stream = '2026-10-24-private.txt:notes.md';
     expect((await expectError(storage.read(stream), InputValidationError)).message).toContain('alternate data stream');
-    await expectError(storage.append(stream, 'x'), InputValidationError);
+    await expectError(storage.append(stream, () => 'x'), InputValidationError);
     await expectError(storage.createExclusive('2026-10-24-new.txt:notes.md', 'x'), InputValidationError);
     expect(await readFile(vault.abs(l(stream)), 'utf8')).toBe('stream');
     expect(await readdir(vault.abs(LIFELOG_DIR))).toEqual(['2026-10-24-private.txt']);

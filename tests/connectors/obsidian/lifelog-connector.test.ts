@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -144,13 +145,14 @@ describe('concurrent and external changes', () => {
     const path = vault.abs(l('2026-10-03-外部編集.md'));
     const racing: LifeLogStorage = {
       refOf: (name) => storage.refOf(name),
-      read: async (name) => {
-        const file = await storage.read(name);
-        await writeFile(path, 'Obsidianで追加\n', { flag: 'a' }); // edited in Obsidian meanwhile
-        return file;
-      },
+      read: (name) => storage.read(name),
       createExclusive: (name, text) => storage.createExclusive(name, text),
-      append: (name, text) => storage.append(name, text),
+      // Edited in Obsidian after the storage read the file and before it writes.
+      append: (name, compose) =>
+        storage.append(name, (file) => {
+          appendFileSync(path, 'Obsidianで追加\n');
+          return compose(file);
+        }),
     };
     await new ObsidianLifeLogConnector({ directory: LIFELOG_DIR, storage: racing }).append({
       id: created.id,

@@ -94,11 +94,13 @@ export class ObsidianKnowledgeConnector implements KnowledgeConnector {
 
   async append(input: KnowledgeAppendInput): Promise<Knowledge> {
     const path = parseKnowledgeId(input.id, this.knowledgeDir());
-    const file = await this.options.storage.read(path);
-    // Checked before writing: a malformed note is never written to.
-    const { meta } = parseOrThrow(file);
-    await this.options.storage.append(path, appendText(file.text, input.content));
-    return toKnowledge(path, meta);
+    let meta: KnowledgeMeta | undefined;
+    await this.options.storage.append(path, (file) => {
+      // Checked before writing: a malformed note is never written to.
+      ({ meta } = parseOrThrow(file));
+      return appendText(file.text, input.content);
+    });
+    return toKnowledge(path, meta!);
   }
 
   private knowledgeDir(): string {
