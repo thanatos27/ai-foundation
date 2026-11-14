@@ -136,7 +136,7 @@ APIキーはRepository・Configに保存しない。キーの変更は環境変�
 ## OpenAPI
 
 - Route定義（`@hono/zod-openapi` の `createRoute`）とZod Schemaから OpenAPI 3.1.0 を生成する。手書きの仕様ファイル・コミット済みの生成物は持たない。
-- 認証付きの `GET /openapi.json` で取得する。`npm run openapi` はServerを起動せずに同じdocumentをstdoutへ出力する（APIキー不要、外部通信なし）。
+- 認証付きの `GET /openapi.json` で取得する。`npm run --silent openapi` はServerを起動せずに同じdocumentをstdoutへ出力する（APIキー不要、外部通信なし。`--silent` はnpmの実行バナーを出力に混ぜないため）。
 - 各operationに operationId、summary、description（共有の説明文、HTTP固有の注記、再実行時の性質）、tag、request（path / query / body）、成功レスポンス、エラーレスポンス（共通 `Error` component）を定義する。全operationに400・401・500・502・503、IDを受けるoperationに404、`knowledge_create` / `lifelog_create` に409、bodyを受けるoperationに413を宣言する。
 - 項目間の制約（`due` と `recurrence`、更新は1項目以上、日付と日時の混在等）はOpenAPIのSchemaでは表せないため、descriptionで説明し、実行時に同じルールで検証する。
 - `info.description` にSource of Truthの説明とHTTP共通の注意を記載する。説明文中の時間帯・書き込み先Calendar名はConfigから組み立てる。

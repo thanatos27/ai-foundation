@@ -2,7 +2,7 @@
  * Prints the REST API's OpenAPI document to stdout, generated from the routes exactly as
  * GET /openapi.json serves it, for review or diffs. Nothing is contacted and no API key is needed:
  *
- *   npm run openapi [-- --config config.local.yaml] > openapi.json
+ *   npm run --silent openapi [-- --config config.local.yaml] > openapi.json
  *
  * The output is not committed: the routes and schemas are the source of the document.
  */

@@ -147,7 +147,7 @@ Route定義とZod Schemaから生成し、手書きの仕様ファイルは持�
 
 ```sh
 curl -H "Authorization: Bearer $KEY" http://127.0.0.1:8787/openapi.json
-npm run openapi > openapi.json   # Serverを起動せずに出力（APIキー不要、外部通信なし）
+npm run --silent openapi > openapi.json   # Serverを起動せずに出力（APIキー不要、外部通信なし）
 ```
 
 ## Configuration
