@@ -6,7 +6,7 @@ export interface LifeLogFile {
 }
 
 /**
- * How life log articles are stored (MVP: one directory of the Obsidian vault on the file system).
+ * How life log articles are stored: one directory of the Obsidian vault, on the file system or Google Drive.
  * Everything that crosses this boundary is a file name in the life log directory, so another
  * storage (e.g. a Google Drive folder) can replace it without changing life log IDs.
  *
@@ -18,8 +18,12 @@ export interface LifeLogStorage {
   refOf(name: string): string;
   /** NotFoundError when no regular file is there; ProviderApiError when it is not valid UTF-8. */
   read(name: string): Promise<LifeLogFile>;
-  /** Creates the file; ConflictError when anything already has that name. Never overwrites. */
+  /** Creates the file; ConflictError when anything already has that name. Never overwrites (see `VaultStorage.createExclusive`). */
   createExclusive(name: string, text: string): Promise<void>;
-  /** Adds `text` to the end of the existing file and changes nothing else; NotFoundError when it is gone. */
-  append(name: string, text: string): Promise<void>;
+  /**
+   * Reads the file, then adds what `compose` returns for it to the end and changes nothing else
+   * (same contract as `VaultStorage.append`). A file that is not valid UTF-8 is never written to.
+   * Returns the file as it was read.
+   */
+  append(name: string, compose: (file: LifeLogFile) => string): Promise<LifeLogFile>;
 }

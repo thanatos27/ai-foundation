@@ -36,9 +36,8 @@ export class ObsidianLifeLogConnector implements LifeLogConnector {
   async append(input: LifeLogAppendInput): Promise<LifeLog> {
     const name = parseLifeLogId(input.id);
     this.directory();
-    // Read first: the file must exist and be valid UTF-8, and its ending decides the separator.
-    const file = await this.options.storage.read(name);
-    await this.options.storage.append(name, appendText(file.text, input.content));
+    // The storage reads first: the file must exist and be valid UTF-8, and its ending decides the separator.
+    await this.options.storage.append(name, (file) => appendText(file.text, input.content));
     return this.toLifeLog(name);
   }
 

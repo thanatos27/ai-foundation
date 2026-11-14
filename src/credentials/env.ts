@@ -12,7 +12,7 @@ export class EnvCredentialProvider implements CredentialProvider {
   }
 
   async getGoogleOAuthCredentials(): Promise<GoogleOAuthCredentials> {
-    const [clientId, clientSecret, refreshToken] = this.require('Google Calendar', [
+    const [clientId, clientSecret, refreshToken] = this.require('Google', [
       'GOOGLE_OAUTH_CLIENT_ID',
       'GOOGLE_OAUTH_CLIENT_SECRET',
       'GOOGLE_OAUTH_REFRESH_TOKEN',

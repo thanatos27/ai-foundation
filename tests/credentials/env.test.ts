@@ -78,7 +78,8 @@ describe('EnvCredentialProvider', () => {
   it('names every missing Google variable without leaking the ones that are set', async () => {
     const env = { GOOGLE_OAUTH_CLIENT_ID: 'client-id', GOOGLE_OAUTH_CLIENT_SECRET: 'client-secret' };
     const error = await credentialError(new EnvCredentialProvider(env).getGoogleOAuthCredentials());
-    expect(error.message).toContain('set GOOGLE_OAUTH_REFRESH_TOKEN');
+    // Shared by Google Calendar and Google Drive: the message names neither.
+    expect(error.message).toContain('Google credential is not configured: set GOOGLE_OAUTH_REFRESH_TOKEN');
     expect(error.message).not.toContain('GOOGLE_OAUTH_CLIENT_ID');
     expect(error.message).not.toContain('client-secret');
   });
