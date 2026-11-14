@@ -23,8 +23,8 @@ describe('createConnectors: the vault storage', () => {
       new EnvCredentialProvider({}),
     );
     // No local vault is needed: the first call asks for the Google credentials.
-    await expect(connectors.knowledge.search({})).rejects.toBeInstanceOf(MissingCredentialError);
-    await expect(connectors.lifelog.get('lifelog:2026-10-03-x.md')).rejects.toBeInstanceOf(MissingCredentialError);
+    await expect(connectors.knowledge!.search({})).rejects.toBeInstanceOf(MissingCredentialError);
+    await expect(connectors.lifelog!.get('lifelog:2026-10-03-x.md')).rejects.toBeInstanceOf(MissingCredentialError);
   });
 
   it('reports a missing vault_folder_id before asking for credentials', async () => {
@@ -32,8 +32,8 @@ describe('createConnectors: the vault storage', () => {
       withObsidian({ storage: 'google_drive', knowledge_dir: 'AI Foundation/Knowledge' }),
       new EnvCredentialProvider({}),
     );
-    await expect(connectors.knowledge.search({})).rejects.toThrow(ConfigurationError);
-    await expect(connectors.knowledge.search({})).rejects.toThrow('vault_folder_id is not set');
+    await expect(connectors.knowledge!.search({})).rejects.toThrow(ConfigurationError);
+    await expect(connectors.knowledge!.search({})).rejects.toThrow('vault_folder_id is not set');
   });
 
   it('keeps the file system for storage: filesystem', async () => {
@@ -41,8 +41,8 @@ describe('createConnectors: the vault storage', () => {
       withObsidian({ storage: 'filesystem', knowledge_dir: 'AI Foundation/Knowledge' }),
       new EnvCredentialProvider({}),
     );
-    await expect(connectors.knowledge.search({})).rejects.toThrow('sources.knowledge.obsidian.vault_path is not set');
-    await expect(connectors.lifelog.get('lifelog:2026-10-03-x.md')).rejects.toThrow(
+    await expect(connectors.knowledge!.search({})).rejects.toThrow('sources.knowledge.obsidian.vault_path is not set');
+    await expect(connectors.lifelog!.get('lifelog:2026-10-03-x.md')).rejects.toThrow(
       'sources.knowledge.obsidian.vault_path is not set',
     );
   });
