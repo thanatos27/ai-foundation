@@ -1,7 +1,7 @@
-import { ConflictError, NotFoundError } from '../../errors.js';
 import { decodeLenient } from './decode.js';
-import { quoteId, segmentsBelow, type VaultPath, vaultPathBelow } from './id.js';
-import type { VaultFile, VaultStorage } from './storage.js';
+import { segmentsBelow, type VaultPath, vaultPathBelow } from './id.js';
+import { knowledgeLabels } from './labels.js';
+import type { VaultFile, VaultListEntry, VaultStorage } from './storage.js';
 import { FilesystemVaultDirectory } from './vault-directory.js';
 
 export interface FilesystemVaultStorageOptions {
@@ -23,21 +23,10 @@ export class FilesystemVaultStorage implements VaultStorage {
   private readonly directory: FilesystemVaultDirectory;
 
   constructor(private readonly options: FilesystemVaultStorageOptions) {
-    const pathOf = (segments: readonly string[]) => vaultPathBelow(options.knowledgeDir ?? '', [...segments]);
     this.directory = new FilesystemVaultDirectory({
       vaultPath: options.vaultPath,
       dir: options.knowledgeDir,
-      labels: {
-        dirConfigKey: 'sources.knowledge.obsidian.knowledge_dir',
-        dirName: 'knowledge directory',
-        quote: (segments) => quoteId(pathOf(segments)),
-        notFound: (segments, cause) => notFound(pathOf(segments), cause),
-        alreadyExists: (segments, cause) =>
-          new ConflictError(
-            `knowledge ${quoteId(pathOf(segments))} already exists; use knowledge_search and knowledge_append to add to it`,
-            { cause },
-          ),
-      },
+      labels: knowledgeLabels(options.knowledgeDir),
       apartFrom: [{ dir: options.lifeLogDir, dirName: 'life log directory' }],
     });
   }
@@ -46,7 +35,7 @@ export class FilesystemVaultStorage implements VaultStorage {
     return this.directory.check();
   }
 
-  async list(): Promise<{ path: VaultPath; modifiedAt: number }[]> {
+  async list(): Promise<VaultListEntry[]> {
     const files = await this.directory.list();
     return files.map(({ segments, modifiedAt }) => ({
       path: vaultPathBelow(this.options.knowledgeDir!, segments),
@@ -77,11 +66,4 @@ export class FilesystemVaultStorage implements VaultStorage {
   private segments(path: VaultPath): string[] {
     return segmentsBelow(path, this.options.knowledgeDir ?? '');
   }
-}
-
-function notFound(path: VaultPath, cause?: unknown): NotFoundError {
-  return new NotFoundError(
-    `knowledge ${quoteId(path)} was not found; it may have been moved or deleted — search again with knowledge_search`,
-    cause === undefined ? undefined : { cause },
-  );
 }

@@ -8,6 +8,17 @@ export interface VaultFile {
   modifiedAt: number;
 }
 
+export interface VaultListEntry {
+  path: VaultPath;
+  modifiedAt: number;
+  /**
+   * Reads this entry as `read(path)` would, reusing what the listing just found (Google Drive: the
+   * file it resolved, instead of resolving the path again for every file of a search). Not kept
+   * after the call that uses the listing. NotFoundError when the file is gone.
+   */
+  read?: () => Promise<VaultFile>;
+}
+
 /**
  * How the Obsidian connector reaches the vault: the local file system or Google Drive. Everything
  * that crosses this boundary is vault-relative: absolute paths, OS separators, errno and Drive file
@@ -20,7 +31,7 @@ export interface VaultStorage {
   /** Throws ConfigurationError when the vault or knowledge_dir is not usable. */
   checkKnowledgeDir(): Promise<void>;
   /** Every regular .md file under knowledge_dir, recursively, at any depth (links are not followed). */
-  list(): Promise<{ path: VaultPath; modifiedAt: number }[]>;
+  list(): Promise<VaultListEntry[]>;
   /** NotFoundError when nothing readable is at `path`. */
   read(path: VaultPath): Promise<VaultFile>;
   /**

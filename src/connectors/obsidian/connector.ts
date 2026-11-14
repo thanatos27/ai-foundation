@@ -52,8 +52,8 @@ export class ObsidianKnowledgeConnector implements KnowledgeConnector {
     this.knowledgeDir();
     assertValidTags(filter.tags ?? []);
     const entries = await this.options.storage.list();
-    const files = await mapLimit(entries, READ_CONCURRENCY, async ({ path }) =>
-      this.options.storage.read(path).catch((error: unknown) => {
+    const files = await mapLimit(entries, READ_CONCURRENCY, async ({ path, read }) =>
+      (read ? read() : this.options.storage.read(path)).catch((error: unknown) => {
         if (error instanceof NotFoundError) return undefined; // removed while searching
         throw error;
       }),

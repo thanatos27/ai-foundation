@@ -16,8 +16,8 @@ const WRAPPED = /providerText\(|errorText\(/;
 
 /** Lines that match but carry no provider text into a message, with the reason. */
 const ALLOWED = new Map<string, string>([
-  // Only bound here; passed on through providerText(message).
-  ['google-calendar/client.ts', 'const message = e.message ?? String(error);'],
+  // Only read here; Google Calendar and Google Drive pass it on through providerText(message).
+  ['google/errors.ts', 'const message = e.message ?? String(error);'],
   // Notion SDK log lines go to stderr, never into an error.
   ['notion/client.ts', 'console.error(`[ai-foundation] Notion ${level}: ${message}`, extraInfo);'],
   // `message` is a parameter AI Foundation writes (e.g. "cannot read ..."); only the errno code is added.
