@@ -141,15 +141,20 @@ Project単位のRoleは付与しない（Secretへのアクセスだけを §1.6
 - `.env.cloud`: クラウド用の `AI_FOUNDATION_API_KEY`（ローカルとは別に生成する）と、Provider Credential 6つ（`.env` と同じ値でよい）。
 
   ```sh
-  node -e "console.log('AI_FOUNDATION_API_KEY=' + crypto.randomBytes(32).toString('base64url'))" >> .env.cloud
+  command node -e "console.log('AI_FOUNDATION_API_KEY=' + crypto.randomBytes(32).toString('base64url'))" >> .env.cloud
   ```
 
 `.env.cloud` の値は次の関数で読む（以降の手順で使う。シェルを開き直したら定義し直す）。ファイルだけを解析し、シェルに同じ名前の環境変数があっても使わない（`node --env-file` は既存の環境変数を優先するため使わない）。値が空・未設定なら何も出力せずに失敗する。
 
+対話シェルに貼り付けて使うため、次の2点を守る。
+
+- `!` を書かない。bash／zshの対話シェルは `"..."` 内の `!` を履歴展開し、定義自体が失敗する。
+- `node` ではなく `command node` で呼ぶ。Git Bashは `node` を `winpty node.exe` のエイリアスにしており、winptyは出力をパイプ・リダイレクトへ渡せない（`stdout is not a tty`）。
+
 ```sh
 env_cloud() {  # <name>: the value of <name> in .env.cloud
-  node -e "const v = require('node:util').parseEnv(require('node:fs').readFileSync('.env.cloud', 'utf8'))[process.argv[1]];
-if (!v) { console.error(process.argv[1] + ' is not set in .env.cloud'); process.exit(1); }
+  command node -e "const v = require('node:util').parseEnv(require('node:fs').readFileSync('.env.cloud', 'utf8'))[process.argv[1]];
+if (v === undefined || v === '') { console.error(process.argv[1] + ' is not set in .env.cloud'); process.exit(1); }
 process.stdout.write(v);" "$1"
 }
 ```
